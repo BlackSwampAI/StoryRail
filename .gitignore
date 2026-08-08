@@ -11,6 +11,7 @@ dist/
 build/
 out/
 .next/
+next-env.d.ts
 .nuxt/
 .svelte-kit/
 
@@ -30,6 +31,7 @@ pnpm-debug.log*
 .parcel-cache/
 .turbo/
 .eslintcache
+*.tsbuildinfo
 *.tmp
 *.temp
 

@@ -30,6 +30,24 @@ The workflow is:
 
 When application code begins, behavior changes are expected to include focused tests. Regression fixes should include a test that demonstrates the corrected behavior. Chris remains responsible for running all tests and validation.
 
+## Application commands
+
+The single application package uses pnpm scripts:
+
+- `pnpm dev` starts the local Next.js development server.
+- `pnpm build` creates the production build.
+- `pnpm start` serves an existing production build.
+- `pnpm test` runs the focused Vitest suite once.
+- `pnpm test:watch` runs Vitest in watch mode.
+- `pnpm typecheck` generates Next.js route and framework types, then checks strict TypeScript types without emitting files.
+- `pnpm lint` runs ESLint.
+- `pnpm format` writes Prettier formatting changes.
+- `pnpm format:check` checks formatting without writing changes.
+
+Agents may write or update the code, tests, and configuration behind these commands, but only Chris executes installation and validation. Handoffs must give Chris an ordered command sequence beginning with `pnpm install --frozen-lockfile` before project checks.
+
+pnpm dependency lifecycle scripts fail closed until reviewed. Record each approval in the committed `pnpm-workspace.yaml` `allowBuilds` map with an exact package version; never approve an unversioned package or all dependency builds. A version change requires a new script review before installation can proceed.
+
 Use Conventional Commits for commit messages, for example `feat: add editorial state transitions` or `docs: define source terminology`.
 
 ## Pull requests
