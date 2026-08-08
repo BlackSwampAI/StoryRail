@@ -2,7 +2,9 @@
 
 These terms form StoryRail's shared editorial language.
 
-- **Source:** Preserved input or evidence, including its origin, retrieval details, and extracted material.
+- **Source:** Preserved input or evidence with its own identity and attributable provenance. A URL Source retains both the exact submitted URL and its conservative canonical URL; retrieval details and extracted material may be added later without replacing Source identity.
+- **Canonical Source URL:** A conservatively normalized URL used for exact Source duplicate comparison. It is distinct from the submitted URL and does not imply content or event equivalence.
+- **Duplicate Source:** An intake submission whose canonical Source URL exactly matches an existing Source. Semantic duplicates, mirrors, syndicated material, and separate Sources covering the same event are not included in this definition.
 - **Story:** The central editorial object representing a candidate or active piece of coverage across its lifecycle.
 - **Story state:** One explicit point in a Story's editorial lifecycle: `intake`, `assigned`, `in_progress`, `in_review`, `changes_requested`, `approved`, `rejected`, or `published`.
 - **Transition receipt:** The durable audit record produced by a successful Story state change, including the transition and Story identities, previous and next states, actor, reason, occurrence timestamp, and resulting revision-cycle count.
@@ -27,6 +29,7 @@ These terms form StoryRail's shared editorial language.
 ## Invariants
 
 - A source is not a story.
+- Exact Source duplication is not semantic Story duplication.
 - A story is not an article.
 - Multiple sources may belong to one story.
 - A story may be rejected or merged without producing an article.
