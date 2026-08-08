@@ -14,7 +14,7 @@ The first vertical slice uses Marvel Cinematic Universe (MCU) coverage to exerci
 8. Run an independent editor-in-chief review.
 9. Approve, reject, or request changes.
 10. Permit no more than two revision cycles.
-11. Export an approved article as Markdown and structured JSON.
+11. Publish an approved Story through a separate, explicit operator transition, exporting its Article as Markdown and structured JSON.
 
 ## In scope
 
@@ -30,7 +30,7 @@ The slice preserves source provenance, keeps the source, story, and article sepa
 - Drafts and subsequent revisions remain separately inspectable.
 - An independent editor-in-chief review records its evidence, outcome, and requested changes.
 - The workflow allows approval, rejection, or a change request and blocks a third revision cycle.
-- Only an approved article can be exported, through an explicit action, as Markdown and structured JSON.
+- Only an approved Story can be explicitly transitioned to published by an operator, with its approved article exported as Markdown and structured JSON.
 - Agent activity and editorial decisions leave durable receipts.
 
 ## Deferred
