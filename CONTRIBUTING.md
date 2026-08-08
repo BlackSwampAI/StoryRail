@@ -39,7 +39,7 @@ The single application package uses pnpm scripts:
 - `pnpm start` serves an existing production build.
 - `pnpm test` runs the focused Vitest suite once.
 - `pnpm test:watch` runs Vitest in watch mode.
-- `pnpm typecheck` checks strict TypeScript types without emitting files.
+- `pnpm typecheck` generates Next.js route and framework types, then checks strict TypeScript types without emitting files.
 - `pnpm lint` runs ESLint.
 - `pnpm format` writes Prettier formatting changes.
 - `pnpm format:check` checks formatting without writing changes.

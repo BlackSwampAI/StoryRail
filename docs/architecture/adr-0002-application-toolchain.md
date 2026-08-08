@@ -24,6 +24,8 @@ The initial pinned toolchain is:
 
 pnpm provides fast, deterministic dependency installation with strict dependency boundaries. Dependency lifecycle scripts are denied unless explicitly reviewed. Approved scripts belong in the committed `pnpm-workspace.yaml` `allowBuilds` map and use exact package versions so new or upgraded scripts fail closed pending separate review. ESLint covers correctness and Next.js-specific rules, while Prettier owns mechanical formatting. Vitest supplies a fast TypeScript-aware test runner, and its React plugin handles TSX through the automatic JSX runtime required by Next.js. jsdom and React Testing Library support focused tests expressed through visible, accessible behavior rather than component internals.
 
+Next-generated type declarations are not committed. `pnpm typecheck` runs `next typegen` before `tsc --noEmit`, ensuring the ignored route and framework declarations exist and making strict typechecking reproducible from a clean checkout.
+
 ## Consequences
 
 Application development has one install, one script surface, and one deployment unit. The committed lockfile and pinned package manager make dependency resolution reproducible. Framework code can initially coordinate full-stack behavior without a network boundary, while separation of domain code preserves a later path to other processes or services if evidence supports it.
