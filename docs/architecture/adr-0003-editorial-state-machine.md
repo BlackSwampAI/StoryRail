@@ -41,7 +41,7 @@ The exact transition matrix is:
 
 Every transition requires a non-empty editorial reason. Moving from `in_review` to `changes_requested` increments the Story's revision-cycle count. The first and second changes requests are permitted; a third is rejected without changing the Story or creating a receipt.
 
-Actors form a bounded discriminated union of operator and agent. Each agent actor records a bounded role and its agent-run identity. Agents may advance preparatory work and request changes, but only an operator may transition a Story into `approved`, `rejected`, or `published`. These gates preserve human accountability for final editorial and publication decisions.
+Actors form a bounded discriminated union of operator and agent. Each operator actor carries an operator identity, while each agent actor records a bounded role and its agent-run identity. These opaque identifiers are supplied by future application and authentication layers; they do not select an authentication system. Agents may advance preparatory work and request changes, but only an operator may transition a Story into `approved`, `rejected`, or `published`. These attributable gates preserve human accountability for final editorial and publication decisions.
 
 A successful transition returns a new Story without mutating its input and a durable transition receipt. The receipt records its own identity, the Story identity, the derived previous state, the next state, actor, editorial reason, occurrence timestamp, and resulting revision-cycle count. A rejected transition returns a structured, machine-readable failure with a stable code and relevant context; it does not return a receipt.
 

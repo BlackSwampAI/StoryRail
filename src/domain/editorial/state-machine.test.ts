@@ -6,6 +6,7 @@ import {
   STORY_STATES,
   agentRunId,
   articleId,
+  operatorId,
   sourceId,
   storyId,
   transitionId,
@@ -13,6 +14,7 @@ import {
   type AgentRunId,
   type ArticleId,
   type EditorialActor,
+  type OperatorId,
   type SourceId,
   type Story,
   type StoryId,
@@ -22,7 +24,10 @@ import {
 
 const CREATED_AT = "2026-08-08T12:00:00.000Z";
 const OCCURRED_AT = "2026-08-08T13:00:00.000Z";
-const OPERATOR = { type: "operator" } as const;
+const OPERATOR = {
+  type: "operator",
+  operatorId: operatorId("operator-0001"),
+} as const;
 const AGENT = {
   type: "agent",
   role: "editor_in_chief",
@@ -219,6 +224,29 @@ describe("transitionStory", () => {
     },
   );
 
+  it.each([
+    ["in_review", "approved"],
+    ["intake", "rejected"],
+    ["approved", "published"],
+  ] as const)(
+    "preserves the operator identity in a successful %s -> %s receipt",
+    (previousState, nextState) => {
+      const result = attempt(makeStory(previousState), nextState, OPERATOR);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.receipt.actor).toEqual({
+          type: "operator",
+          operatorId: operatorId("operator-0001"),
+        });
+        expect(result.receipt.actor.type).toBe("operator");
+        if (result.receipt.actor.type === "operator") {
+          expect(result.receipt.actor.operatorId).toBe(operatorId("operator-0001"));
+        }
+      }
+    },
+  );
+
   it.each(["", "   ", "\n\t"])("rejects a missing editorial reason %#", (reason) => {
     const result = attempt(makeStory("intake"), "assigned", AGENT, reason);
 
@@ -300,12 +328,14 @@ describe("editorial identifiers", () => {
     const storyIdentifier = storyId("story-0001");
     const articleIdentifier = articleId("article-0001");
     const runIdentifier = agentRunId("run-0001");
+    const operatorIdentifier = operatorId("operator-0001");
     const transitionIdentifier = transitionId("transition-0001");
 
     const source: SourceId = sourceIdentifier;
     const story: StoryId = storyIdentifier;
     const article: ArticleId = articleIdentifier;
     const run: AgentRunId = runIdentifier;
+    const operator: OperatorId = operatorIdentifier;
     const transition: TransitionId = transitionIdentifier;
 
     // @ts-expect-error A SourceId cannot be used as a StoryId.
@@ -314,25 +344,47 @@ describe("editorial identifiers", () => {
     const invalidSource: SourceId = articleIdentifier;
     // @ts-expect-error An AgentRunId cannot be used as a TransitionId.
     const invalidTransition: TransitionId = runIdentifier;
+    // @ts-expect-error An OperatorId cannot be used as a SourceId.
+    const invalidSourceFromOperator: SourceId = operatorIdentifier;
+    // @ts-expect-error An OperatorId cannot be used as a StoryId.
+    const invalidStoryFromOperator: StoryId = operatorIdentifier;
+    // @ts-expect-error An OperatorId cannot be used as an ArticleId.
+    const invalidArticleFromOperator: ArticleId = operatorIdentifier;
+    // @ts-expect-error An OperatorId cannot be used as an AgentRunId.
+    const invalidRunFromOperator: AgentRunId = operatorIdentifier;
+    // @ts-expect-error An OperatorId cannot be used as a TransitionId.
+    const invalidTransitionFromOperator: TransitionId = operatorIdentifier;
 
     expect([
       source,
       story,
       article,
       run,
+      operator,
       transition,
       invalidStory,
       invalidSource,
       invalidTransition,
+      invalidSourceFromOperator,
+      invalidStoryFromOperator,
+      invalidArticleFromOperator,
+      invalidRunFromOperator,
+      invalidTransitionFromOperator,
     ]).toEqual([
       "source-0001",
       "story-0001",
       "article-0001",
       "run-0001",
+      "operator-0001",
       "transition-0001",
       "source-0001",
       "article-0001",
       "run-0001",
+      "operator-0001",
+      "operator-0001",
+      "operator-0001",
+      "operator-0001",
+      "operator-0001",
     ]);
   });
 });

@@ -8,12 +8,14 @@ export type SourceId = Identifier<"SourceId">;
 export type StoryId = Identifier<"StoryId">;
 export type ArticleId = Identifier<"ArticleId">;
 export type AgentRunId = Identifier<"AgentRunId">;
+export type OperatorId = Identifier<"OperatorId">;
 export type TransitionId = Identifier<"TransitionId">;
 
 export const sourceId = (value: string): SourceId => value as SourceId;
 export const storyId = (value: string): StoryId => value as StoryId;
 export const articleId = (value: string): ArticleId => value as ArticleId;
 export const agentRunId = (value: string): AgentRunId => value as AgentRunId;
+export const operatorId = (value: string): OperatorId => value as OperatorId;
 export const transitionId = (value: string): TransitionId => value as TransitionId;
 
 export const STORY_STATES = [
@@ -49,6 +51,7 @@ export type AgentRole = (typeof AGENT_ROLES)[number];
 
 export interface OperatorActor {
   readonly type: "operator";
+  readonly operatorId: OperatorId;
 }
 
 export interface AgentActor {

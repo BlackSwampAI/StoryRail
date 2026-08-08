@@ -6,7 +6,7 @@ These terms form StoryRail's shared editorial language.
 - **Story:** The central editorial object representing a candidate or active piece of coverage across its lifecycle.
 - **Story state:** One explicit point in a Story's editorial lifecycle: `intake`, `assigned`, `in_progress`, `in_review`, `changes_requested`, `approved`, `rejected`, or `published`.
 - **Transition receipt:** The durable audit record produced by a successful Story state change, including the transition and Story identities, previous and next states, actor, reason, occurrence timestamp, and resulting revision-cycle count.
-- **Actor:** The operator or bounded agent role responsible for requesting a Story state transition; agent actors are tied to a specific agent run.
+- **Actor:** The operator or bounded agent role responsible for requesting a Story state transition; durable receipts identify a specific operator or tie an agent actor to a specific agent run.
 - **Revision cycle:** One bounded return from `in_review` to `changes_requested`; a Story may enter no more than two revision cycles.
 - **Story source:** The durable relationship between a story and a source, including relevance and provenance.
 - **Assignment:** A bounded brief describing the angle, audience, requirements, constraints, and expected deliverable for a story.
