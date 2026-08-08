@@ -46,6 +46,24 @@ The single application package uses pnpm scripts:
 
 Agents may write or update the code, tests, and configuration behind these commands, but only Chris executes installation and validation. Handoffs must give Chris an ordered command sequence beginning with `pnpm install --frozen-lockfile` before project checks.
 
+## Continuous integration
+
+Before contributing a pull request, run the same validation contract locally in this order:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+git diff --check
+```
+
+GitHub Actions runs these commands independently for pull requests targeting `main`. CI also runs for
+pushes to `main` and can be started manually. A green CI run confirms the automated checks passed for
+that revision; it does not replace Chris's explicit approval to merge.
+
 pnpm dependency lifecycle scripts fail closed until reviewed. Record each approval in the committed `pnpm-workspace.yaml` `allowBuilds` map with an exact package version; never approve an unversioned package or all dependency builds. A version change requires a new script review before installation can proceed.
 
 Use Conventional Commits for commit messages, for example `feat: add editorial state transitions` or `docs: define source terminology`.

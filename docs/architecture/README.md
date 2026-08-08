@@ -10,3 +10,4 @@ Files use `adr-NNNN-short-title.md`, with a zero-padded sequence number. An ADR 
 - [ADR 0002: TypeScript application toolchain](adr-0002-application-toolchain.md) — Accepted
 - [ADR 0003: Editorial state machine](adr-0003-editorial-state-machine.md) — Accepted
 - [ADR 0004: Newsroom shell](adr-0004-newsroom-shell.md) — Accepted
+- [ADR 0005: GitHub Actions continuous integration](adr-0005-continuous-integration.md) — Accepted

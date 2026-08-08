@@ -1,5 +1,7 @@
 # StoryRail
 
+[![CI](https://github.com/BlackSwampAI/StoryRail/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/BlackSwampAI/StoryRail/actions/workflows/ci.yml)
+
 > Turn raw sources into researched, reviewed, publishable stories through a visible agentic editorial workflow.
 
 **Status: pre-alpha. StoryRail is not ready for production use.** The repository contains a minimal application foundation, not an implemented editorial workflow.
@@ -37,6 +39,7 @@ StoryRail's intended lifecycle is: preserve sources, form a story, create an ass
 - [Architecture decisions](docs/architecture/README.md)
 - [ADR 0001: Editorial control plane](docs/architecture/adr-0001-editorial-control-plane.md)
 - [ADR 0002: Application toolchain](docs/architecture/adr-0002-application-toolchain.md)
+- [ADR 0005: GitHub Actions continuous integration](docs/architecture/adr-0005-continuous-integration.md)
 - [Contributing](CONTRIBUTING.md)
 
 ## Application development
