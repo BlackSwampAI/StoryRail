@@ -2,7 +2,7 @@
 
 > Turn raw sources into researched, reviewed, publishable stories through a visible agentic editorial workflow.
 
-**Status: pre-alpha. StoryRail is not ready for production use.** This repository currently defines the product direction and decision framework; it does not claim an implemented application.
+**Status: pre-alpha. StoryRail is not ready for production use.** The repository contains a minimal application foundation, not an implemented editorial workflow.
 
 ## Why StoryRail
 
@@ -36,7 +36,42 @@ StoryRail's intended lifecycle is: preserve sources, form a story, create an ass
 - [MVP vertical slice](docs/product/mvp.md)
 - [Architecture decisions](docs/architecture/README.md)
 - [ADR 0001: Editorial control plane](docs/architecture/adr-0001-editorial-control-plane.md)
+- [ADR 0002: Application toolchain](docs/architecture/adr-0002-application-toolchain.md)
 - [Contributing](CONTRIBUTING.md)
+
+## Application development
+
+Prerequisites:
+
+- Node.js 24.18.0
+- pnpm 11.20.0 through Corepack
+
+Install the pinned dependencies and start the development server:
+
+```bash
+corepack enable
+pnpm install --frozen-lockfile
+pnpm dev
+```
+
+Open [http://localhost:3000](http://localhost:3000). The page should identify StoryRail as a pre-alpha editorial control plane. No editorial features are implemented yet.
+
+Chris owns manual verification. Run the project checks in this order:
+
+```bash
+node --version
+pnpm --version
+pnpm install --frozen-lockfile
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+git diff --check
+pnpm dev
+```
+
+Agents add or update tests when behavior changes, but do not execute these commands.
 
 ## License
 

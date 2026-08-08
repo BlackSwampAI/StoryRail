@@ -7,3 +7,4 @@ Files use `adr-NNNN-short-title.md`, with a zero-padded sequence number. An ADR 
 ## Index
 
 - [ADR 0001: StoryRail as an editorial control plane](adr-0001-editorial-control-plane.md) — Accepted
+- [ADR 0002: TypeScript application toolchain](adr-0002-application-toolchain.md) — Accepted
