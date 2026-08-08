@@ -4,12 +4,12 @@ import { describe, expect, it } from "vitest";
 import HomePage from "@/app/page";
 
 describe("HomePage", () => {
-  it("identifies StoryRail and its pre-alpha editorial purpose", () => {
+  it("renders the newsroom application shell", () => {
     render(<HomePage />);
 
-    expect(screen.getByRole("heading", { name: "StoryRail" })).toBeVisible();
+    expect(screen.getByText("StoryRail")).toBeVisible();
     expect(screen.getByText("Editorial control plane")).toBeVisible();
-    expect(screen.getByText(/visible agentic editorial workflow/i)).toBeVisible();
-    expect(screen.getByRole("status")).toHaveTextContent(/pre-alpha/i);
+    expect(screen.getByRole("navigation", { name: "Story state queues" })).toBeVisible();
+    expect(screen.getByRole("main")).toBeVisible();
   });
 });
