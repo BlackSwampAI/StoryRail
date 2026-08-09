@@ -1,2 +1,5 @@
 allowBuilds:
   unrs-resolver@1.12.2: true
+minimumReleaseAgeExclude:
+  - pg-protocol@1.16.0
+  - pg@8.23.0
