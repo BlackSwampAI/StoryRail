@@ -8,6 +8,7 @@ import { createPostgresSourceRepositories } from "@/adapters/source-persistence"
 import { createRunSourceExtraction } from "@/application/source-extraction";
 import {
   createExtractPersistedSource,
+  createPreserveAndExtractUrlSource,
   createPreserveUrlSource,
 } from "@/application/source-evidence";
 import type {
@@ -34,6 +35,7 @@ const factoryMocks = vi.hoisted(() => ({
   createRunSourceExtraction: vi.fn(),
   createPreserveUrlSource: vi.fn(),
   createExtractPersistedSource: vi.fn(),
+  createPreserveAndExtractUrlSource: vi.fn(),
 }));
 
 vi.mock("@/adapters/source-extraction", async (importOriginal) => {
@@ -65,10 +67,14 @@ vi.mock("@/application/source-evidence", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/application/source-evidence")>();
   factoryMocks.createPreserveUrlSource.mockImplementation(actual.createPreserveUrlSource);
   factoryMocks.createExtractPersistedSource.mockImplementation(actual.createExtractPersistedSource);
+  factoryMocks.createPreserveAndExtractUrlSource.mockImplementation(
+    actual.createPreserveAndExtractUrlSource,
+  );
   return {
     ...actual,
     createPreserveUrlSource: factoryMocks.createPreserveUrlSource,
     createExtractPersistedSource: factoryMocks.createExtractPersistedSource,
+    createPreserveAndExtractUrlSource: factoryMocks.createPreserveAndExtractUrlSource,
   };
 });
 
@@ -183,9 +189,16 @@ describe("createSourceEvidenceRuntime", () => {
     const controlledPool = makePool();
     const fetchImplementation = successfulFetch();
     const createPool = vi.fn(() => controlledPool.pool);
+    const createUuid = vi.fn(() => SOURCE_UUID);
+    const now = vi.fn(() => RECEIVED_AT);
 
     const runtime = createSourceEvidenceRuntime(
-      makeRuntimeOptions(controlledPool, { fetch: fetchImplementation, createPool }),
+      makeRuntimeOptions(controlledPool, {
+        fetch: fetchImplementation,
+        createPool,
+        createUuid,
+        now,
+      }),
     );
 
     expect(createPool).toHaveBeenCalledOnce();
@@ -197,15 +210,30 @@ describe("createSourceEvidenceRuntime", () => {
       apiKey: FIRECRAWL_API_KEY,
       fetch: fetchImplementation,
     });
+    expect(createRunSourceExtraction).toHaveBeenCalledOnce();
+    expect(createPreserveUrlSource).toHaveBeenCalledOnce();
+    expect(createExtractPersistedSource).toHaveBeenCalledOnce();
     expect(controlledPool.query).not.toHaveBeenCalled();
     expect(fetchImplementation).not.toHaveBeenCalled();
+    expect(createUuid).not.toHaveBeenCalled();
+    expect(now).not.toHaveBeenCalled();
     expect(controlledPool.end).not.toHaveBeenCalled();
-    expect(Object.keys(runtime)).toEqual(["preserveUrlSource", "extractPersistedSource", "close"]);
+    expect(createPreserveAndExtractUrlSource).toHaveBeenCalledOnce();
+    expect(createPreserveAndExtractUrlSource).toHaveBeenCalledWith({
+      preserveUrlSource: runtime.preserveUrlSource,
+      extractPersistedSource: runtime.extractPersistedSource,
+    });
+    expect(Object.keys(runtime)).toEqual([
+      "preserveUrlSource",
+      "extractPersistedSource",
+      "preserveAndExtractUrlSource",
+      "close",
+    ]);
     expect(JSON.stringify(runtime)).not.toContain(DATABASE_URL);
     expect(JSON.stringify(runtime)).not.toContain(FIRECRAWL_API_KEY);
   });
 
-  it("shares repositories, delegates to the existing workflows, and uses distinct UUID and clock calls", async () => {
+  it("composes the exact primitive workflows and runs one preserve-then-extract invocation", async () => {
     const controlledPool = makePool();
     const repositories = makeRepositories();
     factoryMocks.createPostgresSourceRepositories.mockReturnValue(repositories);
@@ -222,24 +250,24 @@ describe("createSourceEvidenceRuntime", () => {
       makeRuntimeOptions(controlledPool, { createUuid, now }),
     );
 
-    const preserveResult = await runtime.preserveUrlSource({
+    const result = await runtime.preserveAndExtractUrlSource({
       submittedUrl: "https://example.com/runtime?utm_source=inbox",
       submittedBy: OPERATOR,
     });
 
-    expect(preserveResult.ok).toBe(true);
+    expect(result.ok).toBe(true);
     expect(repositories.getStoredSource()).toMatchObject({
       id: sourceId(SOURCE_UUID),
       receivedAt: RECEIVED_AT,
     });
-    expect(now).toHaveBeenCalledOnce();
-
-    const extractionResult = await runtime.extractPersistedSource({
-      sourceId: sourceId(SOURCE_UUID),
-      requestedBy: OPERATOR,
-    });
-
-    expect(extractionResult.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error("The controlled combined invocation must succeed.");
+    }
+    expect(result.source).toBe(repositories.persist.mock.calls[0]?.[0].source);
+    expect(result.extraction).toBe(repositories.append.mock.calls[0]?.[0].extraction);
+    expect(repositories.persist.mock.invocationCallOrder[0]!).toBeLessThan(
+      repositories.findById.mock.invocationCallOrder[0]!,
+    );
     expect(repositories.append).toHaveBeenCalledOnce();
     expect(repositories.append.mock.calls[0]?.[0].extraction).toMatchObject({
       id: sourceExtractionId(SUCCESS_EXTRACTION_UUID),
@@ -253,6 +281,7 @@ describe("createSourceEvidenceRuntime", () => {
     expect(createRunSourceExtraction).toHaveBeenCalledOnce();
     expect(createPreserveUrlSource).toHaveBeenCalledOnce();
     expect(createExtractPersistedSource).toHaveBeenCalledOnce();
+    expect(createPreserveAndExtractUrlSource).toHaveBeenCalledOnce();
     expect(factoryMocks.createPreserveUrlSource.mock.calls[0]?.[0].sourceRepository).toBe(
       repositories.sources,
     );
@@ -265,6 +294,10 @@ describe("createSourceEvidenceRuntime", () => {
     expect(factoryMocks.createExtractPersistedSource.mock.calls[0]?.[0].runSourceExtraction).toBe(
       factoryMocks.createRunSourceExtraction.mock.results[0]?.value,
     );
+    expect(factoryMocks.createPreserveAndExtractUrlSource).toHaveBeenCalledWith({
+      preserveUrlSource: factoryMocks.createPreserveUrlSource.mock.results[0]?.value,
+      extractPersistedSource: factoryMocks.createExtractPersistedSource.mock.results[0]?.value,
+    });
   });
 
   it("passes workflow results through and appends successful and failed attempts identically", async () => {
@@ -341,14 +374,9 @@ describe("createSourceEvidenceRuntime", () => {
           .mockReturnValueOnce(COMPLETED_AT),
       }),
     );
-    await runtime.preserveUrlSource({
+    const result = await runtime.preserveAndExtractUrlSource({
       submittedUrl: "https://example.com/runtime",
       submittedBy: OPERATOR,
-    });
-
-    const result = await runtime.extractPersistedSource({
-      sourceId: sourceId(SOURCE_UUID),
-      requestedBy: OPERATOR,
     });
 
     expect(result).toMatchObject({
@@ -358,6 +386,11 @@ describe("createSourceEvidenceRuntime", () => {
         failure: { code: "RETRIEVAL_FAILED", retryable: true },
       },
     });
+    if (!result.ok) {
+      throw new Error("A recorded expected provider failure must complete the combined workflow.");
+    }
+    expect(result.source).toBe(repositories.getStoredSource());
+    expect(result.extraction).toBe(repositories.append.mock.calls[0]?.[0].extraction);
     expect(repositories.append).toHaveBeenCalledOnce();
   });
 
@@ -475,6 +508,11 @@ describe("createSourceEvidenceRuntimeFromEnvironment", () => {
     });
     expect(factoryMocks.createRunSourceExtraction.mock.calls[0]?.[0].now).toBe(now);
     expect(factoryMocks.createPreserveUrlSource.mock.calls[0]?.[0].now).toBe(now);
-    expect(Object.keys(runtime)).toEqual(["preserveUrlSource", "extractPersistedSource", "close"]);
+    expect(Object.keys(runtime)).toEqual([
+      "preserveUrlSource",
+      "extractPersistedSource",
+      "preserveAndExtractUrlSource",
+      "close",
+    ]);
   });
 });

@@ -19,3 +19,4 @@ Files use `adr-NNNN-short-title.md`, with a zero-padded sequence number. An ADR 
 - [ADR 0011: Source evidence application workflows](adr-0011-source-evidence-application-workflows.md) — Accepted
 - [ADR 0012: PostgreSQL Source evidence persistence](adr-0012-postgresql-source-evidence-persistence.md) — Accepted
 - [ADR 0013: Source evidence runtime composition](adr-0013-source-evidence-runtime-composition.md) — Accepted
+- [ADR 0014: Combined Source evidence workflow](adr-0014-combined-source-evidence-workflow.md) — Accepted

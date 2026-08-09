@@ -7,8 +7,10 @@ import { createPostgresSourceRepositories } from "@/adapters/source-persistence"
 import { createRunSourceExtraction } from "@/application/source-extraction";
 import {
   createExtractPersistedSource,
+  createPreserveAndExtractUrlSource,
   createPreserveUrlSource,
   type ExtractPersistedSource,
+  type PreserveAndExtractUrlSource,
   type PreserveUrlSource,
 } from "@/application/source-evidence";
 import { sourceExtractionId, sourceId } from "@/domain/editorial";
@@ -21,6 +23,7 @@ import {
 export interface SourceEvidenceRuntime {
   readonly preserveUrlSource: PreserveUrlSource;
   readonly extractPersistedSource: ExtractPersistedSource;
+  readonly preserveAndExtractUrlSource: PreserveAndExtractUrlSource;
   close(): Promise<void>;
 }
 
@@ -67,11 +70,16 @@ export function createSourceEvidenceRuntime(
     extractionRepository: repositories.extractions,
     runSourceExtraction,
   });
+  const preserveAndExtractUrlSource = createPreserveAndExtractUrlSource({
+    preserveUrlSource,
+    extractPersistedSource,
+  });
   let closePromise: Promise<void> | undefined;
 
   return Object.freeze({
     preserveUrlSource,
     extractPersistedSource,
+    preserveAndExtractUrlSource,
     close() {
       closePromise ??= Promise.resolve().then(() => pool.end());
       return closePromise;
