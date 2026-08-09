@@ -47,6 +47,15 @@ The single application package uses pnpm scripts:
 
 Agents may write or update the code, tests, and configuration behind these commands, but only Chris executes installation and validation. Handoffs must give Chris an ordered command sequence beginning with `pnpm install --frozen-lockfile` before project checks.
 
+## Source-evidence runtime configuration
+
+The server-only Source-evidence runtime requires these production variable names:
+
+- `STORYRAIL_DATABASE_URL`
+- `FIRECRAWL_API_KEY`
+
+`.env.example` documents names only. Never commit credentials, connection strings, or working example values. Runtime unit tests inject Pool, fetch, UUID, and clock substitutes, so they require no real PostgreSQL or Firecrawl access. PostgreSQL migrations must be applied externally before a composed runtime can persist Source evidence; application runtime does not execute them. Ordinary validation must never make Firecrawl, other provider, or production database requests.
+
 ## PostgreSQL integration tests
 
 Source-evidence persistence integration tests run against PostgreSQL 18.4 itself. They do not use mocks, testcontainers, an embedded database, or a simulated PostgreSQL implementation.
@@ -60,7 +69,7 @@ STORYRAIL_TEST_DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/story
   pnpm test:postgres
 ```
 
-Credentials, host, and port may differ locally. Do not commit connection strings or credentials. The integration suite owns and closes only the Pool it creates; application runtime database composition remains deferred.
+Credentials, host, and port may differ locally. Do not commit connection strings or credentials. The integration suite owns and closes only the Pool it creates; the server-only application runtime separately owns only the Pool created for its own composed instance.
 
 ## Continuous integration
 
