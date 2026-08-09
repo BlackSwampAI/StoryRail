@@ -22,3 +22,4 @@ Files use `adr-NNNN-short-title.md`, with a zero-padded sequence number. An ADR 
 - [ADR 0014: Combined Source evidence workflow](adr-0014-combined-source-evidence-workflow.md) — Accepted
 - [ADR 0015: Source-evidence HTTP interface](adr-0015-source-evidence-http-interface.md) — Accepted
 - [ADR 0016: Newsroom Source-evidence URL intake](adr-0016-newsroom-source-evidence-url-intake.md) — Accepted
+- [ADR 0017: Durable Story creation](adr-0017-durable-story-creation.md) — Accepted
