@@ -38,6 +38,7 @@ The single application package uses pnpm scripts:
 - `pnpm build` creates the production build.
 - `pnpm start` serves an existing production build.
 - `pnpm test` runs the focused Vitest suite once.
+- `pnpm test:postgres` runs only the PostgreSQL Source-evidence integration suite and requires `STORYRAIL_TEST_DATABASE_URL`.
 - `pnpm test:watch` runs Vitest in watch mode.
 - `pnpm typecheck` generates Next.js route and framework types, then checks strict TypeScript types without emitting files.
 - `pnpm lint` runs ESLint.
@@ -45,6 +46,21 @@ The single application package uses pnpm scripts:
 - `pnpm format:check` checks formatting without writing changes.
 
 Agents may write or update the code, tests, and configuration behind these commands, but only Chris executes installation and validation. Handoffs must give Chris an ordered command sequence beginning with `pnpm install --frozen-lockfile` before project checks.
+
+## PostgreSQL integration tests
+
+Source-evidence persistence integration tests run against PostgreSQL 18.4 itself. They do not use mocks, testcontainers, an embedded database, or a simulated PostgreSQL implementation.
+
+Provide the test-only connection through `STORYRAIL_TEST_DATABASE_URL`. Never use a production `DATABASE_URL`. The configured database name must be exactly `storyrail_test`; the suite connects and verifies that name before any destructive setup. It never creates or drops a database, but it does drop and recreate the `storyrail` schema and truncates the two evidence tables between cases. Use a disposable local test database with no data outside this test workflow that depends on the `storyrail` schema.
+
+When `STORYRAIL_TEST_DATABASE_URL` is absent, `pnpm test` skips the PostgreSQL suite while continuing to run every non-PostgreSQL test. The dedicated command fails before Vitest when the variable is absent. Run the integration suite explicitly with a test URL whose database component is `storyrail_test`:
+
+```bash
+STORYRAIL_TEST_DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/storyrail_test' \
+  pnpm test:postgres
+```
+
+Credentials, host, and port may differ locally. Do not commit connection strings or credentials. The integration suite owns and closes only the Pool it creates; application runtime database composition remains deferred.
 
 ## Continuous integration
 
@@ -56,6 +72,7 @@ pnpm format:check
 pnpm lint
 pnpm typecheck
 pnpm test
+STORYRAIL_TEST_DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/storyrail_test' pnpm test:postgres
 pnpm build
 git diff --check
 ```
