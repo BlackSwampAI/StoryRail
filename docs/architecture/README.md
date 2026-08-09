@@ -15,3 +15,4 @@ Files use `adr-NNNN-short-title.md`, with a zero-padded sequence number. An ADR 
 - [ADR 0007: Source extraction outcomes](adr-0007-source-extraction-outcomes.md) — Accepted
 - [ADR 0008: Firecrawl Source extraction adapter](adr-0008-firecrawl-source-extraction-adapter.md) — Accepted
 - [ADR 0009: Source extraction application service](adr-0009-source-extraction-application-service.md) — Accepted
+- [ADR 0010: Source evidence persistence contracts](adr-0010-source-evidence-persistence-contracts.md) — Accepted
