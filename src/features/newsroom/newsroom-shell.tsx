@@ -11,8 +11,14 @@ import {
   type NewsroomStoryFixture,
 } from "./newsroom-fixtures";
 import styles from "./newsroom-shell.module.css";
+import { SourceEvidenceWorkspace } from "./source-evidence-workspace";
+import type { RequestSourceEvidenceUrl } from "./source-evidence-url-client";
 
-type WorkspaceMode = "story" | "assistant";
+type WorkspaceMode = "story" | "source-intake" | "assistant";
+
+export interface NewsroomShellProps {
+  readonly requestSourceEvidence?: RequestSourceEvidenceUrl;
+}
 
 const dateFormatter = new Intl.DateTimeFormat("en-US", {
   dateStyle: "medium",
@@ -123,7 +129,7 @@ function AssistantWorkspace() {
   );
 }
 
-export function NewsroomShell() {
+export function NewsroomShell({ requestSourceEvidence }: NewsroomShellProps) {
   const [selectedQueue, setSelectedQueue] = useState<StoryState>("intake");
   const initialStory = NEWSROOM_STORIES.find((story) => story.state === "intake");
   const [selectedStoryId, setSelectedStoryId] = useState<StoryId | undefined>(initialStory?.id);
@@ -220,6 +226,13 @@ export function NewsroomShell() {
             </button>
             <button
               type="button"
+              aria-pressed={workspaceMode === "source-intake"}
+              onClick={() => setWorkspaceMode("source-intake")}
+            >
+              Source intake
+            </button>
+            <button
+              type="button"
               aria-pressed={workspaceMode === "assistant"}
               onClick={() => setWorkspaceMode("assistant")}
             >
@@ -228,11 +241,15 @@ export function NewsroomShell() {
           </div>
         </header>
 
-        {workspaceMode === "story" ? (
+        <div hidden={workspaceMode !== "story"}>
           <StoryWorkspace story={selectedStory} />
-        ) : (
+        </div>
+        <div hidden={workspaceMode !== "source-intake"}>
+          <SourceEvidenceWorkspace requestSourceEvidence={requestSourceEvidence} />
+        </div>
+        <div hidden={workspaceMode !== "assistant"}>
           <AssistantWorkspace />
-        )}
+        </div>
       </main>
     </div>
   );

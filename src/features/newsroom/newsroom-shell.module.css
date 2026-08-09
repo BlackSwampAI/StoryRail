@@ -248,9 +248,209 @@
 
 .storyWorkspace,
 .emptyWorkspace,
-.assistantWorkspace {
+.assistantWorkspace,
+.sourceWorkspace {
   width: min(100%, 72rem);
   padding: clamp(2rem, 6vw, 5rem) clamp(1.25rem, 6vw, 5rem);
+}
+
+.sourceWorkspace {
+  display: grid;
+  gap: 2rem;
+}
+
+.sourceWorkspaceHeader {
+  max-width: 52rem;
+}
+
+.sourceWorkspaceHeader h1,
+.receipt h2 {
+  margin: 0.7rem 0 0;
+  color: #f4f7f5;
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 500;
+  letter-spacing: -0.04em;
+  line-height: 1.08;
+}
+
+.sourceWorkspaceHeader h1 {
+  font-size: clamp(2.15rem, 5vw, 4.15rem);
+}
+
+.sourceWorkspaceHeader > p:last-child {
+  margin: 1.5rem 0 0;
+  color: #a9bab2;
+  line-height: 1.7;
+}
+
+.sourceForm {
+  border: 1px solid #315044;
+  border-radius: 0.9rem;
+  background: rgb(13 27 22 / 92%);
+  padding: clamp(1.25rem, 3vw, 2rem);
+}
+
+.sourceForm label {
+  display: block;
+  margin-bottom: 0.65rem;
+  color: #dce8e1;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.sourceFormControls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+}
+
+.sourceForm input,
+.sourceForm button {
+  min-height: 3rem;
+  border: 1px solid #41695a;
+  border-radius: 0.6rem;
+  font: inherit;
+}
+
+.sourceForm input {
+  min-width: 0;
+  background: #08110e;
+  padding: 0.7rem 0.85rem;
+  color: #eef5f0;
+}
+
+.sourceForm button {
+  background: #2d664f;
+  padding: 0.7rem 1.1rem;
+  color: #f4faf6;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.sourceForm button:hover:not(:disabled) {
+  background: #397b60;
+}
+
+.sourceForm button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.sourceForm input:focus-visible,
+.sourceForm button:focus-visible {
+  outline: 3px solid #8ee4c2;
+  outline-offset: 3px;
+}
+
+.formHint,
+.pendingStatus {
+  margin: 0.7rem 0 0;
+  color: #82988e;
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.pendingStatus {
+  color: #a7ddc8;
+  font-weight: 700;
+}
+
+.resultRegion:empty {
+  display: none;
+}
+
+.receipt {
+  border: 1px solid #3d6455;
+  border-left-width: 0.3rem;
+  border-radius: 0.9rem;
+  background: #0e1d18;
+  padding: clamp(1.25rem, 3vw, 2rem);
+}
+
+.receiptCompleted {
+  border-left-color: #76d5b1;
+}
+
+.receiptPartial {
+  border-left-color: #dfb867;
+}
+
+.receiptRejected {
+  border-left-color: #d27a70;
+}
+
+.receipt h2 {
+  font-size: clamp(1.6rem, 3vw, 2.4rem);
+}
+
+.receiptSection {
+  margin-top: 2rem;
+  border-top: 1px solid #29443a;
+  padding-top: 1.5rem;
+}
+
+.receiptSection h3,
+.receiptSection h4 {
+  margin: 0 0 1rem;
+  color: #e8f0eb;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.2rem;
+  font-weight: 500;
+}
+
+.receiptSection h4 {
+  margin-top: 1.75rem;
+  font-size: 1rem;
+}
+
+.receiptFacts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 1.25rem 0 0;
+  background: #29443a;
+  border: 1px solid #29443a;
+}
+
+.receiptFacts > div {
+  min-width: 0;
+  background: #0b1713;
+  padding: 0.9rem;
+}
+
+.receiptFacts dt {
+  margin-bottom: 0.35rem;
+  color: #779087;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.receiptFacts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #dce7e1;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.extractedContent {
+  max-height: 24rem;
+  overflow: auto;
+  margin: 0;
+  border: 1px solid #29443a;
+  border-radius: 0.65rem;
+  background: #07100d;
+  padding: 1rem;
+  color: #c8d7d0;
+  font:
+    0.78rem/1.6 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  white-space: pre-wrap;
 }
 
 .workspaceHeader {
@@ -482,6 +682,11 @@
 
   .workspaceSwitch button {
     flex: 1;
+  }
+
+  .sourceFormControls,
+  .receiptFacts {
+    grid-template-columns: 1fr;
   }
 
   .workspaceHeader {
