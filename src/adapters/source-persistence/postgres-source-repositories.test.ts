@@ -10,21 +10,30 @@ import {
   operatorId,
   sourceExtractionId,
   sourceId,
+  storyId,
+  STORY_STATES,
   type AgentActor,
   type CanonicalSourceUrl,
   type FailedSourceExtraction,
   type OperatorActor,
   type SourceExtraction,
   type SuccessfulSourceExtraction,
+  type Story,
   type UrlSource,
 } from "@/domain/editorial";
 import { describeSourceRepositoriesContract } from "@/application/source-persistence/source-repositories.contract";
+import { describeStoryRepositoryContract } from "@/application/story-persistence/story-repository.contract";
 
 import { createPostgresSourceRepositories } from "./postgres-source-repositories";
+import { createPostgresStoryRepository } from "../story-persistence/postgres-story-repository";
 
 const databaseUrl = process.env.STORYRAIL_TEST_DATABASE_URL;
 const describePostgres = databaseUrl ? describe : describe.skip;
-const migrationPath = resolve(process.cwd(), "database/migrations/0012-source-evidence.sql");
+const sourceMigrationPath = resolve(process.cwd(), "database/migrations/0012-source-evidence.sql");
+const storyMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0017-durable-story-creation.sql",
+);
 
 const OPERATOR: OperatorActor = {
   type: "operator",
@@ -119,13 +128,27 @@ function canonicalUrl(value: string): CanonicalSourceUrl {
   return value as CanonicalSourceUrl;
 }
 
-describePostgres("PostgreSQL Source-evidence repositories", () => {
+function makeStory(suffix: string, overrides: Partial<Story> = {}): Story {
+  return {
+    id: storyId(`opaque-story-${suffix}`),
+    title: `Durable Story ${suffix}`,
+    state: "intake",
+    revisionCycle: 0,
+    createdAt: "opaque created timestamp: 2026/08/09 25:61",
+    updatedAt: "opaque updated timestamp: not normalized",
+    ...overrides,
+  };
+}
+
+describePostgres("PostgreSQL persistence repositories", () => {
   let pool: Pool;
-  let migrationSql: string;
+  let sourceMigrationSql: string;
+  let storyMigrationSql: string;
   let destructiveSetupAllowed = false;
 
   beforeAll(async () => {
-    migrationSql = await readFile(migrationPath, "utf8");
+    sourceMigrationSql = await readFile(sourceMigrationPath, "utf8");
+    storyMigrationSql = await readFile(storyMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -142,7 +165,8 @@ describePostgres("PostgreSQL Source-evidence repositories", () => {
 
       destructiveSetupAllowed = true;
       await client.query("DROP SCHEMA IF EXISTS storyrail CASCADE");
-      await client.query(migrationSql);
+      await client.query(sourceMigrationSql);
+      await client.query(storyMigrationSql);
     } finally {
       client.release();
     }
@@ -154,7 +178,7 @@ describePostgres("PostgreSQL Source-evidence repositories", () => {
     }
 
     await pool.query(
-      "TRUNCATE storyrail.source_extractions, storyrail.url_sources RESTART IDENTITY",
+      "TRUNCATE storyrail.source_extractions, storyrail.url_sources, storyrail.stories RESTART IDENTITY",
     );
   });
 
@@ -173,6 +197,7 @@ describePostgres("PostgreSQL Source-evidence repositories", () => {
   });
 
   describeSourceRepositoriesContract(() => createPostgresSourceRepositories({ pool }));
+  describeStoryRepositoryContract(() => createPostgresStoryRepository({ pool }));
 
   describe("migration", () => {
     it("creates only the dedicated evidence schema objects with the required columns", async () => {
@@ -197,6 +222,7 @@ describePostgres("PostgreSQL Source-evidence repositories", () => {
 
       expect(tables.rows.map((row) => row.table_name)).toEqual([
         "source_extractions",
+        "stories",
         "url_sources",
       ]);
       expect(columns.rows).toEqual([
@@ -234,6 +260,34 @@ describePostgres("PostgreSQL Source-evidence repositories", () => {
           data_type: "bigint",
           is_nullable: "NO",
           is_identity: "YES",
+        },
+        {
+          table_name: "stories",
+          column_name: "story_id",
+          data_type: "text",
+          is_nullable: "NO",
+          is_identity: "NO",
+        },
+        {
+          table_name: "stories",
+          column_name: "state",
+          data_type: "text",
+          is_nullable: "NO",
+          is_identity: "NO",
+        },
+        {
+          table_name: "stories",
+          column_name: "revision_cycle",
+          data_type: "integer",
+          is_nullable: "NO",
+          is_identity: "NO",
+        },
+        {
+          table_name: "stories",
+          column_name: "payload",
+          data_type: "jsonb",
+          is_nullable: "NO",
+          is_identity: "NO",
         },
         {
           table_name: "url_sources",
@@ -316,6 +370,56 @@ describePostgres("PostgreSQL Source-evidence repositories", () => {
           table_name: "source_extractions",
           constraint_name: "source_extractions_source_id_fkey",
           constraint_type: "f",
+        },
+        {
+          table_name: "stories",
+          constraint_name: "stories_payload_created_at_check",
+          constraint_type: "c",
+        },
+        {
+          table_name: "stories",
+          constraint_name: "stories_payload_id_check",
+          constraint_type: "c",
+        },
+        {
+          table_name: "stories",
+          constraint_name: "stories_payload_object_check",
+          constraint_type: "c",
+        },
+        {
+          table_name: "stories",
+          constraint_name: "stories_payload_revision_cycle_check",
+          constraint_type: "c",
+        },
+        {
+          table_name: "stories",
+          constraint_name: "stories_payload_state_check",
+          constraint_type: "c",
+        },
+        {
+          table_name: "stories",
+          constraint_name: "stories_payload_title_check",
+          constraint_type: "c",
+        },
+        {
+          table_name: "stories",
+          constraint_name: "stories_payload_updated_at_check",
+          constraint_type: "c",
+        },
+        {
+          table_name: "stories",
+          constraint_name: "stories_pkey",
+          constraint_type: "p",
+        },
+        {
+          table_name: "stories",
+          constraint_name: "stories_revision_cycle_check",
+          constraint_type: "c",
+        },
+        {
+          table_name: "stories",
+          constraint_name: "stories_state_check",
+          constraint_type: "c",
         },
         {
           table_name: "url_sources",
@@ -627,6 +731,132 @@ describePostgres("PostgreSQL Source-evidence repositories", () => {
     });
   });
 
+  describe("durable Story persistence", () => {
+    it("round-trips the exact complete Story, including SQL-like title, identity, and opaque timestamps", async () => {
+      const repository = createPostgresStoryRepository({ pool });
+      const story = makeStory("$1; DROP SCHEMA storyrail; --", {
+        id: storyId("story '$1'; SELECT pg_sleep(10); --"),
+        title: "Title $1; DROP TABLE storyrail.stories; --  interior  spacing",
+        createdAt: "timestamp $2; DELETE FROM storyrail.stories; --",
+        updatedAt: "not-a-date $3 ' ; --",
+      });
+
+      await expect(repository.persist({ story })).resolves.toEqual({ ok: true, story });
+      await expect(repository.persist({ story: structuredClone(story) })).resolves.toEqual({
+        ok: true,
+        story,
+      });
+      await expect(
+        pool.query("SELECT count(*) AS count FROM storyrail.stories"),
+      ).resolves.toMatchObject({ rows: [{ count: "1" }] });
+    });
+
+    it("decodes every accepted Story state and allowed revision-cycle boundary", async () => {
+      const repository = createPostgresStoryRepository({ pool });
+
+      for (const [index, state] of STORY_STATES.entries()) {
+        const story = makeStory(`accepted-${state}`, {
+          state,
+          revisionCycle: index % 2 === 0 ? 0 : 2,
+        });
+
+        await expect(repository.persist({ story })).resolves.toEqual({ ok: true, story });
+        await expect(repository.persist({ story })).resolves.toEqual({ ok: true, story });
+      }
+    });
+
+    it("rejects impossible relational state and revision-cycle values", async () => {
+      const invalidState = makeStory("invalid-state");
+      const invalidRevision = makeStory("invalid-revision", { revisionCycle: 3 });
+
+      await expect(
+        pool.query(
+          `INSERT INTO storyrail.stories (story_id, state, revision_cycle, payload)
+           VALUES ($1, $2, $3, $4::jsonb)`,
+          [
+            invalidState.id,
+            "invented_state",
+            invalidState.revisionCycle,
+            JSON.stringify({ ...invalidState, state: "invented_state" }),
+          ],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      await expect(
+        pool.query(
+          `INSERT INTO storyrail.stories (story_id, state, revision_cycle, payload)
+           VALUES ($1, $2, $3, $4::jsonb)`,
+          [invalidRevision.id, invalidRevision.state, 3, JSON.stringify(invalidRevision)],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+    });
+
+    it("enforces payload object, identity, state, revision, and required-string constraints", async () => {
+      const story = makeStory("payload-constraints");
+      const variants: readonly [string, (base: Story) => unknown][] = [
+        ["payload-object", () => []],
+        ["payload-id", (base) => ({ ...base, id: storyId("different-id") })],
+        ["payload-state", (base) => ({ ...base, state: "assigned" })],
+        ["payload-revision", (base) => ({ ...base, revisionCycle: 1 })],
+        ["payload-title", (base) => ({ ...base, title: 42 })],
+        ["payload-created", (base) => ({ ...base, createdAt: null })],
+        ["payload-updated", (base) => ({ ...base, updatedAt: false })],
+      ];
+
+      for (const [suffix, createPayload] of variants) {
+        const rowId = storyId(`constraint-${suffix}`);
+        const payload = createPayload({ ...story, id: rowId });
+        await expect(
+          pool.query(
+            `INSERT INTO storyrail.stories (story_id, state, revision_cycle, payload)
+             VALUES ($1, $2, $3, $4::jsonb)`,
+            [rowId, story.state, story.revisionCycle, JSON.stringify(payload)],
+          ),
+        ).rejects.toMatchObject({ code: "23514" });
+      }
+    });
+
+    it.each([
+      ["malformed field", "stories_payload_title_check", "jsonb_set(payload, '{title}', '42')"],
+      ["missing key", "stories_payload_title_check", "payload - 'title'"],
+      ["extra key", null, 'payload || \'{"summary":"not allowed"}\'::jsonb'],
+      [
+        "mismatched identity",
+        "stories_payload_id_check",
+        "jsonb_set(payload, '{id}', '\"other-id\"')",
+      ],
+    ])(
+      "rejects a stored payload with a %s using one safe invariant",
+      async (_, constraint, mutation) => {
+        const story = makeStory(`corrupt-${constraint ?? "extra"}`);
+        const repository = createPostgresStoryRepository({ pool });
+        await repository.persist({ story });
+        const client = await pool.connect();
+
+        try {
+          await client.query("BEGIN");
+          if (constraint) {
+            await client.query(`ALTER TABLE storyrail.stories DROP CONSTRAINT ${constraint}`);
+          }
+          await client.query(
+            `UPDATE storyrail.stories SET payload = ${mutation} WHERE story_id = $1`,
+            [story.id],
+          );
+          const transactionRepository = createPostgresStoryRepository({
+            pool: client as unknown as Pool,
+          });
+
+          await expect(transactionRepository.persist({ story })).rejects.toMatchObject({
+            name: "PostgresStoryPersistenceInvariantError",
+            message: "PostgreSQL Story persistence returned an invalid or impossible result.",
+          });
+        } finally {
+          await client.query("ROLLBACK");
+          client.release();
+        }
+      },
+    );
+  });
+
   describe("database races", () => {
     it("uses a Pool capable of assigning concurrent work to distinct PostgreSQL connections", async () => {
       const [firstClient, secondClient] = await Promise.all([pool.connect(), pool.connect()]);
@@ -641,6 +871,57 @@ describePostgres("PostgreSQL Source-evidence repositories", () => {
         firstClient.release();
         secondClient.release();
       }
+    });
+
+    it("linearizes concurrent exact Story writes to one row and two successes", async () => {
+      const firstRepository = createPostgresStoryRepository({ pool });
+      const secondRepository = createPostgresStoryRepository({ pool });
+      const story = makeStory("race-exact");
+
+      const results = await Promise.all([
+        firstRepository.persist({ story }),
+        secondRepository.persist({ story: structuredClone(story) }),
+      ]);
+
+      expect(results).toEqual([
+        { ok: true, story },
+        { ok: true, story },
+      ]);
+      await expect(
+        pool.query<{ count: string }>(
+          "SELECT count(*) AS count FROM storyrail.stories WHERE story_id = $1",
+          [story.id],
+        ),
+      ).resolves.toMatchObject({ rows: [{ count: "1" }] });
+    });
+
+    it("linearizes divergent same-ID Story writes to one success and one conflict", async () => {
+      const repository = createPostgresStoryRepository({ pool });
+      const first = makeStory("race-divergent");
+      const second = { ...first, title: "A divergent Story" };
+
+      const results = await Promise.all([
+        repository.persist({ story: first }),
+        repository.persist({ story: second }),
+      ]);
+      const successes = results.filter((result) => result.ok);
+      const conflicts = results.filter((result) => !result.ok);
+
+      expect(successes).toHaveLength(1);
+      expect(conflicts).toEqual([
+        {
+          ok: false,
+          error: {
+            code: "STORY_ID_CONFLICT",
+            message: "A different Story with the same Story ID already exists.",
+            storyId: first.id,
+          },
+        },
+      ]);
+      expect([first, second]).toContainEqual(successes[0]?.ok && successes[0].story);
+      await expect(
+        repository.persist({ story: successes[0]?.ok ? successes[0].story : first }),
+      ).resolves.toEqual(successes[0]);
     });
 
     it("linearizes concurrent exact Source replays to one stored row", async () => {
@@ -912,7 +1193,8 @@ describePostgres("PostgreSQL Source-evidence repositories", () => {
           error: { code: expect.stringMatching(/^(DUPLICATE_SOURCE|SOURCE_ID_CONFLICT)$/) },
         });
       } finally {
-        await pool.query(migrationSql);
+        await pool.query(sourceMigrationSql);
+        await pool.query(storyMigrationSql);
       }
     });
 
@@ -924,12 +1206,50 @@ describePostgres("PostgreSQL Source-evidence repositories", () => {
       await expect(repositories.sources.findById(sourceId("closed-pool"))).rejects.toBeTruthy();
     });
 
+    it("does not translate Story query failures into expected persistence results", async () => {
+      const repository = createPostgresStoryRepository({ pool });
+      const story = makeStory("query-failure");
+      await pool.query("DROP TABLE storyrail.stories");
+
+      try {
+        const operation = repository.persist({ story });
+        await expect(operation).rejects.toBeTruthy();
+        await expect(operation).rejects.not.toMatchObject({
+          ok: false,
+          error: { code: "STORY_ID_CONFLICT" },
+        });
+      } finally {
+        await pool.query(storyMigrationSql);
+      }
+    });
+
+    it("does not translate Story connection failures into expected persistence results", async () => {
+      const closedPool = new Pool({ connectionString: databaseUrl });
+      await closedPool.end();
+      const repository = createPostgresStoryRepository({ pool: closedPool });
+
+      await expect(repository.persist({ story: makeStory("closed-pool") })).rejects.toBeTruthy();
+    });
+
     it("does not open or close the injected Pool while constructing repositories", async () => {
       const connectionCountBefore = pool.totalCount;
       const repositories = createPostgresSourceRepositories({ pool });
 
       expect(pool.totalCount).toBe(connectionCountBefore);
       await expect(repositories.sources.findById(sourceId("factory-boundary"))).resolves.toBeNull();
+      await expect(pool.query("SELECT 1 AS healthy")).resolves.toMatchObject({
+        rows: [{ healthy: 1 }],
+      });
+    });
+
+    it("does not connect or close the injected Pool while constructing the Story repository", async () => {
+      const connectionCountBefore = pool.totalCount;
+      const repository = createPostgresStoryRepository({ pool });
+
+      expect(pool.totalCount).toBe(connectionCountBefore);
+      await expect(
+        repository.persist({ story: makeStory("factory-boundary") }),
+      ).resolves.toMatchObject({ ok: true });
       await expect(pool.query("SELECT 1 AS healthy")).resolves.toMatchObject({
         rows: [{ healthy: 1 }],
       });

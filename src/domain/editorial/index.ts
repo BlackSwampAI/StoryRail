@@ -3,5 +3,7 @@ export * from "./source-extraction";
 export * from "./source-extraction-types";
 export * from "./source-types";
 export * from "./source-url";
+export * from "./story-creation";
+export * from "./story-creation-types";
 export * from "./state-machine";
 export * from "./types";
