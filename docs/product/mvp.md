@@ -18,11 +18,11 @@ The first vertical slice uses Marvel Cinematic Universe (MCU) coverage to exerci
 
 ## In scope
 
-The slice preserves source provenance, keeps the source, story, and article separate, records assignment and agent-run inputs and outputs, links material claims to supporting sources, preserves article revisions, enforces explicit editorial states, and requires an operator-controlled decision before export. URL intake retains the exact submission, uses a conservative canonical URL to surface an existing Source identity for exact duplicates, and does not infer that different URLs belong to the same Story. Plain HTTP extraction is the initial path; failures remain visible for human resolution.
+The slice preserves source provenance, keeps the source, story, and article separate, records assignment and agent-run inputs and outputs, links material claims to supporting sources, preserves article revisions, enforces explicit editorial states, and requires an operator-controlled decision before export. URL intake retains the exact submission, uses a conservative canonical URL to surface an existing Source identity for exact duplicates, and does not infer that different URLs belong to the same Story. Plain HTTP extraction is the initial path; successful and failed extraction attempts remain separately inspectable, and each retry preserves rather than overwrites the earlier outcome.
 
 ## Acceptance criteria
 
-- An operator can enter a URL and inspect the preserved source and extraction result.
+- An operator can enter a URL and inspect the preserved Source and each attributable extraction outcome, including failed attempts and later retries.
 - The operator can create a distinct story and attach the source to it.
 - The system can produce a structured assignment for the single MCU writer role.
 - Research notes distinguish sourced facts, unresolved claims, and original synthesis.
