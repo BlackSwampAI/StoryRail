@@ -18,7 +18,7 @@ The first vertical slice uses Marvel Cinematic Universe (MCU) coverage to exerci
 
 ## In scope
 
-The slice preserves source provenance, keeps the source, story, and article separate, records assignment and agent-run inputs and outputs, links material claims to supporting sources, preserves article revisions, enforces explicit editorial states, and requires an operator-controlled decision before export. URL intake retains the exact submission, uses a conservative canonical URL to surface an existing Source identity for exact duplicates, and does not infer that different URLs belong to the same Story. Plain HTTP extraction is the initial path; successful and failed extraction attempts remain separately inspectable, and each retry preserves rather than overwrites the earlier outcome.
+The slice preserves source provenance, keeps the source, story, and article separate, records assignment and agent-run inputs and outputs, links material claims to supporting sources, preserves article revisions, enforces explicit editorial states, and requires an operator-controlled decision before export. URL intake retains the exact submission, uses a conservative canonical URL to surface an existing Source identity for exact duplicates, and does not infer that different URLs belong to the same Story. Firecrawl v2 direct REST is the first replaceable HTTP extraction adapter. Extraction still produces immutable success or failure facts through the existing provider-neutral domain boundary, and each retry preserves rather than overwrites the earlier outcome. Executable orchestration and persistence remain future work.
 
 ## Acceptance criteria
 
