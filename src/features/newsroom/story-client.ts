@@ -1,7 +1,9 @@
 import {
   SOURCE_EXTRACTION_FAILURE_CODES,
+  PREPARATION_FAILURE_CODES,
   type EditorialActor,
   type SourceExtraction,
+  type SourceEvidencePreparation,
   type Story,
   type StorySourceAttachment,
   type UrlSource,
@@ -48,6 +50,7 @@ const STORY_STATES = new Set([
 ]);
 const AGENT_ROLES = new Set(["assignment_editor", "writer", "fact_checker", "editor_in_chief"]);
 const EXTRACTION_FAILURE_CODES = new Set<string>(SOURCE_EXTRACTION_FAILURE_CODES);
+const PREPARATION_FAILURE_CODE_SET = new Set<string>(PREPARATION_FAILURE_CODES);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -135,6 +138,68 @@ function isExtraction(value: unknown): value is SourceExtraction {
   );
 }
 
+function isPreparation(value: unknown): value is SourceEvidencePreparation {
+  if (
+    !isRecord(value) ||
+    !isString(value.id) ||
+    !isString(value.sourceId) ||
+    !isString(value.extractionId) ||
+    !isRecord(value.model) ||
+    !hasExactKeys(value.model, ["provider", "model"]) ||
+    !isString(value.model.provider) ||
+    !isString(value.model.model) ||
+    !isRecord(value.preparer) ||
+    !hasExactKeys(value.preparer, ["key", "version"]) ||
+    !isString(value.preparer.key) ||
+    !isString(value.preparer.version) ||
+    !isActor(value.requestedBy) ||
+    !isString(value.startedAt) ||
+    !isString(value.completedAt)
+  )
+    return false;
+  const common = [
+    "id",
+    "sourceId",
+    "extractionId",
+    "model",
+    "preparer",
+    "requestedBy",
+    "startedAt",
+    "completedAt",
+    "outcome",
+  ];
+  if (value.outcome === "succeeded") {
+    return (
+      hasExactKeys(value, [...common, "document"]) &&
+      isRecord(value.document) &&
+      hasExactKeys(value.document, [
+        "format",
+        "content",
+        "title",
+        "byline",
+        "publishedAt",
+        "language",
+      ]) &&
+      value.document.format === "markdown" &&
+      isString(value.document.content) &&
+      value.document.content.trim().length > 0 &&
+      isStringOrNull(value.document.title) &&
+      isStringOrNull(value.document.byline) &&
+      isStringOrNull(value.document.publishedAt) &&
+      isStringOrNull(value.document.language)
+    );
+  }
+  return (
+    value.outcome === "failed" &&
+    hasExactKeys(value, [...common, "failure"]) &&
+    isRecord(value.failure) &&
+    hasExactKeys(value.failure, ["code", "retryable"]) &&
+    isString(value.failure.code) &&
+    PREPARATION_FAILURE_CODE_SET.has(value.failure.code) &&
+    typeof value.failure.retryable === "boolean"
+  );
+}
+
 function isStory(value: unknown): value is Story {
   return (
     isRecord(value) &&
@@ -174,26 +239,38 @@ function isAttachment(value: unknown): value is StorySourceAttachment {
 }
 
 function isInspection(value: unknown): value is StoryInspection {
-  if (!isRecord(value) || !isStory(value.story) || !Array.isArray(value.sources)) {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ["story", "sources"]) ||
+    !isStory(value.story) ||
+    !Array.isArray(value.sources)
+  ) {
     return false;
   }
   const story = value.story;
   return value.sources.every((item) => {
     if (
       !isRecord(item) ||
-      !hasExactKeys(item, ["attachment", "source", "extractions"]) ||
+      !hasExactKeys(item, ["attachment", "source", "extractions", "preparations"]) ||
       !isAttachment(item.attachment) ||
       !isSource(item.source) ||
       !Array.isArray(item.extractions) ||
-      !item.extractions.every(isExtraction)
+      !item.extractions.every(isExtraction) ||
+      !Array.isArray(item.preparations) ||
+      !item.preparations.every(isPreparation)
     ) {
       return false;
     }
     const sourceId = item.source.id;
+    const extractionIds = new Set(item.extractions.map((extraction) => extraction.id));
     return (
       item.attachment.storyId === story.id &&
       item.attachment.sourceId === sourceId &&
-      item.extractions.every((extraction) => extraction.sourceId === sourceId)
+      item.extractions.every((extraction) => extraction.sourceId === sourceId) &&
+      item.preparations.every(
+        (preparation) =>
+          preparation.sourceId === sourceId && extractionIds.has(preparation.extractionId),
+      )
     );
   });
 }

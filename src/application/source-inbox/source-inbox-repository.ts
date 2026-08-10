@@ -1,8 +1,9 @@
-import type { SourceExtraction, UrlSource } from "@/domain/editorial";
+import type { SourceEvidencePreparation, SourceExtraction, UrlSource } from "@/domain/editorial";
 
 export interface SourceInboxItem {
   readonly source: UrlSource;
   readonly extractions: readonly SourceExtraction[];
+  readonly preparations: readonly SourceEvidencePreparation[];
 }
 
 export interface SourceInboxRepository {

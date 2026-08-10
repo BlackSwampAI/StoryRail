@@ -3,12 +3,15 @@ import { beforeEach, describe, expect, expectTypeOf, it } from "vitest";
 import {
   agentRunId,
   operatorId,
+  sourceEvidencePreparationId,
   sourceExtractionId,
   sourceId,
   storyId,
   type FailedSourceExtraction,
   type SourceId,
+  type SourceEvidencePreparation,
   type SourceExtraction,
+  type SuccessfulSourceEvidencePreparation,
   type SuccessfulSourceExtraction,
   type Story,
   type StoryId,
@@ -28,6 +31,7 @@ export interface StoryInspectionRepositoryContractHarness {
   readonly addSource: (source: UrlSource) => void | Promise<void>;
   readonly addAttachment: (attachment: StorySourceAttachment) => void | Promise<void>;
   readonly addExtraction: (extraction: SourceExtraction) => void | Promise<void>;
+  readonly addPreparation: (preparation: SourceEvidencePreparation) => void | Promise<void>;
 }
 
 function makeStory(suffix: string): Story {
@@ -116,6 +120,32 @@ function makeFailedExtraction(source: UrlSource, suffix: string): FailedSourceEx
   };
 }
 
+function makePreparation(
+  source: UrlSource,
+  extraction: SuccessfulSourceExtraction,
+  suffix: string,
+): SuccessfulSourceEvidencePreparation {
+  return {
+    id: sourceEvidencePreparationId(`preparation-inspection-contract-${suffix}`),
+    sourceId: source.id,
+    extractionId: extraction.id,
+    model: { provider: "openrouter", model: `operator/model-${suffix}` },
+    preparer: { key: "storyrail_evidence_preparer", version: "1" },
+    requestedBy: source.submittedBy,
+    startedAt: `opaque-preparation-started-${suffix}`,
+    completedAt: `opaque-preparation-completed-${suffix}`,
+    outcome: "succeeded",
+    document: {
+      format: "markdown",
+      content: `# Prepared ${suffix}`,
+      title: null,
+      byline: null,
+      publishedAt: null,
+      language: null,
+    },
+  };
+}
+
 export function describeStoryInspectionRepositoryContract(
   createHarness: () =>
     StoryInspectionRepositoryContractHarness | Promise<StoryInspectionRepositoryContractHarness>,
@@ -123,6 +153,7 @@ export function describeStoryInspectionRepositoryContract(
   let repository: StoryInspectionRepository;
   let addStory: StoryInspectionRepositoryContractHarness["addStory"];
   let addSource: StoryInspectionRepositoryContractHarness["addSource"];
+  let addPreparation: StoryInspectionRepositoryContractHarness["addPreparation"];
   let addAttachment: StoryInspectionRepositoryContractHarness["addAttachment"];
   let addExtraction: StoryInspectionRepositoryContractHarness["addExtraction"];
 
@@ -131,6 +162,7 @@ export function describeStoryInspectionRepositoryContract(
     repository = await harness.createRepository();
     addStory = harness.addStory;
     addSource = harness.addSource;
+    addPreparation = harness.addPreparation;
     addAttachment = harness.addAttachment;
     addExtraction = harness.addExtraction;
   });
@@ -165,7 +197,7 @@ export function describeStoryInspectionRepositoryContract(
 
       await expect(repository.inspect(story.id)).resolves.toEqual({
         ok: true,
-        inspection: { story, sources: [{ attachment, source, extractions: [] }] },
+        inspection: { story, sources: [{ attachment, source, extractions: [], preparations: [] }] },
       });
     });
 
@@ -191,7 +223,12 @@ export function describeStoryInspectionRepositoryContract(
       expect(result.inspection.sources).toEqual(
         [...sources]
           .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0))
-          .map((source) => ({ attachment: attachments.get(source.id), source, extractions: [] })),
+          .map((source) => ({
+            attachment: attachments.get(source.id),
+            source,
+            extractions: [],
+            preparations: [],
+          })),
       );
       expect(new Set(result.inspection.sources.map(({ source }) => source.id)).size).toBe(3);
     });
@@ -220,8 +257,8 @@ export function describeStoryInspectionRepositoryContract(
       }
 
       expect(result.inspection.sources).toEqual([
-        { attachment: firstAttachment, source: firstByIdentity, extractions: [] },
-        { attachment: lastAttachment, source: lastByIdentity, extractions: [] },
+        { attachment: firstAttachment, source: firstByIdentity, extractions: [], preparations: [] },
+        { attachment: lastAttachment, source: lastByIdentity, extractions: [], preparations: [] },
       ]);
     });
 
@@ -245,8 +282,13 @@ export function describeStoryInspectionRepositoryContract(
       }
 
       expect(result.inspection.sources).toEqual([
-        { attachment: agentAttachment, source: agentSource, extractions: [] },
-        { attachment: operatorAttachment, source: operatorSource, extractions: [] },
+        { attachment: agentAttachment, source: agentSource, extractions: [], preparations: [] },
+        {
+          attachment: operatorAttachment,
+          source: operatorSource,
+          extractions: [],
+          preparations: [],
+        },
       ]);
     });
 
@@ -264,7 +306,40 @@ export function describeStoryInspectionRepositoryContract(
         ok: true,
         inspection: {
           story,
-          sources: [{ attachment, source, extractions: [successful, failed] }],
+          sources: [{ attachment, source, extractions: [successful, failed], preparations: [] }],
+        },
+      });
+    });
+
+    it("returns prepared evidence after attachment without duplicating raw extraction history", async () => {
+      const story = makeStory("prepared-history");
+      const source = makeSource("prepared-history");
+      const extraction = makeSuccessfulExtraction(source, "prepared-history");
+      const first = makePreparation(source, extraction, "first");
+      const { document: _discardedDocument, ...secondCommon } = makePreparation(
+        source,
+        extraction,
+        "second",
+      );
+      void _discardedDocument;
+      const second: SourceEvidencePreparation = {
+        ...secondCommon,
+        outcome: "failed",
+        failure: { code: "MODEL_OUTPUT_INVALID", retryable: false },
+      };
+      await addStory(story);
+      const attachment = await addAttachedSource(story, source);
+      await addExtraction(extraction);
+      await addPreparation(first);
+      await addPreparation(second);
+
+      await expect(repository.inspect(story.id)).resolves.toEqual({
+        ok: true,
+        inspection: {
+          story,
+          sources: [
+            { attachment, source, extractions: [extraction], preparations: [first, second] },
+          ],
         },
       });
     });
@@ -295,7 +370,10 @@ export function describeStoryInspectionRepositoryContract(
 
       await expect(repository.inspect(story.id)).resolves.toEqual({
         ok: true,
-        inspection: { story, sources: [{ attachment, source, extractions: [extraction] }] },
+        inspection: {
+          story,
+          sources: [{ attachment, source, extractions: [extraction], preparations: [] }],
+        },
       });
     });
 
@@ -321,8 +399,13 @@ export function describeStoryInspectionRepositoryContract(
       if (!result.ok) throw new Error("The multi-Source extraction setup must succeed.");
 
       expect(result.inspection.sources).toEqual([
-        { attachment: attachmentA, source: sourceA, extractions: [extractionA1, extractionA2] },
-        { attachment: attachmentZ, source: sourceZ, extractions: [extractionZ] },
+        {
+          attachment: attachmentA,
+          source: sourceA,
+          extractions: [extractionA1, extractionA2],
+          preparations: [],
+        },
+        { attachment: attachmentZ, source: sourceZ, extractions: [extractionZ], preparations: [] },
       ]);
       expect(result.inspection.sources).toHaveLength(2);
     });
@@ -381,6 +464,7 @@ export function describeStoryInspectionRepositoryContract(
             attachment: makeAttachment(makeStory("isolation"), makeSource("isolation")),
             source: makeSource("isolation"),
             extractions: [makeSuccessfulExtraction(makeSource("isolation"), "isolation")],
+            preparations: [],
           },
         ],
       });
@@ -407,6 +491,9 @@ export function describeStoryInspectionRepositoryContract(
       expectTypeOf<StoryInspectionSource["extractions"]>().toEqualTypeOf<
         readonly SourceExtraction[]
       >();
+      expectTypeOf<StoryInspectionSource["preparations"]>().toEqualTypeOf<
+        readonly SourceEvidencePreparation[]
+      >();
       expectTypeOf<InspectStoryResult>().toMatchTypeOf<
         | { readonly ok: true; readonly inspection: { readonly story: Story } }
         | { readonly ok: false; readonly error: { readonly storyId: StoryId } }
@@ -420,6 +507,7 @@ export function createReferenceStoryInspectionRepositoryHarness(): StoryInspecti
   const sources = new Map<SourceId, UrlSource>();
   const attachments = new Map<StoryId, Map<SourceId, StorySourceAttachment>>();
   const extractions = new Map<SourceId, SourceExtraction[]>();
+  const preparations = new Map<SourceId, SourceEvidencePreparation[]>();
 
   return {
     createRepository() {
@@ -447,7 +535,12 @@ export function createReferenceStoryInspectionRepositoryHarness(): StoryInspecti
               if (!source) {
                 throw new Error("Reference Story inspection contains an impossible relationship.");
               }
-              return { attachment, source, extractions: extractions.get(source.id) ?? [] };
+              return {
+                attachment,
+                source,
+                extractions: extractions.get(source.id) ?? [],
+                preparations: preparations.get(source.id) ?? [],
+              };
             });
 
           return {
@@ -472,6 +565,11 @@ export function createReferenceStoryInspectionRepositoryHarness(): StoryInspecti
       const sourceExtractions = extractions.get(extraction.sourceId) ?? [];
       sourceExtractions.push(structuredClone(extraction));
       extractions.set(extraction.sourceId, sourceExtractions);
+    },
+    addPreparation(preparation) {
+      const sourcePreparations = preparations.get(preparation.sourceId) ?? [];
+      sourcePreparations.push(structuredClone(preparation));
+      preparations.set(preparation.sourceId, sourcePreparations);
     },
   };
 }

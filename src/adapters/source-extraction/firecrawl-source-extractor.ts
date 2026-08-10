@@ -58,6 +58,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+const CHALLENGE_PAGE_MARKERS = [
+  /recaptcha\s+requires\s+verification/i,
+  /protected\s+by\s+(?:\*\*)?recaptcha/i,
+  /verify\s+you(?:'|’)re\s+human/i,
+  /verify\s+you\s+are\s+human/i,
+  /checking\s+your\s+browser/i,
+  /challenge-platform/i,
+] as const;
+
+function isObviousChallengePage(markdown: string): boolean {
+  return CHALLENGE_PAGE_MARKERS.some((marker) => marker.test(markdown));
+}
+
 function mapSuccessfulBody(body: unknown): SourceExtractorResult {
   if (!isRecord(body) || body.success !== true || !isRecord(body.data)) {
     return failure("EXTRACTION_FAILED", false);
@@ -67,6 +80,10 @@ function mapSuccessfulBody(body: unknown): SourceExtractorResult {
 
   if (typeof markdown !== "string" || markdown.trim().length === 0) {
     return failure("EXTRACTION_FAILED", false);
+  }
+
+  if (isObviousChallengePage(markdown)) {
+    return failure("RESPONSE_REJECTED", false);
   }
 
   const metadata = isRecord(body.data.metadata) ? body.data.metadata : null;
@@ -112,7 +129,7 @@ export function createFirecrawlSourceExtractor(
             maxAge: 0,
             storeInCache: false,
             skipTlsVerification: false,
-            proxy: "basic",
+            proxy: "auto",
             removeBase64Images: true,
             blockAds: true,
           }),

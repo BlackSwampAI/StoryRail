@@ -7,6 +7,7 @@ import type { StoryListItem } from "@/application/story-listing";
 import {
   STORY_STATES,
   type EditorialActor,
+  type SourceEvidencePreparation,
   type SourceExtraction,
   type StoryId,
   type StoryState,
@@ -90,7 +91,7 @@ function PersistedExtractionAttempt({
               <dd>{extraction.document.language ?? "Unavailable"}</dd>
             </div>
           </dl>
-          <h6>Actual persisted Markdown</h6>
+          <h6>RAW EXTRACTION · actual persisted Markdown</h6>
           <pre className={styles.extractedContent}>{extraction.document.content}</pre>
         </>
       ) : (
@@ -144,6 +145,94 @@ function PersistedExtractionAttempt({
   );
 }
 
+function PersistedPreparationAttempt({
+  preparation,
+  attemptNumber,
+}: Readonly<{ preparation: SourceEvidencePreparation; attemptNumber: number }>) {
+  return (
+    <article className={styles.persistedExtraction}>
+      <header className={styles.extractionHeader}>
+        <h5>Prepared evidence attempt {attemptNumber}</h5>
+        <span>{preparation.outcome === "succeeded" ? "Succeeded" : "Failed"}</span>
+      </header>
+      {preparation.outcome === "succeeded" ? (
+        <>
+          <dl className={styles.receiptFacts}>
+            <div>
+              <dt>Prepared title</dt>
+              <dd>{preparation.document.title ?? "Unavailable"}</dd>
+            </div>
+            <div>
+              <dt>Byline</dt>
+              <dd>{preparation.document.byline ?? "Unavailable"}</dd>
+            </div>
+            <div>
+              <dt>Publication timestamp</dt>
+              <dd>{preparation.document.publishedAt ?? "Unavailable"}</dd>
+            </div>
+            <div>
+              <dt>Language</dt>
+              <dd>{preparation.document.language ?? "Unavailable"}</dd>
+            </div>
+          </dl>
+          <h6>Clean Markdown</h6>
+          <pre className={styles.extractedContent}>{preparation.document.content}</pre>
+        </>
+      ) : (
+        <div className={styles.extractionFailure}>
+          <h6>Evidence preparation failed</h6>
+          <p>
+            {preparation.failure.code} · retryable: {preparation.failure.retryable ? "yes" : "no"}
+          </p>
+        </div>
+      )}
+      <details className={styles.extractionAudit}>
+        <summary>Technical preparation record</summary>
+        <dl className={styles.receiptFacts}>
+          <div>
+            <dt>Preparation ID</dt>
+            <dd>{preparation.id}</dd>
+          </div>
+          <div>
+            <dt>Source extraction ID</dt>
+            <dd>{preparation.extractionId}</dd>
+          </div>
+          <div>
+            <dt>Provider</dt>
+            <dd>{preparation.model.provider}</dd>
+          </div>
+          <div>
+            <dt>Model</dt>
+            <dd>{preparation.model.model}</dd>
+          </div>
+          <div>
+            <dt>Preparer</dt>
+            <dd>
+              {preparation.preparer.key} / {preparation.preparer.version}
+            </dd>
+          </div>
+          <div>
+            <dt>Requested by</dt>
+            <dd>{actorLabel(preparation.requestedBy)}</dd>
+          </div>
+          <div>
+            <dt>Started</dt>
+            <dd>{preparation.startedAt}</dd>
+          </div>
+          <div>
+            <dt>Completed</dt>
+            <dd>{preparation.completedAt}</dd>
+          </div>
+          <div>
+            <dt>Outcome</dt>
+            <dd>{preparation.outcome}</dd>
+          </div>
+        </dl>
+      </details>
+    </article>
+  );
+}
+
 function PersistedStoryWorkspace({ inspection }: Readonly<{ inspection: StoryInspection }>) {
   const { story, sources } = inspection;
   return (
@@ -179,7 +268,7 @@ function PersistedStoryWorkspace({ inspection }: Readonly<{ inspection: StoryIns
       <div className={styles.persistedSources}>
         <p className={styles.sectionNumber}>01</p>
         <h3>Attached Sources</h3>
-        {sources.map(({ attachment, source, extractions }) => {
+        {sources.map(({ attachment, source, extractions, preparations }) => {
           const canonicalHref = safeUrl(source.canonicalUrl);
           return (
             <section className={styles.persistedSource} key={`${story.id}:${source.id}`}>
@@ -227,7 +316,21 @@ function PersistedStoryWorkspace({ inspection }: Readonly<{ inspection: StoryIns
                 </div>
               </dl>
               <div className={styles.persistedEvidence}>
-                <h5>Evidence / extraction history</h5>
+                <h5>Prepared evidence</h5>
+                {preparations.length === 0 ? (
+                  <p className={styles.noExtraction}>
+                    No prepared evidence is recorded for this Source.
+                  </p>
+                ) : (
+                  preparations.map((preparation, index) => (
+                    <PersistedPreparationAttempt
+                      preparation={preparation}
+                      attemptNumber={index + 1}
+                      key={preparation.id}
+                    />
+                  ))
+                )}
+                <h5>Raw evidence</h5>
                 {extractions.length === 0 ? (
                   <p className={styles.noExtraction}>No extraction is recorded for this Source.</p>
                 ) : (

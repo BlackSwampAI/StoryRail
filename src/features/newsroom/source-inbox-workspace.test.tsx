@@ -3,11 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   operatorId,
+  sourceEvidencePreparationId,
   sourceExtractionId,
   sourceId,
   storyId,
   type CanonicalSourceUrl,
   type SourceExtraction,
+  type SourceEvidencePreparation,
   type Story,
   type StorySourceAttachment,
   type UrlSource,
@@ -43,7 +45,26 @@ const extraction = {
     language: null,
   },
 } satisfies SourceExtraction;
-const item = { source, extractions: [extraction] } as const;
+const item = { source, extractions: [extraction], preparations: [] } as const;
+const preparation = {
+  id: sourceEvidencePreparationId("preparation-25"),
+  sourceId: source.id,
+  extractionId: extraction.id,
+  model: { provider: "openrouter", model: "operator/model" },
+  preparer: { key: "storyrail_evidence_preparer", version: "1" },
+  requestedBy: actor,
+  startedAt: "preparation-started",
+  completedAt: "preparation-completed",
+  outcome: "succeeded",
+  document: {
+    format: "markdown",
+    content: "# Prepared evidence",
+    title: "Prepared title",
+    byline: null,
+    publishedAt: null,
+    language: "en",
+  },
+} satisfies SourceEvidencePreparation;
 const story = {
   id: storyId("story-24"),
   title: "Existing Story",
@@ -79,6 +100,10 @@ function clients() {
         },
       }),
     ),
+    prepareEvidence: vi.fn<SourceInboxClient["prepareEvidence"]>(async () => ({
+      kind: "completed",
+      value: preparation,
+    })),
   };
   const stories: StoryClient = {
     listStories: vi.fn<StoryClient["listStories"]>(async () => ({
@@ -95,7 +120,10 @@ function clients() {
     })),
     inspectStory: vi.fn<StoryClient["inspectStory"]>(async () => ({
       kind: "completed",
-      value: { story, sources: [{ attachment, source, extractions: [extraction] }] },
+      value: {
+        story,
+        sources: [{ attachment, source, extractions: [extraction], preparations: [] }],
+      },
     })),
   };
   return { inbox, stories };
@@ -122,14 +150,78 @@ function renderInbox(
 }
 
 describe("SourceInboxWorkspace", () => {
-  it("does not show an empty state before loading and renders all three choices with persisted Markdown", async () => {
+  it("shows preparation and triage controls before raw Markdown is expanded", async () => {
     const { inbox, stories } = clients();
     renderInbox(inbox, stories);
     expect(screen.getByText("Loading pending Sources…")).toBeVisible();
-    expect(await screen.findByText("# Persisted evidence")).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Prepare evidence" })).toBeVisible();
+    expect(screen.getByText("# Persisted evidence")).not.toBeVisible();
     expect(screen.getByRole("button", { name: "Create new Story" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Attach to existing Story" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Skip" })).toBeVisible();
+
+    fireEvent.click(screen.getByText("Raw extraction history"));
+    expect(screen.getByText("# Persisted evidence")).toBeVisible();
+  });
+
+  it("prepares the selected successful extraction while retaining raw evidence and pending triage", async () => {
+    const { inbox, stories } = clients();
+    renderInbox(inbox, stories);
+    fireEvent.click(await screen.findByRole("button", { name: "Prepare evidence" }));
+    expect(await screen.findByText("Prepared evidence recorded")).toBeVisible();
+    expect(inbox.prepareEvidence).toHaveBeenCalledWith(source.id, extraction.id);
+    expect(screen.getByText("# Prepared evidence")).toBeVisible();
+    expect(screen.getByText("# Persisted evidence")).not.toBeVisible();
+    expect(screen.getByRole("button", { name: "Prepare again" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Create new Story" })).toBeVisible();
+
+    fireEvent.click(screen.getByText("Raw extraction history"));
+    expect(screen.getByText("# Persisted evidence")).toBeVisible();
+  });
+
+  it("prioritizes existing prepared evidence and prepares the same extraction again", async () => {
+    const { inbox, stories } = clients();
+    const preparedInbox: SourceInboxClient = {
+      ...inbox,
+      listPendingSources: vi.fn<SourceInboxClient["listPendingSources"]>(async () => ({
+        kind: "completed",
+        value: [{ ...item, preparations: [preparation] }],
+      })),
+    };
+    renderInbox(preparedInbox, stories);
+
+    expect(await screen.findByText("# Prepared evidence")).toBeVisible();
+    expect(screen.getByText("# Persisted evidence")).not.toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Prepare again" }));
+    expect(preparedInbox.prepareEvidence).toHaveBeenCalledWith(source.id, extraction.id);
+  });
+
+  it("does not offer preparation for a failed raw extraction", async () => {
+    const { inbox, stories } = clients();
+    const failedExtraction: SourceExtraction = {
+      id: sourceExtractionId("failed-extraction-25"),
+      sourceId: source.id,
+      extractor: { key: "controlled", version: "1" },
+      requestedBy: actor,
+      startedAt: "failed-start",
+      completedAt: "failed-complete",
+      outcome: "failed",
+      failure: { code: "RETRIEVAL_FAILED", retryable: true },
+    };
+    const failedInbox: SourceInboxClient = {
+      ...inbox,
+      listPendingSources: vi.fn<SourceInboxClient["listPendingSources"]>(async () => ({
+        kind: "completed",
+        value: [{ source, extractions: [failedExtraction], preparations: [] }],
+      })),
+    };
+    renderInbox(failedInbox, stories);
+    expect(
+      await screen.findByText("No successful extraction is available to prepare."),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Prepare evidence" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("Raw extraction history"));
+    expect(screen.getByText("RETRIEVAL_FAILED · retryable: yes")).toBeVisible();
   });
 
   it("runs create, attach, triage, inspect in order and only then removes the Source", async () => {

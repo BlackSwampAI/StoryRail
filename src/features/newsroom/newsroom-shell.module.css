@@ -530,6 +530,19 @@
   cursor: pointer;
 }
 
+.rawExtractionHistory {
+  margin-top: 1.5rem;
+  border-top: 1px solid #29443a;
+  padding-top: 1.25rem;
+}
+
+.rawExtractionHistory > summary {
+  cursor: pointer;
+  color: #e8f0eb;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.1rem;
+}
+
 .storyCreation {
   border: 1px solid #41695a;
   border-radius: 0.9rem;

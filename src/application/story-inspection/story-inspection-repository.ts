@@ -1,5 +1,6 @@
 import type {
   SourceExtraction,
+  SourceEvidencePreparation,
   Story,
   StoryId,
   StorySourceAttachment,
@@ -10,6 +11,7 @@ export interface StoryInspectionSource {
   readonly attachment: StorySourceAttachment;
   readonly source: UrlSource;
   readonly extractions: readonly SourceExtraction[];
+  readonly preparations: readonly SourceEvidencePreparation[];
 }
 
 export interface StoryInspection {

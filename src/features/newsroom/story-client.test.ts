@@ -58,6 +58,25 @@ const FAILED_EXTRACTION = {
   outcome: "failed",
   failure: { code: "RETRIEVAL_FAILED", retryable: true },
 } as const;
+const PREPARATION = {
+  id: "preparation-success-0025",
+  sourceId: SOURCE.id,
+  extractionId: SUCCESSFUL_EXTRACTION.id,
+  model: { provider: "openrouter", model: "operator/model" },
+  preparer: { key: "storyrail_evidence_preparer", version: "1" },
+  requestedBy: { type: "operator", operatorId: "operator-0021" },
+  startedAt: "opaque-preparation-started",
+  completedAt: "opaque-preparation-completed",
+  outcome: "succeeded",
+  document: {
+    format: "markdown",
+    content: "# Exact prepared Markdown",
+    title: null,
+    byline: null,
+    publishedAt: "opaque-prepared-published",
+    language: null,
+  },
+} as const;
 const INSPECTION = {
   story: STORY,
   sources: [
@@ -65,6 +84,7 @@ const INSPECTION = {
       attachment: ATTACHMENT,
       source: SOURCE,
       extractions: [SUCCESSFUL_EXTRACTION, FAILED_EXTRACTION],
+      preparations: [PREPARATION],
     },
   ],
 };
@@ -179,6 +199,7 @@ describe("story-client", () => {
               document: { ...SUCCESSFUL_EXTRACTION.document, publishedAt: "opaque-published" },
             },
           ],
+          preparations: [],
         },
       ],
     };
@@ -205,7 +226,10 @@ describe("story-client", () => {
 
   it("parses zero extractions, exact Markdown, nullable metadata, and failed evidence", async () => {
     const inspections = [
-      { story: STORY, sources: [{ attachment: ATTACHMENT, source: SOURCE, extractions: [] }] },
+      {
+        story: STORY,
+        sources: [{ attachment: ATTACHMENT, source: SOURCE, extractions: [], preparations: [] }],
+      },
       INSPECTION,
     ];
     const fetch = vi
@@ -227,7 +251,7 @@ describe("story-client", () => {
 
   it.each([
     { attachment: ATTACHMENT, source: SOURCE },
-    { attachment: ATTACHMENT, source: SOURCE, extractions: {} },
+    { attachment: ATTACHMENT, source: SOURCE, extractions: {}, preparations: [] },
     {
       attachment: ATTACHMENT,
       source: SOURCE,
@@ -237,16 +261,19 @@ describe("story-client", () => {
           document: { ...SUCCESSFUL_EXTRACTION.document, content: 42 },
         },
       ],
+      preparations: [],
     },
     {
       attachment: ATTACHMENT,
       source: SOURCE,
       extractions: [{ ...FAILED_EXTRACTION, failure: { code: "INVENTED", retryable: true } }],
+      preparations: [],
     },
     {
       attachment: ATTACHMENT,
       source: SOURCE,
       extractions: [{ ...FAILED_EXTRACTION, sourceId: "another-source" }],
+      preparations: [],
     },
   ])("rejects malformed extraction entry %# without retry", async (sourceEntry) => {
     const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>

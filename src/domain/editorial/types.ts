@@ -6,6 +6,7 @@ type Identifier<Name extends string> = string & {
 
 export type SourceId = Identifier<"SourceId">;
 export type SourceExtractionId = Identifier<"SourceExtractionId">;
+export type SourceEvidencePreparationId = Identifier<"SourceEvidencePreparationId">;
 export type StoryId = Identifier<"StoryId">;
 export type ArticleId = Identifier<"ArticleId">;
 export type AgentRunId = Identifier<"AgentRunId">;
@@ -15,6 +16,8 @@ export type TransitionId = Identifier<"TransitionId">;
 export const sourceId = (value: string): SourceId => value as SourceId;
 export const sourceExtractionId = (value: string): SourceExtractionId =>
   value as SourceExtractionId;
+export const sourceEvidencePreparationId = (value: string): SourceEvidencePreparationId =>
+  value as SourceEvidencePreparationId;
 export const storyId = (value: string): StoryId => value as StoryId;
 export const articleId = (value: string): ArticleId => value as ArticleId;
 export const agentRunId = (value: string): AgentRunId => value as AgentRunId;

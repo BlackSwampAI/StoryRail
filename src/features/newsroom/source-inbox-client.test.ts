@@ -28,13 +28,35 @@ const extraction = {
     language: null,
   },
 } as const;
+const preparation = {
+  id: "preparation-25",
+  sourceId: source.id,
+  extractionId: extraction.id,
+  model: { provider: "openrouter", model: "operator/model" },
+  preparer: { key: "storyrail_evidence_preparer", version: "1" },
+  requestedBy: actor,
+  startedAt: "opaque-preparation-start",
+  completedAt: "opaque-preparation-complete",
+  outcome: "succeeded",
+  document: {
+    format: "markdown",
+    content: "# Prepared",
+    title: null,
+    byline: null,
+    publishedAt: null,
+    language: null,
+  },
+} as const;
 
 describe("sourceInboxClient", () => {
   it("performs the exact inbox GET and strictly restores extraction evidence", async () => {
     const fetch = vi.fn(
       async () =>
         new Response(
-          JSON.stringify({ ok: true, sources: [{ source, extractions: [extraction] }] }),
+          JSON.stringify({
+            ok: true,
+            sources: [{ source, extractions: [extraction], preparations: [] }],
+          }),
           {
             status: 200,
           },
@@ -45,7 +67,10 @@ describe("sourceInboxClient", () => {
       method: "GET",
       headers: { Accept: "application/json" },
     });
-    expect(result).toEqual({ kind: "completed", value: [{ source, extractions: [extraction] }] });
+    expect(result).toEqual({
+      kind: "completed",
+      value: [{ source, extractions: [extraction], preparations: [] }],
+    });
   });
 
   it("performs the exact triage PUT without browser provenance or timestamp", async () => {
@@ -74,13 +99,41 @@ describe("sourceInboxClient", () => {
     expect(result).toEqual({ kind: "completed", value: triageDecision });
   });
 
+  it("performs the exact preparation POST and strictly restores the durable attempt", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(
+      async () => new Response(JSON.stringify({ ok: true, preparation }), { status: 201 }),
+    );
+    const result = await createSourceInboxClient(fetch).prepareEvidence(source.id, extraction.id);
+    expect(fetch).toHaveBeenCalledWith("/api/sources/source%2Fa%20b/preparations", {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ extractionId: extraction.id }),
+    });
+    expect(result).toEqual({ kind: "completed", value: preparation });
+    expect(String(fetch.mock.calls[0]?.[1]?.body)).not.toMatch(/model|provider|prompt|actor/i);
+  });
+
+  it("fails closed for malformed preparation output without retry", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ ok: true, preparation: { ...preparation, providerBody: "unsafe" } }),
+          { status: 201 },
+        ),
+    );
+    await expect(
+      createSourceInboxClient(fetch).prepareEvidence(source.id, extraction.id),
+    ).resolves.toMatchObject({ kind: "unavailable" });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
   it("fails safely on malformed evidence and does not retry", async () => {
     const fetch = vi.fn(
       async () =>
         new Response(
           JSON.stringify({
             ok: true,
-            sources: [{ source, extractions: [{ ...extraction, extra: true }] }],
+            sources: [{ source, extractions: [{ ...extraction, extra: true }], preparations: [] }],
           }),
           { status: 200 },
         ),

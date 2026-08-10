@@ -5,7 +5,12 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import type { SourceInboxItem } from "@/application/source-inbox";
 import type { StoryInspection } from "@/application/story-inspection";
 import type { StoryListItem } from "@/application/story-listing";
-import type { Story } from "@/domain/editorial";
+import type {
+  EditorialActor,
+  SourceEvidencePreparation,
+  SourceExtractionId,
+  Story,
+} from "@/domain/editorial";
 
 import styles from "./newsroom-shell.module.css";
 import {
@@ -42,46 +47,172 @@ function extractedTitle(item: SourceInboxItem): string {
   return "";
 }
 
-function Evidence({ item }: Readonly<{ item: SourceInboxItem }>) {
+function actorLabel(actor: EditorialActor): string {
+  return actor.type === "operator"
+    ? `operator: ${actor.operatorId}`
+    : `agent: ${actor.role}, run ${actor.runId}`;
+}
+
+function PreparationRecord({
+  preparation,
+  attemptNumber,
+}: Readonly<{ preparation: SourceEvidencePreparation; attemptNumber: number }>) {
+  return (
+    <article className={styles.persistedExtraction}>
+      <header className={styles.extractionHeader}>
+        <h6>Prepared evidence attempt {attemptNumber}</h6>
+        <span>{preparation.outcome === "succeeded" ? "Succeeded" : "Failed"}</span>
+      </header>
+      {preparation.outcome === "succeeded" ? (
+        <>
+          <dl className={styles.receiptFacts}>
+            <div>
+              <dt>Prepared title</dt>
+              <dd>{preparation.document.title ?? "Unavailable"}</dd>
+            </div>
+            <div>
+              <dt>Byline</dt>
+              <dd>{preparation.document.byline ?? "Unavailable"}</dd>
+            </div>
+            <div>
+              <dt>Publication timestamp</dt>
+              <dd>{preparation.document.publishedAt ?? "Unavailable"}</dd>
+            </div>
+            <div>
+              <dt>Language</dt>
+              <dd>{preparation.document.language ?? "Unavailable"}</dd>
+            </div>
+          </dl>
+          <h6>Clean Markdown</h6>
+          <pre className={styles.extractedContent}>{preparation.document.content}</pre>
+        </>
+      ) : (
+        <div className={styles.extractionFailure}>
+          <h6>Evidence preparation failed</h6>
+          <p>
+            {preparation.failure.code} · retryable: {preparation.failure.retryable ? "yes" : "no"}
+          </p>
+        </div>
+      )}
+      <details className={styles.extractionAudit}>
+        <summary>Technical preparation record</summary>
+        <p>Preparation ID: {preparation.id}</p>
+        <p>Source extraction ID: {preparation.extractionId}</p>
+        <p>Provider: {preparation.model.provider}</p>
+        <p>Model: {preparation.model.model}</p>
+        <p>
+          Preparer: {preparation.preparer.key} / {preparation.preparer.version}
+        </p>
+        <p>Requested by: {actorLabel(preparation.requestedBy)}</p>
+        <p>Started: {preparation.startedAt}</p>
+        <p>Completed: {preparation.completedAt}</p>
+        <p>Outcome: {preparation.outcome}</p>
+      </details>
+    </article>
+  );
+}
+
+function Evidence({
+  item,
+  preparations,
+  preparingExtractionId,
+  preparationMessage,
+  onPrepare,
+}: Readonly<{
+  item: SourceInboxItem;
+  preparations: readonly SourceEvidencePreparation[];
+  preparingExtractionId: SourceExtractionId | null;
+  preparationMessage: string | null;
+  onPrepare: (extractionId: SourceExtractionId) => void;
+}>) {
+  const successfulExtractions = item.extractions.flatMap((extraction, index) =>
+    extraction.outcome === "succeeded" ? [{ extraction, attemptNumber: index + 1 }] : [],
+  );
+
   return (
     <div className={styles.persistedEvidence}>
-      <h4>Evidence / extraction history</h4>
-      {item.extractions.length === 0 ? (
-        <p className={styles.noExtraction}>No extraction is recorded for this Source.</p>
+      <h4>Prepare evidence</h4>
+      {successfulExtractions.length === 0 ? (
+        <p className={styles.noExtraction}>No successful extraction is available to prepare.</p>
       ) : (
-        item.extractions.map((extraction, index) => (
+        successfulExtractions.map(({ extraction, attemptNumber }) => (
           <article className={styles.persistedExtraction} key={extraction.id}>
             <header className={styles.extractionHeader}>
-              <h5>Extraction attempt {index + 1}</h5>
-              <span>{extraction.outcome === "succeeded" ? "Succeeded" : "Failed"}</span>
+              <h5>Extraction attempt {attemptNumber}</h5>
+              <span>Successful raw extraction</span>
             </header>
-            {extraction.outcome === "succeeded" ? (
-              <>
-                <p>{extraction.document.title ?? "Title unavailable"}</p>
-                <h6>Actual persisted Markdown</h6>
-                <pre className={styles.extractedContent}>{extraction.document.content}</pre>
-              </>
-            ) : (
-              <div className={styles.extractionFailure}>
-                <h6>Extraction failed</h6>
-                <p>
-                  {extraction.failure.code} · retryable:{" "}
-                  {extraction.failure.retryable ? "yes" : "no"}
-                </p>
-              </div>
-            )}
-            <details className={styles.extractionAudit}>
-              <summary>Technical extraction record</summary>
-              <p>Extraction ID: {extraction.id}</p>
-              <p>
-                Extractor: {extraction.extractor.key} / {extraction.extractor.version}
-              </p>
-              <p>Started: {extraction.startedAt}</p>
-              <p>Completed: {extraction.completedAt}</p>
-            </details>
+            <p>{extraction.document.title ?? "Title unavailable"}</p>
+            <p>Targets extraction ID: {extraction.id}</p>
+            <button
+              type="button"
+              disabled={preparingExtractionId !== null}
+              onClick={() => onPrepare(extraction.id)}
+            >
+              {preparingExtractionId === extraction.id
+                ? "Preparing evidence…"
+                : preparations.some((candidate) => candidate.extractionId === extraction.id)
+                  ? "Prepare again"
+                  : "Prepare evidence"}
+            </button>
           </article>
         ))
       )}
+      {preparationMessage ? (
+        <p className={styles.pendingStatus} role="status">
+          {preparationMessage}
+        </p>
+      ) : null}
+      <h4>Prepared evidence</h4>
+      {preparations.length === 0 ? (
+        <p className={styles.noExtraction}>No prepared evidence is recorded for this Source.</p>
+      ) : (
+        preparations.map((preparation, index) => (
+          <PreparationRecord
+            key={preparation.id}
+            preparation={preparation}
+            attemptNumber={index + 1}
+          />
+        ))
+      )}
+      <details className={styles.rawExtractionHistory}>
+        <summary>Raw extraction history</summary>
+        {item.extractions.length === 0 ? (
+          <p className={styles.noExtraction}>No extraction is recorded for this Source.</p>
+        ) : (
+          item.extractions.map((extraction, index) => (
+            <article className={styles.persistedExtraction} key={extraction.id}>
+              <header className={styles.extractionHeader}>
+                <h5>Extraction attempt {index + 1}</h5>
+                <span>{extraction.outcome === "succeeded" ? "Succeeded" : "Failed"}</span>
+              </header>
+              {extraction.outcome === "succeeded" ? (
+                <>
+                  <p>{extraction.document.title ?? "Title unavailable"}</p>
+                  <h6>RAW EXTRACTION · actual persisted Markdown</h6>
+                  <pre className={styles.extractedContent}>{extraction.document.content}</pre>
+                </>
+              ) : (
+                <div className={styles.extractionFailure}>
+                  <h6>Extraction failed</h6>
+                  <p>
+                    {extraction.failure.code} · retryable:{" "}
+                    {extraction.failure.retryable ? "yes" : "no"}
+                  </p>
+                </div>
+              )}
+              <details className={styles.extractionAudit}>
+                <summary>Technical extraction record</summary>
+                <p>Extraction ID: {extraction.id}</p>
+                <p>
+                  Extractor: {extraction.extractor.key} / {extraction.extractor.version}
+                </p>
+                <p>Started: {extraction.startedAt}</p>
+                <p>Completed: {extraction.completedAt}</p>
+              </details>
+            </article>
+          ))
+        )}
+      </details>
     </div>
   );
 }
@@ -129,7 +260,40 @@ function TriageItem({
   const [reason, setReason] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [progress, setProgress] = useState<Progress>({ kind: "idle" });
+  const [preparations, setPreparations] = useState(item.preparations);
+  const [preparingExtractionId, setPreparingExtractionId] = useState<SourceExtractionId | null>(
+    null,
+  );
+  const [preparationMessage, setPreparationMessage] = useState<string | null>(null);
   const pendingRef = useRef(false);
+  const preparationPendingRef = useRef(false);
+
+  async function prepare(extractionId: SourceExtractionId) {
+    if (preparationPendingRef.current) return;
+    preparationPendingRef.current = true;
+    setPreparingExtractionId(extractionId);
+    setPreparationMessage("Preparing evidence…");
+    try {
+      const result = await inboxRequests.prepareEvidence(item.source.id, extractionId);
+      if (result.kind === "completed") {
+        setPreparations((current) => [...current, result.value]);
+        setPreparationMessage(
+          result.value.outcome === "succeeded"
+            ? "Prepared evidence recorded"
+            : "Evidence preparation failed",
+        );
+      } else {
+        setPreparationMessage(
+          result.kind === "application-failure"
+            ? `Evidence preparation failed: ${result.error.message}`
+            : "Evidence preparation outcome is unavailable.",
+        );
+      }
+    } finally {
+      preparationPendingRef.current = false;
+      setPreparingExtractionId(null);
+    }
+  }
 
   function open(next: Exclude<Action, null>) {
     if (progress.kind === "partial" && progress.story !== undefined) return;
@@ -360,7 +524,13 @@ function TriageItem({
         <p>Source ID: {item.source.id}</p>
         <p>Received: {item.source.receivedAt}</p>
       </details>
-      <Evidence item={item} />
+      <Evidence
+        item={item}
+        preparations={preparations}
+        preparingExtractionId={preparingExtractionId}
+        preparationMessage={preparationMessage}
+        onPrepare={(extractionId) => void prepare(extractionId)}
+      />
       <div className={styles.workspaceSwitch} role="group" aria-label="Triage action">
         <button
           type="button"

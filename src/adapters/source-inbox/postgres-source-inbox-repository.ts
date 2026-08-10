@@ -2,6 +2,8 @@ import { isDeepStrictEqual } from "node:util";
 
 import type { Pool, QueryResultRow } from "pg";
 
+import { decodePostgresSourceEvidencePreparation } from "@/adapters/source-evidence-preparation-persistence";
+import { decodePostgresSourceExtraction } from "@/adapters/source-persistence/postgres-source-extraction-decoder";
 import type { SourceInboxItem, SourceInboxRepository } from "@/application/source-inbox";
 import {
   AGENT_ROLES,
@@ -10,21 +12,18 @@ import {
   type CanonicalSourceUrl,
   type EditorialActor,
   type OperatorId,
+  type SourceEvidencePreparation,
   type SourceExtraction,
   type SourceId,
   type UrlSource,
 } from "@/domain/editorial";
-import { decodePostgresSourceExtraction } from "@/adapters/source-persistence/postgres-source-extraction-decoder";
 
 interface SourceInboxRow extends QueryResultRow {
   readonly source_id: unknown;
   readonly canonical_url: unknown;
   readonly source_payload: unknown;
-  readonly extraction_id: unknown;
-  readonly extraction_source_id: unknown;
-  readonly extraction_outcome: unknown;
-  readonly extraction_payload: unknown;
-  readonly append_position: unknown;
+  readonly extraction_payloads: unknown;
+  readonly preparation_payloads: unknown;
 }
 
 class PostgresSourceInboxInvariantError extends Error {
@@ -34,60 +33,44 @@ class PostgresSourceInboxInvariantError extends Error {
   }
 }
 
-function invariantError(): PostgresSourceInboxInvariantError {
-  return new PostgresSourceInboxInvariantError();
-}
+const invariantError = () => new PostgresSourceInboxInvariantError();
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+const exact = (value: Record<string, unknown>, keys: readonly string[]) =>
+  isDeepStrictEqual(Object.keys(value).sort(), [...keys].sort());
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
-  return isDeepStrictEqual(Object.keys(value).sort(), [...keys].sort());
-}
-
-function isAgentRole(value: unknown): value is AgentRole {
-  return typeof value === "string" && (AGENT_ROLES as readonly string[]).includes(value);
-}
-
-function decodeActor(value: unknown): EditorialActor {
+function actor(value: unknown): EditorialActor {
   if (!isRecord(value)) throw invariantError();
   if (
     value.type === "operator" &&
-    hasExactKeys(value, ["type", "operatorId"]) &&
+    exact(value, ["type", "operatorId"]) &&
     typeof value.operatorId === "string"
   ) {
     return { type: "operator", operatorId: value.operatorId as OperatorId };
   }
   if (
     value.type === "agent" &&
-    hasExactKeys(value, ["type", "role", "runId"]) &&
-    isAgentRole(value.role) &&
+    exact(value, ["type", "role", "runId"]) &&
+    typeof value.role === "string" &&
+    (AGENT_ROLES as readonly string[]).includes(value.role) &&
     typeof value.runId === "string"
   ) {
     return {
       type: "agent",
-      role: value.role,
+      role: value.role as AgentRole,
       runId: value.runId as AgentRunId,
     };
   }
   throw invariantError();
 }
 
-function decodeSource(row: SourceInboxRow): UrlSource {
+function source(row: SourceInboxRow): UrlSource {
   const payload = row.source_payload;
   if (
     typeof row.source_id !== "string" ||
     typeof row.canonical_url !== "string" ||
     !isRecord(payload) ||
-    !hasExactKeys(payload, [
-      "id",
-      "type",
-      "submittedUrl",
-      "canonicalUrl",
-      "submittedBy",
-      "receivedAt",
-    ]) ||
+    !exact(payload, ["id", "type", "submittedUrl", "canonicalUrl", "submittedBy", "receivedAt"]) ||
     payload.id !== row.source_id ||
     payload.type !== "url" ||
     typeof payload.submittedUrl !== "string" ||
@@ -101,39 +84,27 @@ function decodeSource(row: SourceInboxRow): UrlSource {
     type: "url",
     submittedUrl: payload.submittedUrl,
     canonicalUrl: row.canonical_url as CanonicalSourceUrl,
-    submittedBy: decodeActor(payload.submittedBy),
+    submittedBy: actor(payload.submittedBy),
     receivedAt: payload.receivedAt,
   };
 }
 
-function hasNoExtraction(row: SourceInboxRow): boolean {
-  return (
-    row.extraction_id === null &&
-    row.extraction_source_id === null &&
-    row.extraction_outcome === null &&
-    row.extraction_payload === null &&
-    row.append_position === null
-  );
+function extractions(value: unknown, sourceId: SourceId): SourceExtraction[] {
+  if (!Array.isArray(value)) throw invariantError();
+  return value.map((payload) => {
+    const extraction = decodePostgresSourceExtraction(payload, invariantError);
+    if (extraction.sourceId !== sourceId) throw invariantError();
+    return extraction;
+  });
 }
 
-function decodeExtraction(row: SourceInboxRow, sourceId: SourceId): SourceExtraction {
-  if (
-    typeof row.extraction_id !== "string" ||
-    row.extraction_source_id !== sourceId ||
-    (row.extraction_outcome !== "succeeded" && row.extraction_outcome !== "failed") ||
-    (typeof row.append_position !== "string" && typeof row.append_position !== "number")
-  ) {
-    throw invariantError();
-  }
-  const extraction = decodePostgresSourceExtraction(row.extraction_payload, invariantError);
-  if (
-    extraction.id !== row.extraction_id ||
-    extraction.sourceId !== sourceId ||
-    extraction.outcome !== row.extraction_outcome
-  ) {
-    throw invariantError();
-  }
-  return extraction;
+function preparations(value: unknown, sourceId: SourceId): SourceEvidencePreparation[] {
+  if (!Array.isArray(value)) throw invariantError();
+  return value.map((payload) => {
+    const preparation = decodePostgresSourceEvidencePreparation(payload, invariantError);
+    if (preparation.sourceId !== sourceId) throw invariantError();
+    return preparation;
+  });
 }
 
 export function createPostgresSourceInboxRepository(options: {
@@ -145,14 +116,17 @@ export function createPostgresSourceInboxRepository(options: {
         `SELECT source.source_id,
                 source.canonical_url,
                 source.payload AS source_payload,
-                extraction.extraction_id,
-                extraction.source_id AS extraction_source_id,
-                extraction.outcome AS extraction_outcome,
-                extraction.payload AS extraction_payload,
-                extraction.append_position
+                COALESCE((
+                  SELECT jsonb_agg(extraction.payload ORDER BY extraction.append_position ASC)
+                  FROM storyrail.source_extractions AS extraction
+                  WHERE extraction.source_id = source.source_id
+                ), '[]'::jsonb) AS extraction_payloads,
+                COALESCE((
+                  SELECT jsonb_agg(preparation.payload ORDER BY preparation.append_position ASC)
+                  FROM storyrail.source_evidence_preparations AS preparation
+                  WHERE preparation.source_id = source.source_id
+                ), '[]'::jsonb) AS preparation_payloads
          FROM storyrail.url_sources AS source
-         LEFT JOIN storyrail.source_extractions AS extraction
-           ON extraction.source_id = source.source_id
          WHERE NOT EXISTS (
            SELECT 1 FROM storyrail.story_source_attachments AS attachment
            WHERE attachment.source_id = source.source_id
@@ -161,27 +135,16 @@ export function createPostgresSourceInboxRepository(options: {
            SELECT 1 FROM storyrail.source_triage_decisions AS triage
            WHERE triage.source_id = source.source_id
          )
-         ORDER BY source.source_id COLLATE "C" ASC,
-                  extraction.append_position ASC`,
+         ORDER BY source.source_id COLLATE "C" ASC`,
       );
-
-      const items: { source: UrlSource; extractions: SourceExtraction[] }[] = [];
-      for (const row of result.rows) {
-        const source = decodeSource(row);
-        const previous = items.at(-1);
-        if (previous?.source.id === source.id) {
-          if (!isDeepStrictEqual(previous.source, source) || hasNoExtraction(row)) {
-            throw invariantError();
-          }
-          previous.extractions.push(decodeExtraction(row, source.id));
-          continue;
-        }
-        items.push({
-          source,
-          extractions: hasNoExtraction(row) ? [] : [decodeExtraction(row, source.id)],
-        });
-      }
-      return items satisfies readonly SourceInboxItem[];
+      return result.rows.map((row) => {
+        const durableSource = source(row);
+        return {
+          source: durableSource,
+          extractions: extractions(row.extraction_payloads, durableSource.id),
+          preparations: preparations(row.preparation_payloads, durableSource.id),
+        } satisfies SourceInboxItem;
+      });
     },
   };
 }
