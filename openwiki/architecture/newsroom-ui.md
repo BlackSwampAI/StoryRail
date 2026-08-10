@@ -24,11 +24,11 @@ It fetches Stories via `storyClient`, pending Sources via `sourceInboxRequests`,
 
 ## Workspaces and clients
 
-| Component                 | File                            | Backed by                                                                                     |
-| ------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------- |
-| `SourceEvidenceWorkspace` | `source-evidence-workspace.tsx` | `POST /api/source-evidence/url` via `source-evidence-url-client.ts`                           |
+| Component                 | File                            | Backed by                                                                                                                                   |
+| ------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SourceEvidenceWorkspace` | `source-evidence-workspace.tsx` | `POST /api/source-evidence/url` via `source-evidence-url-client.ts`                                                                         |
 | `SourceInboxWorkspace`    | `source-inbox-workspace.tsx`    | `GET /api/source-inbox`, `POST /api/sources/[sourceId]/preparations`, and `PUT /api/sources/[sourceId]/triage` via `source-inbox-client.ts` |
-| Story inspection views    | `newsroom-shell.tsx`            | `GET /api/stories/[storyId]` via `story-client.ts`                                            |
+| Story inspection views    | `newsroom-shell.tsx`            | `GET /api/stories/[storyId]` via `story-client.ts`                                                                                          |
 
 ### Source-evidence intake
 

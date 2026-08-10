@@ -45,16 +45,16 @@ flowchart TD
     ADP --> PG
 ```
 
-| Layer            | Path                    | Responsibility                                                                                          |
-| ---------------- | ----------------------- | ------------------------------------------------------------------------------------------------------- |
-| Domain           | `src/domain/editorial`  | Pure editorial types, validation, and the Story state machine. No I/O.                                  |
-| Application      | `src/application`       | Use-case workflows that orchestrate domain rules with repository ports.                                 |
+| Layer            | Path                    | Responsibility                                                                                                        |
+| ---------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Domain           | `src/domain/editorial`  | Pure editorial types, validation, and the Story state machine. No I/O.                                                |
+| Application      | `src/application`       | Use-case workflows that orchestrate domain rules with repository ports.                                               |
 | Adapters         | `src/adapters`          | PostgreSQL persistence, Firecrawl extraction, and LangChain/OpenRouter structured-model implementations of the ports. |
-| Runtime          | `src/runtime`           | Composes adapters and application services into focused frozen runtimes with injectable external seams. |
-| Server providers | `src/server`            | Lazy singletons that build runtimes from environment on first use.                                      |
-| HTTP interface   | `src/interfaces/http`   | Hand-rolled request/response handlers that validate JSON and map workflow results to status codes.      |
-| Next.js routes   | `src/app/api`           | Thin Next.js route handlers binding HTTP handlers to providers.                                         |
-| Newsroom UI      | `src/features/newsroom` | React client shell with Source-evidence, Source-inbox, and Story workspaces.                            |
+| Runtime          | `src/runtime`           | Composes adapters and application services into focused frozen runtimes with injectable external seams.               |
+| Server providers | `src/server`            | Lazy singletons that build runtimes from environment on first use.                                                    |
+| HTTP interface   | `src/interfaces/http`   | Hand-rolled request/response handlers that validate JSON and map workflow results to status codes.                    |
+| Next.js routes   | `src/app/api`           | Thin Next.js route handlers binding HTTP handlers to providers.                                                       |
+| Newsroom UI      | `src/features/newsroom` | React client shell with Source-evidence, Source-inbox, and Story workspaces.                                          |
 
 ## Three composed runtimes
 
