@@ -14,7 +14,7 @@ import {
 } from "@/domain/editorial";
 
 import type { SourceInboxClient } from "./source-inbox-client";
-import { SourceInboxWorkspace } from "./source-inbox-workspace";
+import { SourceInboxWorkspace, type SourceInboxWorkspaceProps } from "./source-inbox-workspace";
 import type { StoryClient } from "./story-client";
 
 const actor = { type: "operator", operatorId: operatorId("operator-24") } as const;
@@ -101,14 +101,21 @@ function clients() {
   return { inbox, stories };
 }
 
-function renderInbox(inbox: SourceInboxClient, stories: StoryClient) {
+function renderInbox(
+  inbox: SourceInboxClient,
+  stories: StoryClient,
+  options: {
+    readonly sourceCount?: number;
+    readonly onStoryKnown?: SourceInboxWorkspaceProps["onStoryKnown"];
+  } = {},
+) {
   return render(
     <SourceInboxWorkspace
       refreshVersion={0}
-      stories={[{ story, sourceCount: 0 }]}
+      stories={[{ story, sourceCount: options.sourceCount ?? 0 }]}
       inboxRequests={inbox}
       storyRequests={stories}
-      onStoryKnown={vi.fn()}
+      onStoryKnown={options.onStoryKnown ?? vi.fn()}
       onStoryLoaded={vi.fn()}
     />,
   );
@@ -187,5 +194,57 @@ describe("SourceInboxWorkspace", () => {
     expect(stories.createStory).not.toHaveBeenCalled();
     expect(stories.attachSource).not.toHaveBeenCalled();
     expect(stories.inspectStory).not.toHaveBeenCalled();
+  });
+
+  it("preserves a known count of one when new Story inspection fails", async () => {
+    const { inbox, stories } = clients();
+    const failedStories: StoryClient = {
+      ...stories,
+      inspectStory: vi.fn<StoryClient["inspectStory"]>(async () => ({
+        kind: "unavailable",
+        message: "The Story request could not be completed.",
+      })),
+    };
+    const onStoryKnown = vi.fn<SourceInboxWorkspaceProps["onStoryKnown"]>();
+    renderInbox(inbox, failedStories, { onStoryKnown });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Create new Story" }));
+    fireEvent.change(screen.getByLabelText("Source relevance"), { target: { value: "Relevant" } });
+    fireEvent.change(screen.getByLabelText("Editorial decision reason"), {
+      target: { value: "New subject" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create, attach, and record decision" }));
+
+    expect(
+      await screen.findByText(/authoritative Story inspection could not be loaded/i),
+    ).toBeVisible();
+    expect(onStoryKnown).toHaveBeenLastCalledWith(story, 1);
+  });
+
+  it("preserves N plus one when existing Story inspection fails", async () => {
+    const { inbox, stories } = clients();
+    const failedStories: StoryClient = {
+      ...stories,
+      inspectStory: vi.fn<StoryClient["inspectStory"]>(async () => ({
+        kind: "unavailable",
+        message: "The Story request could not be completed.",
+      })),
+    };
+    const onStoryKnown = vi.fn<SourceInboxWorkspaceProps["onStoryKnown"]>();
+    renderInbox(inbox, failedStories, { sourceCount: 4, onStoryKnown });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Attach to existing Story" }));
+    fireEvent.change(screen.getByLabelText("Source relevance"), {
+      target: { value: "Additional facts" },
+    });
+    fireEvent.change(screen.getByLabelText("Editorial decision reason"), {
+      target: { value: "Same subject" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Attach and record decision" }));
+
+    expect(
+      await screen.findByText(/authoritative Story inspection could not be loaded/i),
+    ).toBeVisible();
+    expect(onStoryKnown).toHaveBeenLastCalledWith(story, 5);
   });
 });

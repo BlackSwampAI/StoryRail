@@ -99,7 +99,10 @@ type Progress =
       readonly kind: "partial";
       readonly message: string;
       readonly story?: Story;
-      readonly retryTriage?: { readonly decision: "new_story" | "existing_story" };
+      readonly retryTriage?: {
+        readonly decision: "new_story" | "existing_story";
+        readonly sourceCount: number;
+      };
     };
 
 function TriageItem({
@@ -150,14 +153,14 @@ function TriageItem({
     return Object.keys(next).length === 0;
   }
 
-  async function inspect(story: Story): Promise<boolean> {
+  async function inspect(story: Story, knownSourceCount: number): Promise<boolean> {
     setProgress({ kind: "pending", stage: "Loading authoritative Story…" });
     const result = await storyRequests.inspectStory(story.id);
     if (result.kind === "completed") {
       onStoryLoaded(result.value);
       return true;
     } else {
-      onStoryKnown(story, 1);
+      onStoryKnown(story, knownSourceCount);
       setProgress({
         kind: "partial",
         story,
@@ -209,7 +212,7 @@ function TriageItem({
         setProgress({
           kind: "partial",
           story,
-          retryTriage: { decision: "new_story" },
+          retryTriage: { decision: "new_story", sourceCount: 1 },
           message:
             triage.kind === "application-failure"
               ? `Story and attachment exist; final triage audit failed: ${triage.error.message}`
@@ -217,7 +220,7 @@ function TriageItem({
         });
         return;
       }
-      if (await inspect(story)) onResolved();
+      if (await inspect(story, 1)) onResolved();
     } finally {
       pendingRef.current = false;
     }
@@ -246,7 +249,8 @@ function TriageItem({
         });
         return;
       }
-      onStoryKnown(selected.story, selected.sourceCount + 1);
+      const knownSourceCount = selected.sourceCount + 1;
+      onStoryKnown(selected.story, knownSourceCount);
       setProgress({ kind: "pending", stage: "Recording final triage decision…" });
       const triage = await inboxRequests.recordTriageDecision(
         item.source.id,
@@ -258,7 +262,7 @@ function TriageItem({
         setProgress({
           kind: "partial",
           story: selected.story,
-          retryTriage: { decision: "existing_story" },
+          retryTriage: { decision: "existing_story", sourceCount: knownSourceCount },
           message:
             triage.kind === "application-failure"
               ? `Attachment exists; final triage audit failed: ${triage.error.message}`
@@ -266,7 +270,7 @@ function TriageItem({
         });
         return;
       }
-      if (await inspect(selected.story)) onResolved();
+      if (await inspect(selected.story, knownSourceCount)) onResolved();
     } finally {
       pendingRef.current = false;
     }
@@ -305,6 +309,7 @@ function TriageItem({
     pendingRef.current = true;
     const story = progress.story;
     const decision = progress.retryTriage.decision;
+    const knownSourceCount = progress.retryTriage.sourceCount;
     setProgress({ kind: "pending", stage: "Retrying final triage decision…" });
     try {
       const result = await inboxRequests.recordTriageDecision(
@@ -317,7 +322,7 @@ function TriageItem({
         setProgress({
           kind: "partial",
           story,
-          retryTriage: { decision },
+          retryTriage: { decision, sourceCount: knownSourceCount },
           message:
             result.kind === "application-failure"
               ? `The attachment still exists; final triage audit failed: ${result.error.message}`
@@ -325,7 +330,7 @@ function TriageItem({
         });
         return;
       }
-      if (await inspect(story)) onResolved();
+      if (await inspect(story, knownSourceCount)) onResolved();
     } finally {
       pendingRef.current = false;
     }
