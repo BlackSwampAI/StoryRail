@@ -7,18 +7,19 @@ import type {
   CanonicalSourceUrl,
   EditorialActor,
   SourceExtraction,
-  SourceExtractionFailureCode,
   SourceExtractionId,
   SourceId,
   UrlSource,
 } from "@/domain/editorial";
-import { AGENT_ROLES, SOURCE_EXTRACTION_FAILURE_CODES } from "@/domain/editorial";
+import { AGENT_ROLES } from "@/domain/editorial";
 import type {
   AppendSourceExtractionResult,
   PersistUrlSourceResult,
   SourceExtractionRepository,
   UrlSourceRepository,
 } from "@/application/source-persistence";
+
+import { decodePostgresSourceExtraction } from "./postgres-source-extraction-decoder";
 
 export interface PostgresSourceRepositories {
   readonly sources: UrlSourceRepository;
@@ -52,10 +53,6 @@ function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): 
   const actualKeys = Object.keys(value).sort();
   const expectedKeys = [...keys].sort();
   return isDeepStrictEqual(actualKeys, expectedKeys);
-}
-
-function isStringOrNull(value: unknown): value is string | null {
-  return typeof value === "string" || value === null;
 }
 
 function isAgentRole(value: unknown): value is AgentRole {
@@ -103,89 +100,6 @@ function decodeUrlSource(payload: unknown): UrlSource {
   return structuredClone(payload) as unknown as UrlSource;
 }
 
-function isExtractorDescriptor(value: unknown): boolean {
-  return (
-    isRecord(value) &&
-    hasExactKeys(value, ["key", "version"]) &&
-    typeof value.key === "string" &&
-    typeof value.version === "string"
-  );
-}
-
-function isDocument(value: unknown): boolean {
-  return (
-    isRecord(value) &&
-    hasExactKeys(value, ["format", "content", "title", "byline", "publishedAt", "language"]) &&
-    value.format === "markdown" &&
-    typeof value.content === "string" &&
-    isStringOrNull(value.title) &&
-    isStringOrNull(value.byline) &&
-    isStringOrNull(value.publishedAt) &&
-    isStringOrNull(value.language)
-  );
-}
-
-function isFailureCode(value: unknown): value is SourceExtractionFailureCode {
-  return (
-    typeof value === "string" &&
-    (SOURCE_EXTRACTION_FAILURE_CODES as readonly string[]).includes(value)
-  );
-}
-
-function isFailure(value: unknown): boolean {
-  return (
-    isRecord(value) &&
-    hasExactKeys(value, ["code", "retryable"]) &&
-    isFailureCode(value.code) &&
-    typeof value.retryable === "boolean"
-  );
-}
-
-function hasExtractionCommonFields(payload: Record<string, unknown>): boolean {
-  return (
-    typeof payload.id === "string" &&
-    typeof payload.sourceId === "string" &&
-    isExtractorDescriptor(payload.extractor) &&
-    isActor(payload.requestedBy) &&
-    typeof payload.startedAt === "string" &&
-    typeof payload.completedAt === "string"
-  );
-}
-
-function decodeSourceExtraction(payload: unknown): SourceExtraction {
-  if (!isRecord(payload) || !hasExtractionCommonFields(payload)) {
-    throw invariantError();
-  }
-
-  const commonKeys = [
-    "id",
-    "sourceId",
-    "extractor",
-    "requestedBy",
-    "startedAt",
-    "completedAt",
-    "outcome",
-  ];
-
-  if (
-    payload.outcome === "succeeded" &&
-    hasExactKeys(payload, [...commonKeys, "document"]) &&
-    isDocument(payload.document)
-  ) {
-    return structuredClone(payload) as unknown as SourceExtraction;
-  }
-
-  if (
-    payload.outcome === "failed" &&
-    hasExactKeys(payload, [...commonKeys, "failure"]) &&
-    isFailure(payload.failure)
-  ) {
-    return structuredClone(payload) as unknown as SourceExtraction;
-  }
-
-  throw invariantError();
-}
-
 function serialize(value: UrlSource | SourceExtraction): string {
   const serialized = JSON.stringify(value);
 
@@ -218,7 +132,7 @@ async function findExtractionById(
     [extractionIdentity],
   );
   const row = result.rows[0];
-  return row ? decodeSourceExtraction(row.payload) : null;
+  return row ? decodePostgresSourceExtraction(row.payload, invariantError) : null;
 }
 
 export function createPostgresSourceRepositories(
@@ -310,7 +224,10 @@ export function createPostgresSourceRepositories(
       );
 
       if (inserted.rows[0]) {
-        return { ok: true, extraction: decodeSourceExtraction(inserted.rows[0].payload) };
+        return {
+          ok: true,
+          extraction: decodePostgresSourceExtraction(inserted.rows[0].payload, invariantError),
+        };
       }
 
       const existingById = await findExtractionById(pool, extraction.id);
@@ -354,7 +271,7 @@ export function createPostgresSourceRepositories(
          ORDER BY append_position ASC`,
         [sourceIdentity],
       );
-      return result.rows.map((row) => decodeSourceExtraction(row.payload));
+      return result.rows.map((row) => decodePostgresSourceExtraction(row.payload, invariantError));
     },
   };
 

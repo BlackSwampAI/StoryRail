@@ -1,4 +1,11 @@
-import type { EditorialActor, Story, StorySourceAttachment, UrlSource } from "@/domain/editorial";
+import {
+  SOURCE_EXTRACTION_FAILURE_CODES,
+  type EditorialActor,
+  type SourceExtraction,
+  type Story,
+  type StorySourceAttachment,
+  type UrlSource,
+} from "@/domain/editorial";
 import type { StoryInspection } from "@/application/story-inspection";
 import type { StoryListItem } from "@/application/story-listing";
 
@@ -40,6 +47,7 @@ const STORY_STATES = new Set([
   "published",
 ]);
 const AGENT_ROLES = new Set(["assignment_editor", "writer", "fact_checker", "editor_in_chief"]);
+const EXTRACTION_FAILURE_CODES = new Set<string>(SOURCE_EXTRACTION_FAILURE_CODES);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -58,11 +66,73 @@ function isString(value: unknown): value is string {
 function isActor(value: unknown): value is EditorialActor {
   if (!isRecord(value) || !isString(value.type)) return false;
   return value.type === "operator"
-    ? isString(value.operatorId)
+    ? hasExactKeys(value, ["type", "operatorId"]) && isString(value.operatorId)
     : value.type === "agent" &&
+        hasExactKeys(value, ["type", "role", "runId"]) &&
         isString(value.role) &&
         AGENT_ROLES.has(value.role) &&
         isString(value.runId);
+}
+
+function isStringOrNull(value: unknown): value is string | null {
+  return value === null || isString(value);
+}
+
+function isExtraction(value: unknown): value is SourceExtraction {
+  if (
+    !isRecord(value) ||
+    !isString(value.id) ||
+    !isString(value.sourceId) ||
+    !isRecord(value.extractor) ||
+    !hasExactKeys(value.extractor, ["key", "version"]) ||
+    !isString(value.extractor.key) ||
+    !isString(value.extractor.version) ||
+    !isActor(value.requestedBy) ||
+    !isString(value.startedAt) ||
+    !isString(value.completedAt)
+  ) {
+    return false;
+  }
+
+  const commonKeys = [
+    "id",
+    "sourceId",
+    "extractor",
+    "requestedBy",
+    "startedAt",
+    "completedAt",
+    "outcome",
+  ];
+  if (value.outcome === "succeeded") {
+    return (
+      hasExactKeys(value, [...commonKeys, "document"]) &&
+      isRecord(value.document) &&
+      hasExactKeys(value.document, [
+        "format",
+        "content",
+        "title",
+        "byline",
+        "publishedAt",
+        "language",
+      ]) &&
+      value.document.format === "markdown" &&
+      isString(value.document.content) &&
+      isStringOrNull(value.document.title) &&
+      isStringOrNull(value.document.byline) &&
+      isStringOrNull(value.document.publishedAt) &&
+      isStringOrNull(value.document.language)
+    );
+  }
+
+  return (
+    value.outcome === "failed" &&
+    hasExactKeys(value, [...commonKeys, "failure"]) &&
+    isRecord(value.failure) &&
+    hasExactKeys(value.failure, ["code", "retryable"]) &&
+    isString(value.failure.code) &&
+    EXTRACTION_FAILURE_CODES.has(value.failure.code) &&
+    typeof value.failure.retryable === "boolean"
+  );
 }
 
 function isStory(value: unknown): value is Story {
@@ -109,10 +179,22 @@ function isInspection(value: unknown): value is StoryInspection {
   }
   const story = value.story;
   return value.sources.every((item) => {
-    if (!isRecord(item) || !isAttachment(item.attachment) || !isSource(item.source)) {
+    if (
+      !isRecord(item) ||
+      !hasExactKeys(item, ["attachment", "source", "extractions"]) ||
+      !isAttachment(item.attachment) ||
+      !isSource(item.source) ||
+      !Array.isArray(item.extractions) ||
+      !item.extractions.every(isExtraction)
+    ) {
       return false;
     }
-    return item.attachment.storyId === story.id && item.attachment.sourceId === item.source.id;
+    const sourceId = item.source.id;
+    return (
+      item.attachment.storyId === story.id &&
+      item.attachment.sourceId === sourceId &&
+      item.extractions.every((extraction) => extraction.sourceId === sourceId)
+    );
   });
 }
 

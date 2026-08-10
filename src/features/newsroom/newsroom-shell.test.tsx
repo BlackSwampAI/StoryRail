@@ -59,9 +59,36 @@ const ATTACHMENT = Object.freeze({
   attachedBy: ACTOR,
   attachedAt: "opaque-source-attached",
 });
+const SUCCESSFUL_EXTRACTION = Object.freeze({
+  id: sourceExtractionId("extraction-newsroom-0023-success"),
+  sourceId: SOURCE.id,
+  extractor: Object.freeze({ key: "controlled", version: "1" }),
+  requestedBy: ACTOR,
+  startedAt: "opaque-success-started",
+  completedAt: "opaque-success-completed",
+  outcome: "succeeded",
+  document: Object.freeze({
+    format: "markdown",
+    content: "# Persisted newsroom evidence\n\n<img src=x onerror=alert('unsafe')>\n\nFull text.",
+    title: "Persisted extraction headline",
+    byline: null,
+    publishedAt: "opaque-publication-timestamp",
+    language: "en",
+  }),
+} satisfies SourceExtraction);
+const FAILED_EXTRACTION = Object.freeze({
+  id: sourceExtractionId("extraction-newsroom-0023-failed"),
+  sourceId: SOURCE.id,
+  extractor: Object.freeze({ key: "controlled", version: "1" }),
+  requestedBy: ACTOR,
+  startedAt: "opaque-failure-started",
+  completedAt: "opaque-failure-completed",
+  outcome: "failed",
+  failure: Object.freeze({ code: "RETRIEVAL_FAILED", retryable: true }),
+} satisfies SourceExtraction);
 const INSPECTION = Object.freeze({
   story: INTAKE_STORY,
-  sources: [{ attachment: ATTACHMENT, source: SOURCE }],
+  sources: [{ attachment: ATTACHMENT, source: SOURCE, extractions: [SUCCESSFUL_EXTRACTION] }],
 });
 
 function completedClient(overrides: Partial<StoryClient> = {}): StoryClient {
@@ -90,27 +117,10 @@ function completedClient(overrides: Partial<StoryClient> = {}): StoryClient {
 }
 
 function completedSourceRequest(): ReturnType<typeof vi.fn<RequestSourceEvidenceUrl>> {
-  const extraction = Object.freeze({
-    id: sourceExtractionId("extraction-newsroom-0022"),
-    sourceId: SOURCE.id,
-    extractor: Object.freeze({ key: "controlled", version: "1" }),
-    requestedBy: ACTOR,
-    startedAt: "opaque-started",
-    completedAt: "opaque-completed",
-    outcome: "succeeded",
-    document: Object.freeze({
-      format: "markdown",
-      content: "# Evidence",
-      title: INTAKE_STORY.title,
-      byline: null,
-      publishedAt: null,
-      language: "en",
-    }),
-  } satisfies SourceExtraction);
   const result = Object.freeze({
     kind: "completed",
     source: SOURCE,
-    extraction,
+    extraction: SUCCESSFUL_EXTRACTION,
   } satisfies SourceEvidenceUrlResult);
   return vi.fn<RequestSourceEvidenceUrl>(async () => result);
 }
@@ -197,6 +207,70 @@ describe("NewsroomShell", () => {
     expect(await screen.findByText("Persisted Story")).toBeVisible();
     expect(screen.getByRole("heading", { name: INTAKE_STORY.title })).toBeVisible();
     expect(screen.getByText(ATTACHMENT.relevance)).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Extraction attempt 1" })).toBeVisible();
+    expect(screen.getByText(SUCCESSFUL_EXTRACTION.document.title)).toBeVisible();
+    expect(screen.getByText(SUCCESSFUL_EXTRACTION.document.publishedAt)).toBeVisible();
+    expect(screen.getByText(SUCCESSFUL_EXTRACTION.document.language)).toBeVisible();
+    expect(screen.getByText("Unavailable")).toBeVisible();
+    const markdown = screen.getByText(/# Persisted newsroom evidence/).closest("pre");
+    expect(markdown?.textContent).toBe(SUCCESSFUL_EXTRACTION.document.content);
+    expect(markdown?.innerHTML).toContain("&lt;img");
+  });
+
+  it("renders every append-ordered attempt and truthful failed and empty evidence states", async () => {
+    const emptySource = Object.freeze({
+      ...SOURCE,
+      id: sourceId("source-newsroom-0023-empty"),
+      canonicalUrl: "https://example.com/empty-evidence" as UrlSource["canonicalUrl"],
+    });
+    const emptyAttachment = Object.freeze({
+      ...ATTACHMENT,
+      sourceId: emptySource.id,
+      relevance: "A Source without extraction history.",
+    });
+    const inspection = {
+      story: INTAKE_STORY,
+      sources: [
+        {
+          attachment: ATTACHMENT,
+          source: SOURCE,
+          extractions: [FAILED_EXTRACTION, SUCCESSFUL_EXTRACTION],
+        },
+        { attachment: emptyAttachment, source: emptySource, extractions: [] },
+      ],
+    };
+    const client = completedClient({
+      inspectStory: vi.fn<StoryClient["inspectStory"]>(async () => ({
+        kind: "completed",
+        value: inspection,
+      })),
+    });
+    render(<NewsroomShell storyRequests={client} />);
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(INTAKE_STORY.title) }));
+
+    const attempts = await screen.findAllByRole("heading", { name: /Extraction attempt/ });
+    expect(attempts.map((heading) => heading.textContent)).toEqual([
+      "Extraction attempt 1",
+      "Extraction attempt 2",
+    ]);
+    expect(screen.getByRole("heading", { name: "Extraction failed" })).toBeVisible();
+    expect(screen.getByText("RETRIEVAL_FAILED")).toBeVisible();
+    expect(screen.getByText("Yes")).toBeVisible();
+    expect(screen.getByText("No extraction is recorded for this Source.")).toBeVisible();
+    expect(client.inspectStory).toHaveBeenCalledOnce();
+  });
+
+  it("restores persisted Markdown from a fresh Story inspection after a workspace remount", async () => {
+    const client = completedClient();
+    const first = render(<NewsroomShell storyRequests={client} />);
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(INTAKE_STORY.title) }));
+    expect(await screen.findByText(/# Persisted newsroom evidence/)).toBeVisible();
+    first.unmount();
+
+    render(<NewsroomShell storyRequests={client} />);
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(INTAKE_STORY.title) }));
+    expect(await screen.findByText(/# Persisted newsroom evidence/)).toBeVisible();
+    expect(client.inspectStory).toHaveBeenCalledTimes(2);
   });
 
   it("shows a safe inspection unavailable state without listing-only fallback", async () => {
