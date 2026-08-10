@@ -24,3 +24,4 @@ Files use `adr-NNNN-short-title.md`, with a zero-padded sequence number. An ADR 
 - [ADR 0016: Newsroom Source-evidence URL intake](adr-0016-newsroom-source-evidence-url-intake.md) — Accepted
 - [ADR 0017: Durable Story creation](adr-0017-durable-story-creation.md) — Accepted
 - [ADR 0018: Durable Source-to-Story attachment](adr-0018-durable-story-source-attachment.md) — Accepted
+- [ADR 0019: Durable Story inspection read model](adr-0019-durable-story-inspection-read-model.md) — Accepted
