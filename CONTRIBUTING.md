@@ -38,7 +38,7 @@ The single application package uses pnpm scripts:
 - `pnpm build` creates the production build.
 - `pnpm start` serves an existing production build.
 - `pnpm test` runs the focused Vitest suite once.
-- `pnpm test:postgres` runs only the PostgreSQL persistence integration suite for Source evidence and Stories and requires `STORYRAIL_TEST_DATABASE_URL`.
+- `pnpm test:postgres` runs only the PostgreSQL persistence integration suite for Source evidence, Stories, and Story-Source attachments and requires `STORYRAIL_TEST_DATABASE_URL`.
 - `pnpm test:watch` runs Vitest in watch mode.
 - `pnpm typecheck` generates Next.js route and framework types, then checks strict TypeScript types without emitting files.
 - `pnpm lint` runs ESLint.
@@ -58,9 +58,9 @@ The server-only Source-evidence runtime requires these production variable names
 
 ## PostgreSQL integration tests
 
-Source-evidence and Story persistence integration tests run against PostgreSQL 18.4 itself. They do not use mocks, testcontainers, an embedded database, or a simulated PostgreSQL implementation.
+Source-evidence, Story, and Story-Source attachment persistence integration tests run against PostgreSQL 18.4 itself. They do not use mocks, testcontainers, an embedded database, or a simulated PostgreSQL implementation.
 
-Provide the test-only connection through `STORYRAIL_TEST_DATABASE_URL`. Never use a production `DATABASE_URL`. The configured database name must be exactly `storyrail_test`; the suite connects and verifies that name before any destructive setup. It never creates or drops a database, but it does drop and recreate the `storyrail` schema, applies migrations 0012 and 0017 in order, and truncates the two evidence tables plus the Stories table between cases. Use a disposable local test database with no data outside this test workflow that depends on the `storyrail` schema.
+Provide the test-only connection through `STORYRAIL_TEST_DATABASE_URL`. Never use a production `DATABASE_URL`. The configured database name must be exactly `storyrail_test`; the suite connects and verifies that name before any destructive setup. It never creates or drops a database, but it does drop and recreate the `storyrail` schema, applies migrations 0012, 0017, and 0018 in order, and truncates the two evidence tables, Stories table, and Story-Source attachment table between cases. Use a disposable local test database with no data outside this test workflow that depends on the `storyrail` schema.
 
 When `STORYRAIL_TEST_DATABASE_URL` is absent, `pnpm test` skips the PostgreSQL suite while continuing to run every non-PostgreSQL test. The dedicated command fails before Vitest when the variable is absent. Run the integration suite explicitly with a test URL whose database component is `storyrail_test`:
 

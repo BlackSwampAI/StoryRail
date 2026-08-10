@@ -19,13 +19,16 @@ import {
   type SourceExtraction,
   type SuccessfulSourceExtraction,
   type Story,
+  type StorySourceAttachment,
   type UrlSource,
 } from "@/domain/editorial";
 import { describeSourceRepositoriesContract } from "@/application/source-persistence/source-repositories.contract";
 import { describeStoryRepositoryContract } from "@/application/story-persistence/story-repository.contract";
+import { describeStorySourceAttachmentRepositoryContract } from "@/application/story-source-persistence/story-source-attachment-repository.contract";
 
 import { createPostgresSourceRepositories } from "./postgres-source-repositories";
 import { createPostgresStoryRepository } from "../story-persistence/postgres-story-repository";
+import { createPostgresStorySourceAttachmentRepository } from "../story-source-persistence/postgres-story-source-attachment-repository";
 
 const databaseUrl = process.env.STORYRAIL_TEST_DATABASE_URL;
 const describePostgres = databaseUrl ? describe : describe.skip;
@@ -33,6 +36,10 @@ const sourceMigrationPath = resolve(process.cwd(), "database/migrations/0012-sou
 const storyMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0017-durable-story-creation.sql",
+);
+const attachmentMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0018-durable-story-source-attachment.sql",
 );
 
 const OPERATOR: OperatorActor = {
@@ -140,15 +147,31 @@ function makeStory(suffix: string, overrides: Partial<Story> = {}): Story {
   };
 }
 
+function makeAttachment(
+  suffix: string,
+  overrides: Partial<StorySourceAttachment> = {},
+): StorySourceAttachment {
+  return {
+    storyId: storyId(`opaque-attachment-story-${suffix}`),
+    sourceId: sourceId(`opaque-attachment-source-${suffix}`),
+    relevance: `Relevant evidence ${suffix}`,
+    attachedBy: OPERATOR,
+    attachedAt: "opaque attachment timestamp: 2026/08/09 25:61",
+    ...overrides,
+  };
+}
+
 describePostgres("PostgreSQL persistence repositories", () => {
   let pool: Pool;
   let sourceMigrationSql: string;
   let storyMigrationSql: string;
+  let attachmentMigrationSql: string;
   let destructiveSetupAllowed = false;
 
   beforeAll(async () => {
     sourceMigrationSql = await readFile(sourceMigrationPath, "utf8");
     storyMigrationSql = await readFile(storyMigrationPath, "utf8");
+    attachmentMigrationSql = await readFile(attachmentMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -167,6 +190,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await client.query("DROP SCHEMA IF EXISTS storyrail CASCADE");
       await client.query(sourceMigrationSql);
       await client.query(storyMigrationSql);
+      await client.query(attachmentMigrationSql);
     } finally {
       client.release();
     }
@@ -178,7 +202,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     }
 
     await pool.query(
-      "TRUNCATE storyrail.source_extractions, storyrail.url_sources, storyrail.stories RESTART IDENTITY",
+      "TRUNCATE storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.stories RESTART IDENTITY",
     );
   });
 
@@ -198,6 +222,28 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
   describeSourceRepositoriesContract(() => createPostgresSourceRepositories({ pool }));
   describeStoryRepositoryContract(() => createPostgresStoryRepository({ pool }));
+  describeStorySourceAttachmentRepositoryContract(() => {
+    let sourceSequence = 0;
+    return {
+      createRepository: () => createPostgresStorySourceAttachmentRepository({ pool }),
+      async addStory(id) {
+        await createPostgresStoryRepository({ pool }).persist({
+          story: makeStory(`contract-${id}`, { id }),
+        });
+      },
+      async addSource(id) {
+        sourceSequence += 1;
+        const source = makeSource(
+          `contract-${sourceSequence}`,
+          OPERATOR,
+          `https://example.com/attachment-contract/${sourceSequence}`,
+        );
+        await createPostgresSourceRepositories({ pool }).sources.persist({
+          source: { ...source, id },
+        });
+      },
+    };
+  });
 
   describe("migration", () => {
     it("creates only the dedicated evidence schema objects with the required columns", async () => {
@@ -223,6 +269,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       expect(tables.rows.map((row) => row.table_name)).toEqual([
         "source_extractions",
         "stories",
+        "story_source_attachments",
         "url_sources",
       ]);
       expect(columns.rows).toEqual([
@@ -284,6 +331,27 @@ describePostgres("PostgreSQL persistence repositories", () => {
         },
         {
           table_name: "stories",
+          column_name: "payload",
+          data_type: "jsonb",
+          is_nullable: "NO",
+          is_identity: "NO",
+        },
+        {
+          table_name: "story_source_attachments",
+          column_name: "story_id",
+          data_type: "text",
+          is_nullable: "NO",
+          is_identity: "NO",
+        },
+        {
+          table_name: "story_source_attachments",
+          column_name: "source_id",
+          data_type: "text",
+          is_nullable: "NO",
+          is_identity: "NO",
+        },
+        {
+          table_name: "story_source_attachments",
           column_name: "payload",
           data_type: "jsonb",
           is_nullable: "NO",
@@ -422,6 +490,56 @@ describePostgres("PostgreSQL persistence repositories", () => {
           constraint_type: "c",
         },
         {
+          table_name: "story_source_attachments",
+          constraint_name: "story_source_attachments_payload_attached_at_check",
+          constraint_type: "c",
+        },
+        {
+          table_name: "story_source_attachments",
+          constraint_name: "story_source_attachments_payload_attached_by_check",
+          constraint_type: "c",
+        },
+        {
+          table_name: "story_source_attachments",
+          constraint_name: "story_source_attachments_payload_object_check",
+          constraint_type: "c",
+        },
+        {
+          table_name: "story_source_attachments",
+          constraint_name: "story_source_attachments_payload_relevance_check",
+          constraint_type: "c",
+        },
+        {
+          table_name: "story_source_attachments",
+          constraint_name: "story_source_attachments_payload_shape_check",
+          constraint_type: "c",
+        },
+        {
+          table_name: "story_source_attachments",
+          constraint_name: "story_source_attachments_payload_source_id_check",
+          constraint_type: "c",
+        },
+        {
+          table_name: "story_source_attachments",
+          constraint_name: "story_source_attachments_payload_story_id_check",
+          constraint_type: "c",
+        },
+        {
+          table_name: "story_source_attachments",
+          constraint_name: "story_source_attachments_pkey",
+          constraint_type: "p",
+        },
+        {
+          table_name: "story_source_attachments",
+          constraint_name: "story_source_attachments_source_id_fkey",
+          constraint_type: "f",
+        },
+        {
+          table_name: "story_source_attachments",
+          constraint_name: "story_source_attachments_story_id_fkey",
+          constraint_type: "f",
+        },
+        {
           table_name: "url_sources",
           constraint_name: "url_sources_canonical_url_key",
           constraint_type: "u",
@@ -462,6 +580,33 @@ describePostgres("PostgreSQL persistence repositories", () => {
            AND con.conname = 'source_extractions_source_id_fkey'`,
       );
       expect(foreignKey.rows[0]?.definition).toContain("ON UPDATE RESTRICT ON DELETE RESTRICT");
+
+      const attachmentForeignKeys = await pool.query<{
+        constraint_name: string;
+        definition: string;
+      }>(
+        `SELECT con.conname AS constraint_name,
+                pg_get_constraintdef(con.oid) AS definition
+         FROM pg_constraint AS con
+         JOIN pg_class AS rel ON rel.oid = con.conrelid
+         JOIN pg_namespace AS namespace ON namespace.oid = rel.relnamespace
+         WHERE namespace.nspname = 'storyrail'
+           AND rel.relname = 'story_source_attachments'
+           AND con.contype = 'f'
+         ORDER BY con.conname`,
+      );
+      expect(attachmentForeignKeys.rows).toEqual([
+        {
+          constraint_name: "story_source_attachments_source_id_fkey",
+          definition:
+            "FOREIGN KEY (source_id) REFERENCES storyrail.url_sources(source_id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+        },
+        {
+          constraint_name: "story_source_attachments_story_id_fkey",
+          definition:
+            "FOREIGN KEY (story_id) REFERENCES storyrail.stories(story_id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+        },
+      ]);
     });
 
     it("creates the repository ordering index in the required column order", async () => {
@@ -491,6 +636,49 @@ describePostgres("PostgreSQL persistence repositories", () => {
           index_name: "source_extractions_source_id_append_position_idx",
           is_unique: false,
           columns: "source_id,append_position",
+        },
+      ]);
+    });
+
+    it("uses only the composite attachment primary-key index and adds no attachment ID or ordering columns", async () => {
+      const columns = await pool.query<{ column_name: string }>(
+        `SELECT column_name
+         FROM information_schema.columns
+         WHERE table_schema = 'storyrail'
+           AND table_name = 'story_source_attachments'
+         ORDER BY ordinal_position`,
+      );
+      const indexes = await pool.query<{
+        index_name: string;
+        is_primary: boolean;
+        columns: string;
+      }>(
+        `SELECT index_class.relname AS index_name,
+                idx.indisprimary AS is_primary,
+                string_agg(attribute.attname::text, ',' ORDER BY key.ordinality) AS columns
+         FROM pg_index AS idx
+         JOIN pg_class AS table_class ON table_class.oid = idx.indrelid
+         JOIN pg_namespace AS namespace ON namespace.oid = table_class.relnamespace
+         JOIN pg_class AS index_class ON index_class.oid = idx.indexrelid
+         JOIN unnest(idx.indkey) WITH ORDINALITY AS key(attribute_number, ordinality) ON true
+         JOIN pg_attribute AS attribute
+           ON attribute.attrelid = table_class.oid
+          AND attribute.attnum = key.attribute_number
+         WHERE namespace.nspname = 'storyrail'
+           AND table_class.relname = 'story_source_attachments'
+         GROUP BY index_class.relname, idx.indisprimary`,
+      );
+
+      expect(columns.rows.map((row) => row.column_name)).toEqual([
+        "story_id",
+        "source_id",
+        "payload",
+      ]);
+      expect(indexes.rows).toEqual([
+        {
+          index_name: "story_source_attachments_pkey",
+          is_primary: true,
+          columns: "story_id,source_id",
         },
       ]);
     });
@@ -857,6 +1045,300 @@ describePostgres("PostgreSQL persistence repositories", () => {
     );
   });
 
+  describe("durable Story-Source attachment persistence", () => {
+    async function persistAttachmentParents(attachment: StorySourceAttachment): Promise<void> {
+      const story = makeStory(`parent-${attachment.storyId}`, { id: attachment.storyId });
+      const source = makeSource(
+        `parent-${attachment.sourceId}`,
+        OPERATOR,
+        `https://example.com/attachment-parent/${encodeURIComponent(attachment.sourceId)}`,
+      );
+      await createPostgresStoryRepository({ pool }).persist({ story });
+      await createPostgresSourceRepositories({ pool }).sources.persist({
+        source: { ...source, id: attachment.sourceId },
+      });
+    }
+
+    it("round-trips exact SQL-like identities, relevance, actor identity, and timestamp", async () => {
+      const repository = createPostgresStorySourceAttachmentRepository({ pool });
+      const attachment = makeAttachment("sql-like", {
+        storyId: storyId("story '$1'; DROP TABLE storyrail.stories; --"),
+        sourceId: sourceId("source $2; DELETE FROM storyrail.url_sources; --"),
+        relevance: "Evidence $3; DROP SCHEMA storyrail; --\n\n  interior spacing",
+        attachedBy: {
+          type: "agent",
+          role: "fact_checker",
+          runId: agentRunId("run '$4'; SELECT pg_sleep(10); --"),
+        },
+        attachedAt: "timestamp $5; not-a-date ' ; --",
+      });
+      await persistAttachmentParents(attachment);
+
+      await expect(repository.attach({ attachment })).resolves.toEqual({ ok: true, attachment });
+      await expect(repository.attach({ attachment: structuredClone(attachment) })).resolves.toEqual(
+        {
+          ok: true,
+          attachment,
+        },
+      );
+      await expect(
+        pool.query<{ payload: StorySourceAttachment }>(
+          `SELECT payload
+           FROM storyrail.story_source_attachments
+           WHERE story_id = $1 AND source_id = $2`,
+          [attachment.storyId, attachment.sourceId],
+        ),
+      ).resolves.toMatchObject({ rows: [{ payload: attachment }] });
+    });
+
+    it("accepts and round-trips assignment-editor attachment provenance", async () => {
+      const repository = createPostgresStorySourceAttachmentRepository({ pool });
+      const attachedBy = {
+        type: "agent" as const,
+        role: "assignment_editor" as const,
+        runId: agentRunId("opaque-assignment-editor-attachment-run"),
+      };
+      const attachment = makeAttachment("assignment-editor", { attachedBy });
+      await persistAttachmentParents(attachment);
+
+      await expect(repository.attach({ attachment })).resolves.toEqual({ ok: true, attachment });
+      const replay = await repository.attach({ attachment: structuredClone(attachment) });
+
+      expect(replay).toEqual({ ok: true, attachment });
+      expect(replay.ok && replay.attachment.attachedBy).toEqual({
+        type: "agent",
+        role: "assignment_editor",
+        runId: agentRunId("opaque-assignment-editor-attachment-run"),
+      });
+    });
+
+    it("rejects mismatched identities and malformed payload or actor types in PostgreSQL", async () => {
+      const attachment = makeAttachment("database-constraints");
+      await persistAttachmentParents(attachment);
+      const variants: readonly [string, unknown][] = [
+        ["payload array", []],
+        ["mismatched Story", { ...attachment, storyId: storyId("other-story") }],
+        ["mismatched Source", { ...attachment, sourceId: sourceId("other-source") }],
+        ["numeric relevance", { ...attachment, relevance: 42 }],
+        ["numeric timestamp", { ...attachment, attachedAt: 42 }],
+        [
+          "missing key",
+          {
+            storyId: attachment.storyId,
+            sourceId: attachment.sourceId,
+            attachedBy: attachment.attachedBy,
+            attachedAt: attachment.attachedAt,
+          },
+        ],
+        ["extra key", { ...attachment, attachmentId: "not-allowed" }],
+        ["malformed operator", { ...attachment, attachedBy: { type: "operator", operatorId: 42 } }],
+        ["extra operator fact", { ...attachment, attachedBy: { ...OPERATOR, role: "writer" } }],
+        [
+          "invalid agent role",
+          {
+            ...attachment,
+            attachedBy: { type: "agent", role: "publisher", runId: "run-invalid" },
+          },
+        ],
+        [
+          "malformed agent run",
+          { ...attachment, attachedBy: { type: "agent", role: "writer", runId: false } },
+        ],
+      ];
+
+      for (const [, payload] of variants) {
+        await expect(
+          pool.query(
+            `INSERT INTO storyrail.story_source_attachments (story_id, source_id, payload)
+             VALUES ($1, $2, $3::jsonb)`,
+            [attachment.storyId, attachment.sourceId, JSON.stringify(payload)],
+          ),
+        ).rejects.toMatchObject({ code: "23514" });
+      }
+    });
+
+    it.each([
+      [
+        "missing fact",
+        "story_source_attachments_payload_shape_check,story_source_attachments_payload_attached_at_check",
+        "payload - 'attachedAt'",
+      ],
+      [
+        "extra fact",
+        "story_source_attachments_payload_shape_check",
+        'payload || \'{"attachmentId":"hidden"}\'::jsonb',
+      ],
+      [
+        "malformed fact",
+        "story_source_attachments_payload_relevance_check",
+        "jsonb_set(payload, '{relevance}', '42')",
+      ],
+      [
+        "mismatched Story identity",
+        "story_source_attachments_payload_story_id_check",
+        "jsonb_set(payload, '{storyId}', '\"other-story\"')",
+      ],
+      [
+        "mismatched Source identity",
+        "story_source_attachments_payload_source_id_check",
+        "jsonb_set(payload, '{sourceId}', '\"other-source\"')",
+      ],
+      [
+        "malformed actor",
+        "story_source_attachments_payload_attached_by_check",
+        'jsonb_set(payload, \'{attachedBy}\', \'{"type":"agent","role":"invented","runId":"run"}\')',
+      ],
+      ["empty relevance", null, "jsonb_set(payload, '{relevance}', '\"\"')"],
+      ["untrimmed relevance", null, "jsonb_set(payload, '{relevance}', '\"  relevant  \"')"],
+    ])(
+      "rejects a stored attachment with %s through one safe invariant",
+      async (_, constraint, mutation) => {
+        const attachment = makeAttachment(`corrupt-${constraint ?? mutation.length}`);
+        const repository = createPostgresStorySourceAttachmentRepository({ pool });
+        await persistAttachmentParents(attachment);
+        await repository.attach({ attachment });
+        const client = await pool.connect();
+
+        try {
+          await client.query("BEGIN");
+          for (const constraintName of constraint?.split(",") ?? []) {
+            await client.query(
+              `ALTER TABLE storyrail.story_source_attachments DROP CONSTRAINT ${constraintName}`,
+            );
+          }
+          await client.query(
+            `UPDATE storyrail.story_source_attachments
+           SET payload = ${mutation}
+           WHERE story_id = $1 AND source_id = $2`,
+            [attachment.storyId, attachment.sourceId],
+          );
+          const transactionRepository = createPostgresStorySourceAttachmentRepository({
+            pool: client as unknown as Pool,
+          });
+
+          await expect(transactionRepository.attach({ attachment })).rejects.toMatchObject({
+            name: "PostgresStorySourceAttachmentPersistenceInvariantError",
+            message:
+              "PostgreSQL Story-Source attachment persistence returned an invalid or impossible result.",
+          });
+        } finally {
+          await client.query("ROLLBACK");
+          client.release();
+        }
+      },
+    );
+
+    it("keeps every differing relationship fact in conflict and preserves the original row", async () => {
+      const repository = createPostgresStorySourceAttachmentRepository({ pool });
+      const attachment = makeAttachment("all-conflicts");
+      const variants: StorySourceAttachment[] = [
+        { ...attachment, relevance: "different relevance" },
+        {
+          ...attachment,
+          attachedBy: { type: "agent", role: "writer", runId: agentRunId("different-type") },
+        },
+        {
+          ...attachment,
+          attachedBy: { type: "operator", operatorId: operatorId("different-operator") },
+        },
+        {
+          ...attachment,
+          attachedBy: {
+            type: "agent",
+            role: "writer",
+            runId: agentRunId("shared-agent-run"),
+          },
+        },
+        {
+          ...attachment,
+          attachedBy: {
+            type: "agent",
+            role: "fact_checker",
+            runId: agentRunId("different-run"),
+          },
+        },
+        { ...attachment, attachedAt: "different attachment timestamp" },
+      ];
+      await persistAttachmentParents(attachment);
+      await repository.attach({ attachment });
+
+      for (const variant of variants) {
+        await expect(repository.attach({ attachment: variant })).resolves.toMatchObject({
+          ok: false,
+          error: {
+            code: "STORY_SOURCE_CONFLICT",
+            storyId: attachment.storyId,
+            sourceId: attachment.sourceId,
+          },
+        });
+      }
+      await expect(repository.attach({ attachment })).resolves.toEqual({ ok: true, attachment });
+    });
+
+    it("returns deterministic missing-parent failures without inserting a row", async () => {
+      const repository = createPostgresStorySourceAttachmentRepository({ pool });
+      const missingStory = makeAttachment("missing-story-specific");
+      const missingSource = makeAttachment("missing-source-specific");
+      const bothMissing = makeAttachment("both-missing-specific");
+
+      const sourceParent = makeSource("missing-story-parent");
+      await createPostgresSourceRepositories({ pool }).sources.persist({
+        source: { ...sourceParent, id: missingStory.sourceId },
+      });
+      await createPostgresStoryRepository({ pool }).persist({
+        story: makeStory("missing-source-parent", { id: missingSource.storyId }),
+      });
+
+      await expect(repository.attach({ attachment: missingStory })).resolves.toMatchObject({
+        ok: false,
+        error: { code: "STORY_NOT_FOUND", storyId: missingStory.storyId },
+      });
+      await expect(repository.attach({ attachment: missingSource })).resolves.toMatchObject({
+        ok: false,
+        error: { code: "SOURCE_NOT_FOUND", sourceId: missingSource.sourceId },
+      });
+      await expect(repository.attach({ attachment: bothMissing })).resolves.toMatchObject({
+        ok: false,
+        error: { code: "STORY_NOT_FOUND", storyId: bothMissing.storyId },
+      });
+      await expect(
+        pool.query<{ count: string }>("SELECT count(*) FROM storyrail.story_source_attachments"),
+      ).resolves.toMatchObject({ rows: [{ count: "0" }] });
+    });
+
+    it("restricts updates and deletion of either attached parent", async () => {
+      const repository = createPostgresStorySourceAttachmentRepository({ pool });
+      const attachment = makeAttachment("restrict-parents");
+      await persistAttachmentParents(attachment);
+      await repository.attach({ attachment });
+
+      await expect(
+        pool.query("DELETE FROM storyrail.stories WHERE story_id = $1", [attachment.storyId]),
+      ).rejects.toMatchObject({ code: "23001" });
+      await expect(
+        pool.query("DELETE FROM storyrail.url_sources WHERE source_id = $1", [attachment.sourceId]),
+      ).rejects.toMatchObject({ code: "23001" });
+      await expect(
+        pool.query(
+          `UPDATE storyrail.stories
+           SET story_id = $1,
+               payload = jsonb_set(payload, '{id}', to_jsonb($1::text))
+           WHERE story_id = $2`,
+          [storyId("replacement-attached-story"), attachment.storyId],
+        ),
+      ).rejects.toMatchObject({ code: "23001" });
+      await expect(
+        pool.query(
+          `UPDATE storyrail.url_sources
+           SET source_id = $1,
+               payload = jsonb_set(payload, '{id}', to_jsonb($1::text))
+           WHERE source_id = $2`,
+          [sourceId("replacement-attached-source"), attachment.sourceId],
+        ),
+      ).rejects.toMatchObject({ code: "23001" });
+    });
+  });
+
   describe("database races", () => {
     it("uses a Pool capable of assigning concurrent work to distinct PostgreSQL connections", async () => {
       const [firstClient, secondClient] = await Promise.all([pool.connect(), pool.connect()]);
@@ -922,6 +1404,76 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await expect(
         repository.persist({ story: successes[0]?.ok ? successes[0].story : first }),
       ).resolves.toEqual(successes[0]);
+    });
+
+    it("linearizes concurrent exact attachment writes to one row and two successes", async () => {
+      const firstRepository = createPostgresStorySourceAttachmentRepository({ pool });
+      const secondRepository = createPostgresStorySourceAttachmentRepository({ pool });
+      const attachment = makeAttachment("race-exact-attachment");
+      const story = makeStory("race-exact-attachment", { id: attachment.storyId });
+      const source = makeSource("race-exact-attachment");
+      await createPostgresStoryRepository({ pool }).persist({ story });
+      await createPostgresSourceRepositories({ pool }).sources.persist({
+        source: { ...source, id: attachment.sourceId },
+      });
+
+      const results = await Promise.all([
+        firstRepository.attach({ attachment }),
+        secondRepository.attach({ attachment: structuredClone(attachment) }),
+      ]);
+
+      expect(results).toEqual([
+        { ok: true, attachment },
+        { ok: true, attachment },
+      ]);
+      await expect(
+        pool.query<{ count: string }>(
+          `SELECT count(*)
+           FROM storyrail.story_source_attachments
+           WHERE story_id = $1 AND source_id = $2`,
+          [attachment.storyId, attachment.sourceId],
+        ),
+      ).resolves.toMatchObject({ rows: [{ count: "1" }] });
+    });
+
+    it("linearizes concurrent divergent attachment writes to one winner and one conflict", async () => {
+      const repository = createPostgresStorySourceAttachmentRepository({ pool });
+      const first = makeAttachment("race-divergent-attachment");
+      const second = { ...first, relevance: "Divergent relationship relevance" };
+      const story = makeStory("race-divergent-attachment", { id: first.storyId });
+      const source = makeSource("race-divergent-attachment");
+      await createPostgresStoryRepository({ pool }).persist({ story });
+      await createPostgresSourceRepositories({ pool }).sources.persist({
+        source: { ...source, id: first.sourceId },
+      });
+
+      const results = await Promise.all([
+        repository.attach({ attachment: first }),
+        repository.attach({ attachment: second }),
+      ]);
+      const successes = results.filter((result) => result.ok);
+      const conflicts = results.filter((result) => !result.ok);
+
+      expect(successes).toHaveLength(1);
+      expect(conflicts).toEqual([
+        {
+          ok: false,
+          error: {
+            code: "STORY_SOURCE_CONFLICT",
+            message:
+              "A different Story-Source attachment for the same Story and Source already exists.",
+            storyId: first.storyId,
+            sourceId: first.sourceId,
+          },
+        },
+      ]);
+      expect([first, second]).toContainEqual(successes[0]?.ok && successes[0].attachment);
+      await expect(
+        repository.attach({ attachment: successes[0]?.ok ? successes[0].attachment : first }),
+      ).resolves.toEqual(successes[0]);
+      await expect(
+        pool.query<{ count: string }>("SELECT count(*) FROM storyrail.story_source_attachments"),
+      ).resolves.toMatchObject({ rows: [{ count: "1" }] });
     });
 
     it("linearizes concurrent exact Source replays to one stored row", async () => {
@@ -1195,6 +1747,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       } finally {
         await pool.query(sourceMigrationSql);
         await pool.query(storyMigrationSql);
+        await pool.query(attachmentMigrationSql);
       }
     });
 
@@ -1209,6 +1762,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     it("does not translate Story query failures into expected persistence results", async () => {
       const repository = createPostgresStoryRepository({ pool });
       const story = makeStory("query-failure");
+      await pool.query("DROP TABLE storyrail.story_source_attachments");
       await pool.query("DROP TABLE storyrail.stories");
 
       try {
@@ -1220,6 +1774,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         });
       } finally {
         await pool.query(storyMigrationSql);
+        await pool.query(attachmentMigrationSql);
       }
     });
 
@@ -1229,6 +1784,56 @@ describePostgres("PostgreSQL persistence repositories", () => {
       const repository = createPostgresStoryRepository({ pool: closedPool });
 
       await expect(repository.persist({ story: makeStory("closed-pool") })).rejects.toBeTruthy();
+    });
+
+    it("does not translate attachment query failures into expected repository results", async () => {
+      const repository = createPostgresStorySourceAttachmentRepository({ pool });
+      const attachment = makeAttachment("query-failure");
+      await pool.query("DROP TABLE storyrail.story_source_attachments");
+
+      try {
+        const operation = repository.attach({ attachment });
+        await expect(operation).rejects.toBeTruthy();
+        await expect(operation).rejects.not.toMatchObject({
+          ok: false,
+          error: {
+            code: expect.stringMatching(
+              /^(STORY_SOURCE_CONFLICT|STORY_NOT_FOUND|SOURCE_NOT_FOUND)$/,
+            ),
+          },
+        });
+      } finally {
+        await pool.query(attachmentMigrationSql);
+      }
+    });
+
+    it("does not translate attachment connection failures into expected repository results", async () => {
+      const closedPool = new Pool({ connectionString: databaseUrl });
+      await closedPool.end();
+      const repository = createPostgresStorySourceAttachmentRepository({ pool: closedPool });
+
+      await expect(
+        repository.attach({ attachment: makeAttachment("closed-pool") }),
+      ).rejects.toBeTruthy();
+    });
+
+    it("propagates the exact attachment serialization failure before querying PostgreSQL", async () => {
+      const failure = new Error("attachment serialization failed");
+      const repository = createPostgresStorySourceAttachmentRepository({ pool });
+      const attachment = {
+        ...makeAttachment("serialization-failure"),
+        attachedBy: {
+          ...OPERATOR,
+          toJSON() {
+            throw failure;
+          },
+        } as unknown as OperatorActor,
+      };
+
+      await expect(repository.attach({ attachment })).rejects.toBe(failure);
+      await expect(
+        pool.query<{ count: string }>("SELECT count(*) FROM storyrail.story_source_attachments"),
+      ).resolves.toMatchObject({ rows: [{ count: "0" }] });
     });
 
     it("does not open or close the injected Pool while constructing repositories", async () => {
@@ -1250,6 +1855,19 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await expect(
         repository.persist({ story: makeStory("factory-boundary") }),
       ).resolves.toMatchObject({ ok: true });
+      await expect(pool.query("SELECT 1 AS healthy")).resolves.toMatchObject({
+        rows: [{ healthy: 1 }],
+      });
+    });
+
+    it("does not connect or close the injected Pool while constructing the attachment repository", async () => {
+      const connectionCountBefore = pool.totalCount;
+      const repository = createPostgresStorySourceAttachmentRepository({ pool });
+
+      expect(pool.totalCount).toBe(connectionCountBefore);
+      await expect(
+        repository.attach({ attachment: makeAttachment("factory-boundary") }),
+      ).resolves.toMatchObject({ ok: false, error: { code: "STORY_NOT_FOUND" } });
       await expect(pool.query("SELECT 1 AS healthy")).resolves.toMatchObject({
         rows: [{ healthy: 1 }],
       });
