@@ -24,11 +24,13 @@ import {
 } from "@/domain/editorial";
 import { describeSourceRepositoriesContract } from "@/application/source-persistence/source-repositories.contract";
 import { describeStoryInspectionRepositoryContract } from "@/application/story-inspection/story-inspection-repository.contract";
+import { describeStoryListingRepositoryContract } from "@/application/story-listing/story-listing-repository.contract";
 import { describeStoryRepositoryContract } from "@/application/story-persistence/story-repository.contract";
 import { describeStorySourceAttachmentRepositoryContract } from "@/application/story-source-persistence/story-source-attachment-repository.contract";
 
 import { createPostgresSourceRepositories } from "./postgres-source-repositories";
 import { createPostgresStoryInspectionRepository } from "../story-inspection/postgres-story-inspection-repository";
+import { createPostgresStoryListingRepository } from "../story-listing/postgres-story-listing-repository";
 import { createPostgresStoryRepository } from "../story-persistence/postgres-story-repository";
 import { createPostgresStorySourceAttachmentRepository } from "../story-source-persistence/postgres-story-source-attachment-repository";
 
@@ -247,6 +249,44 @@ describePostgres("PostgreSQL persistence repositories", () => {
       }
     },
   }));
+  describeStoryListingRepositoryContract(() => {
+    let sourceSequence = 0;
+    return {
+      createRepository: () => createPostgresStoryListingRepository({ pool }),
+      async addStory(story) {
+        const result = await createPostgresStoryRepository({ pool }).persist({ story });
+        if (!result.ok) throw new Error("The Story listing contract Story write must succeed.");
+      },
+      async attachSource(storyIdentity, sourceIdentity) {
+        sourceSequence += 1;
+        const source = {
+          ...makeSource(
+            `listing-${sourceSequence}`,
+            OPERATOR,
+            `https://example.com/listing-contract/${sourceSequence}`,
+          ),
+          id: sourceIdentity,
+        };
+        const sourceResult = await createPostgresSourceRepositories({ pool }).sources.persist({
+          source,
+        });
+        if (!sourceResult.ok) {
+          throw new Error("The Story listing contract Source write must succeed.");
+        }
+        const attachmentResult = await createPostgresStorySourceAttachmentRepository({
+          pool,
+        }).attach({
+          attachment: makeAttachment(`listing-${sourceSequence}`, {
+            storyId: storyIdentity,
+            sourceId: sourceIdentity,
+          }),
+        });
+        if (!attachmentResult.ok) {
+          throw new Error("The Story listing contract attachment write must succeed.");
+        }
+      },
+    };
+  });
   describeStorySourceAttachmentRepositoryContract(() => {
     let sourceSequence = 0;
     return {
@@ -1834,6 +1874,23 @@ describePostgres("PostgreSQL persistence repositories", () => {
   });
 
   describe("safe failure boundaries", () => {
+    it("does not translate Story listing query failures into an empty collection", async () => {
+      const client = await pool.connect();
+
+      try {
+        await client.query("BEGIN");
+        await client.query("DROP TABLE storyrail.story_source_attachments");
+        const repository = createPostgresStoryListingRepository({
+          pool: client as unknown as Pool,
+        });
+
+        await expect(repository.list()).rejects.toBeTruthy();
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    });
+
     it("does not translate Story inspection query failures into STORY_NOT_FOUND", async () => {
       const client = await pool.connect();
 

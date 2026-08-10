@@ -503,6 +503,13 @@
   font-weight: 700;
 }
 
+.fieldError {
+  margin: -0.15rem 0 0;
+  color: #f0a49b;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
 .storyCreationForm input,
 .storyCreationForm textarea,
 .storyCreationForm button {

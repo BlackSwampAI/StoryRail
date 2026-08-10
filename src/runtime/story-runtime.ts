@@ -3,10 +3,12 @@ import { randomUUID } from "node:crypto";
 import { Pool, type PoolConfig } from "pg";
 
 import { createPostgresStoryInspectionRepository } from "@/adapters/story-inspection";
+import { createPostgresStoryListingRepository } from "@/adapters/story-listing";
 import { createPostgresStoryRepository } from "@/adapters/story-persistence";
 import { createPostgresStorySourceAttachmentRepository } from "@/adapters/story-source-persistence";
 import { createCreateStory, type CreateStoryWorkflow } from "@/application/story-creation";
 import type { StoryInspectionRepository } from "@/application/story-inspection";
+import type { StoryListingRepository } from "@/application/story-listing";
 import {
   createAttachSourceToStory,
   type AttachSourceToStoryWorkflow,
@@ -17,6 +19,7 @@ export interface StoryRuntime {
   readonly createStory: CreateStoryWorkflow;
   readonly attachSourceToStory: AttachSourceToStoryWorkflow;
   readonly inspectStory: StoryInspectionRepository["inspect"];
+  readonly listStories: StoryListingRepository["list"];
   close(): Promise<void>;
 }
 
@@ -51,6 +54,7 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
   const storyRepository = createPostgresStoryRepository({ pool });
   const attachmentRepository = createPostgresStorySourceAttachmentRepository({ pool });
   const inspectionRepository = createPostgresStoryInspectionRepository({ pool });
+  const listingRepository = createPostgresStoryListingRepository({ pool });
   const createStory = createCreateStory({
     storyRepository,
     createStoryId: () => storyId(createUuid()),
@@ -59,12 +63,14 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
   const attachSourceToStory = createAttachSourceToStory({ attachmentRepository, now });
   const inspectStory: StoryInspectionRepository["inspect"] = (identity) =>
     inspectionRepository.inspect(identity);
+  const listStories: StoryListingRepository["list"] = () => listingRepository.list();
   let closePromise: Promise<void> | undefined;
 
   return Object.freeze({
     createStory,
     attachSourceToStory,
     inspectStory,
+    listStories,
     close() {
       closePromise ??= Promise.resolve().then(() => pool.end());
       return closePromise;

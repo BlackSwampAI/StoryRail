@@ -4,9 +4,11 @@ import type { Pool, PoolConfig } from "pg";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createPostgresStoryInspectionRepository } from "@/adapters/story-inspection";
+import { createPostgresStoryListingRepository } from "@/adapters/story-listing";
 import { createPostgresStoryRepository } from "@/adapters/story-persistence";
 import { createPostgresStorySourceAttachmentRepository } from "@/adapters/story-source-persistence";
 import type { StoryInspectionRepository } from "@/application/story-inspection";
+import type { StoryListingRepository } from "@/application/story-listing";
 import type { StoryRepository } from "@/application/story-persistence";
 import type { StorySourceAttachmentRepository } from "@/application/story-source-persistence";
 import { operatorId, sourceId, storyId } from "@/domain/editorial";
@@ -21,6 +23,7 @@ const factoryMocks = vi.hoisted(() => ({
   createStoryRepository: vi.fn(),
   createAttachmentRepository: vi.fn(),
   createInspectionRepository: vi.fn(),
+  createListingRepository: vi.fn(),
 }));
 
 vi.mock("@/adapters/story-persistence", () => ({
@@ -33,6 +36,10 @@ vi.mock("@/adapters/story-source-persistence", () => ({
 
 vi.mock("@/adapters/story-inspection", () => ({
   createPostgresStoryInspectionRepository: factoryMocks.createInspectionRepository,
+}));
+
+vi.mock("@/adapters/story-listing", () => ({
+  createPostgresStoryListingRepository: factoryMocks.createListingRepository,
 }));
 
 const DATABASE_URL = "opaque-story-runtime-database-configuration";
@@ -81,8 +88,11 @@ function makeRepositories() {
       },
     })),
   };
+  const listingRepository: StoryListingRepository = {
+    list: vi.fn<StoryListingRepository["list"]>(async () => []),
+  };
 
-  return { storyRepository, attachmentRepository, inspectionRepository };
+  return { storyRepository, attachmentRepository, inspectionRepository, listingRepository };
 }
 
 beforeEach(() => {
@@ -93,10 +103,11 @@ beforeEach(() => {
   factoryMocks.createStoryRepository.mockReturnValue(repositories.storyRepository);
   factoryMocks.createAttachmentRepository.mockReturnValue(repositories.attachmentRepository);
   factoryMocks.createInspectionRepository.mockReturnValue(repositories.inspectionRepository);
+  factoryMocks.createListingRepository.mockReturnValue(repositories.listingRepository);
 });
 
 describe("createStoryRuntime", () => {
-  it("owns one inert Pool and composes the three existing PostgreSQL adapters", () => {
+  it("owns one inert Pool and composes all Story PostgreSQL adapters", () => {
     const controlledPool = makePool();
     const createPool = vi.fn<(configuration: PoolConfig) => Pool>(() => controlledPool.pool);
     const createUuid = vi.fn(() => STORY_UUID);
@@ -117,6 +128,9 @@ describe("createStoryRuntime", () => {
     expect(createPostgresStoryInspectionRepository).toHaveBeenCalledWith({
       pool: controlledPool.pool,
     });
+    expect(createPostgresStoryListingRepository).toHaveBeenCalledWith({
+      pool: controlledPool.pool,
+    });
     expect(controlledPool.query).not.toHaveBeenCalled();
     expect(createUuid).not.toHaveBeenCalled();
     expect(now).not.toHaveBeenCalled();
@@ -125,6 +139,7 @@ describe("createStoryRuntime", () => {
       "createStory",
       "attachSourceToStory",
       "inspectStory",
+      "listStories",
       "close",
     ]);
     expect(JSON.stringify(runtime)).not.toContain(DATABASE_URL);
@@ -136,6 +151,7 @@ describe("createStoryRuntime", () => {
     factoryMocks.createStoryRepository.mockReturnValue(repositories.storyRepository);
     factoryMocks.createAttachmentRepository.mockReturnValue(repositories.attachmentRepository);
     factoryMocks.createInspectionRepository.mockReturnValue(repositories.inspectionRepository);
+    factoryMocks.createListingRepository.mockReturnValue(repositories.listingRepository);
     const createUuid = vi.fn(() => STORY_UUID);
     const now = vi
       .fn<() => string>()
@@ -156,6 +172,7 @@ describe("createStoryRuntime", () => {
       attachedBy: OPERATOR,
     });
     const inspectionResult = await runtime.inspectStory(storyId(STORY_UUID));
+    const listingResult = await runtime.listStories();
 
     expect(createResult).toMatchObject({
       ok: true,
@@ -185,6 +202,8 @@ describe("createStoryRuntime", () => {
       ok: false,
       error: { code: "STORY_NOT_FOUND" },
     });
+    expect(repositories.listingRepository.list).toHaveBeenCalledOnce();
+    expect(listingResult).toEqual([]);
     expect(createUuid).toHaveBeenCalledOnce();
     expect(now).toHaveBeenCalledTimes(2);
   });

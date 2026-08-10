@@ -1,20 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import type { StoryInspection } from "@/application/story-inspection";
-import type { EditorialActor, StoryId, StoryState } from "@/domain/editorial";
-
+import type { StoryListItem } from "@/application/story-listing";
 import {
-  NEWSROOM_QUEUES,
-  NEWSROOM_STORIES,
-  STORY_STATE_LABELS,
-  type NewsroomStoryFixture,
-} from "./newsroom-fixtures";
+  STORY_STATES,
+  type EditorialActor,
+  type StoryId,
+  type StoryState,
+} from "@/domain/editorial";
+
 import styles from "./newsroom-shell.module.css";
+import { STORY_STATE_LABELS } from "./newsroom-state";
 import { SourceEvidenceWorkspace } from "./source-evidence-workspace";
 import type { RequestSourceEvidenceUrl } from "./source-evidence-url-client";
-import type { StoryClient } from "./story-client";
+import { storyClient, type StoryClient } from "./story-client";
 
 type WorkspaceMode = "story" | "source-intake" | "assistant";
 
@@ -23,99 +24,12 @@ export interface NewsroomShellProps {
   readonly storyRequests?: StoryClient;
 }
 
-const dateFormatter = new Intl.DateTimeFormat("en-US", {
-  dateStyle: "medium",
-  timeStyle: "short",
-  timeZone: "UTC",
-});
-
-function formatDate(value: string): string {
-  return dateFormatter.format(new Date(value));
-}
-
 function pluralizeStories(count: number): string {
   return `${count} ${count === 1 ? "story" : "stories"}`;
 }
 
 function pluralizeSources(count: number): string {
   return `${count} ${count === 1 ? "source" : "sources"}`;
-}
-
-function FixtureStoryWorkspace({ story }: Readonly<{ story: NewsroomStoryFixture | undefined }>) {
-  if (!story) {
-    return (
-      <section className={styles.emptyWorkspace} aria-labelledby="empty-workspace-title">
-        <p className={styles.sectionKicker}>Story workspace</p>
-        <h2 id="empty-workspace-title">No Story selected</h2>
-        <p>This queue is empty. Choose another queue to inspect its editorial Stories.</p>
-      </section>
-    );
-  }
-
-  return (
-    <article className={styles.storyWorkspace} aria-labelledby="workspace-story-title">
-      <header className={styles.workspaceHeader}>
-        <div>
-          <p className={styles.sectionKicker}>Selected Story</p>
-          <h2 id="workspace-story-title">{story.title}</h2>
-        </div>
-        <span className={styles.stateBadge}>{STORY_STATE_LABELS[story.state]}</span>
-      </header>
-
-      <p className={styles.summary}>{story.summary}</p>
-
-      <dl className={styles.storyFacts}>
-        <div>
-          <dt>Revision cycle</dt>
-          <dd>{story.revisionCycle}</dd>
-        </div>
-        <div>
-          <dt>Sources</dt>
-          <dd>{story.sourceCount}</dd>
-        </div>
-        <div>
-          <dt>Assigned role</dt>
-          <dd>{story.assignedRole}</dd>
-        </div>
-      </dl>
-
-      <div className={styles.timestamps}>
-        <p>
-          Created <time dateTime={story.createdAt}>{formatDate(story.createdAt)}</time>
-        </p>
-        <p>
-          Updated <time dateTime={story.updatedAt}>{formatDate(story.updatedAt)}</time>
-        </p>
-      </div>
-
-      <div className={styles.workspaceSections}>
-        <section aria-labelledby="sources-heading">
-          <p className={styles.sectionNumber}>01</p>
-          <h3 id="sources-heading">Sources</h3>
-          <p>
-            {pluralizeSources(story.sourceCount)} noted for this Story. Source records and
-            provenance will appear here in a later batch.
-          </p>
-        </section>
-        <section aria-labelledby="assignment-heading">
-          <p className={styles.sectionNumber}>02</p>
-          <h3 id="assignment-heading">Assignment</h3>
-          <p>
-            Current desk role: {story.assignedRole}. A durable assignment brief has not been
-            connected to this presentation prototype.
-          </p>
-        </section>
-        <section aria-labelledby="activity-heading">
-          <p className={styles.sectionNumber}>03</p>
-          <h3 id="activity-heading">Activity</h3>
-          <p>{story.lastActivity}</p>
-          <p className={styles.placeholderNote}>
-            Durable receipts and agent-run history are deferred.
-          </p>
-        </section>
-      </div>
-    </article>
-  );
 }
 
 function actorLabel(actor: EditorialActor): string {
@@ -157,10 +71,10 @@ function PersistedStoryWorkspace({ inspection }: Readonly<{ inspection: StoryIns
       </dl>
       <div className={styles.timestamps}>
         <p>
-          Created <time dateTime={story.createdAt}>{formatDate(story.createdAt)}</time>
+          Created <time dateTime={story.createdAt}>{story.createdAt}</time>
         </p>
         <p>
-          Updated <time dateTime={story.updatedAt}>{formatDate(story.updatedAt)}</time>
+          Updated <time dateTime={story.updatedAt}>{story.updatedAt}</time>
         </p>
       </div>
       <p className={styles.auditFact}>Story ID: {story.id}</p>
@@ -197,7 +111,7 @@ function PersistedStoryWorkspace({ inspection }: Readonly<{ inspection: StoryIns
                 <div>
                   <dt>Source received</dt>
                   <dd>
-                    <time dateTime={source.receivedAt}>{formatDate(source.receivedAt)}</time>
+                    <time dateTime={source.receivedAt}>{source.receivedAt}</time>
                   </dd>
                 </div>
                 <div>
@@ -207,9 +121,7 @@ function PersistedStoryWorkspace({ inspection }: Readonly<{ inspection: StoryIns
                 <div>
                   <dt>Attached</dt>
                   <dd>
-                    <time dateTime={attachment.attachedAt}>
-                      {formatDate(attachment.attachedAt)}
-                    </time>
+                    <time dateTime={attachment.attachedAt}>{attachment.attachedAt}</time>
                   </dd>
                 </div>
                 <div>
@@ -252,30 +164,94 @@ function AssistantWorkspace() {
   );
 }
 
+type StoryListingState =
+  | { readonly kind: "loading" }
+  | { readonly kind: "loaded"; readonly items: readonly StoryListItem[] }
+  | { readonly kind: "unavailable" };
+
 type StorySelection =
-  | { readonly kind: "fixture"; readonly storyId: StoryId | undefined }
-  | { readonly kind: "persisted"; readonly inspection: StoryInspection };
+  | { readonly kind: "none" }
+  | { readonly kind: "loading"; readonly storyId: StoryId }
+  | { readonly kind: "loaded"; readonly inspection: StoryInspection }
+  | { readonly kind: "unavailable"; readonly storyId: StoryId };
 
 export function NewsroomShell({ requestSourceEvidence, storyRequests }: NewsroomShellProps) {
+  const requests = storyRequests ?? storyClient;
   const [selectedQueue, setSelectedQueue] = useState<StoryState>("intake");
-  const initialStory = NEWSROOM_STORIES.find((story) => story.state === "intake");
-  const [storySelection, setStorySelection] = useState<StorySelection>({
-    kind: "fixture",
-    storyId: initialStory?.id,
-  });
+  const [listing, setListing] = useState<StoryListingState>({ kind: "loading" });
+  const [storySelection, setStorySelection] = useState<StorySelection>({ kind: "none" });
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("story");
 
-  const visibleStories = NEWSROOM_STORIES.filter((story) => story.state === selectedQueue);
-  const selectedStory =
-    storySelection.kind === "fixture"
-      ? NEWSROOM_STORIES.find((story) => story.id === storySelection.storyId)
-      : undefined;
+  const loadStories = useCallback(async () => {
+    setListing({ kind: "loading" });
+    try {
+      const result = await requests.listStories();
+      setListing(
+        result.kind === "completed"
+          ? { kind: "loaded", items: result.value }
+          : { kind: "unavailable" },
+      );
+    } catch {
+      setListing({ kind: "unavailable" });
+    }
+  }, [requests]);
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const result = await requests.listStories();
+        if (active) {
+          setListing(
+            result.kind === "completed"
+              ? { kind: "loaded", items: result.value }
+              : { kind: "unavailable" },
+          );
+        }
+      } catch {
+        if (active) setListing({ kind: "unavailable" });
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [requests]);
+
+  const items = listing.kind === "loaded" ? listing.items : [];
+  const visibleStories = items.filter(({ story }) => story.state === selectedQueue);
 
   function selectQueue(state: StoryState) {
-    const firstStory = NEWSROOM_STORIES.find((story) => story.state === state);
-
     setSelectedQueue(state);
-    setStorySelection({ kind: "fixture", storyId: firstStory?.id });
+    setStorySelection({ kind: "none" });
+  }
+
+  async function selectStory(identity: StoryId) {
+    setStorySelection({ kind: "loading", storyId: identity });
+    setWorkspaceMode("story");
+    try {
+      const result = await requests.inspectStory(identity);
+      setStorySelection(
+        result.kind === "completed"
+          ? { kind: "loaded", inspection: result.value }
+          : { kind: "unavailable", storyId: identity },
+      );
+    } catch {
+      setStorySelection({ kind: "unavailable", storyId: identity });
+    }
+  }
+
+  function upsertStoryListItem(item: StoryListItem) {
+    setListing((current) => {
+      if (current.kind !== "loaded") return current;
+      const existingIndex = current.items.findIndex(({ story }) => story.id === item.story.id);
+      const nextItems = [...current.items];
+      if (existingIndex === -1) nextItems.push(item);
+      else nextItems[existingIndex] = item;
+      nextItems.sort((left, right) =>
+        left.story.id < right.story.id ? -1 : left.story.id > right.story.id ? 1 : 0,
+      );
+      return { kind: "loaded", items: nextItems };
+    });
   }
 
   return (
@@ -290,21 +266,31 @@ export function NewsroomShell({ requestSourceEvidence, storyRequests }: Newsroom
         </header>
 
         <nav className={styles.queueNavigation} aria-label="Story state queues">
-          <p className={styles.navigationLabel}>Preview queues · fixture data</p>
+          <p className={styles.navigationLabel}>Persisted Story queues</p>
           <div className={styles.queueList}>
-            {NEWSROOM_QUEUES.map((queue) => (
-              <button
-                className={styles.queueButton}
-                type="button"
-                key={queue.state}
-                aria-current={selectedQueue === queue.state ? "page" : undefined}
-                aria-label={`${queue.label}, ${pluralizeStories(queue.count)}`}
-                onClick={() => selectQueue(queue.state)}
-              >
-                <span>{queue.label}</span>
-                <span className={styles.queueCount}>{queue.count}</span>
-              </button>
-            ))}
+            {STORY_STATES.map((state) => {
+              const count = items.filter(({ story }) => story.state === state).length;
+              const label = STORY_STATE_LABELS[state];
+              return (
+                <button
+                  className={styles.queueButton}
+                  type="button"
+                  key={state}
+                  aria-current={selectedQueue === state ? "page" : undefined}
+                  aria-label={
+                    listing.kind === "loaded"
+                      ? `${label}, ${pluralizeStories(count)}`
+                      : `${label}, count unavailable`
+                  }
+                  onClick={() => selectQueue(state)}
+                >
+                  <span>{label}</span>
+                  <span className={styles.queueCount}>
+                    {listing.kind === "loaded" ? count : "—"}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </nav>
 
@@ -314,31 +300,41 @@ export function NewsroomShell({ requestSourceEvidence, storyRequests }: Newsroom
               <p className={styles.navigationLabel}>On the desk</p>
               <h1 id="queue-stories-title">{STORY_STATE_LABELS[selectedQueue]} Stories</h1>
             </div>
-            <span>{visibleStories.length}</span>
+            <span>{listing.kind === "loaded" ? visibleStories.length : "—"}</span>
           </div>
 
-          {visibleStories.length > 0 ? (
+          {listing.kind === "loading" ? (
+            <div className={styles.emptyQueue} role="status" aria-live="polite">
+              <p>Loading persisted Stories…</p>
+              <span>Queue counts are not yet known.</span>
+            </div>
+          ) : listing.kind === "unavailable" ? (
+            <div className={styles.emptyQueue} role="alert">
+              <p>Persisted Stories are unavailable.</p>
+              <span>The newsroom could not load its authoritative Story list.</span>
+              <button
+                className={styles.storyCreationAction}
+                type="button"
+                onClick={() => void loadStories()}
+              >
+                Retry
+              </button>
+            </div>
+          ) : visibleStories.length > 0 ? (
             <div className={styles.storyList}>
-              {visibleStories.map((story) => (
+              {visibleStories.map(({ story, sourceCount }) => (
                 <button
                   className={styles.storyCard}
                   type="button"
                   key={story.id}
                   aria-pressed={
-                    storySelection.kind === "fixture" && storySelection.storyId === story.id
+                    storySelection.kind === "loaded" &&
+                    storySelection.inspection.story.id === story.id
                   }
-                  onClick={() => {
-                    setStorySelection({ kind: "fixture", storyId: story.id });
-                    setWorkspaceMode("story");
-                  }}
+                  onClick={() => void selectStory(story.id)}
                 >
                   <span className={styles.storyCardTitle}>{story.title}</span>
-                  <span className={styles.storyCardMeta}>
-                    {pluralizeSources(story.sourceCount)}
-                    <span aria-hidden="true"> · </span>
-                    {story.assignedRole}
-                  </span>
-                  <span className={styles.storyCardActivity}>{story.lastActivity}</span>
+                  <span className={styles.storyCardMeta}>{pluralizeSources(sourceCount)}</span>
                 </button>
               ))}
             </div>
@@ -380,18 +376,49 @@ export function NewsroomShell({ requestSourceEvidence, storyRequests }: Newsroom
         </header>
 
         <div hidden={workspaceMode !== "story"}>
-          {storySelection.kind === "persisted" ? (
+          {storySelection.kind === "loaded" ? (
             <PersistedStoryWorkspace inspection={storySelection.inspection} />
+          ) : storySelection.kind === "loading" ? (
+            <section className={styles.emptyWorkspace} role="status">
+              <p className={styles.sectionKicker}>Story workspace</p>
+              <h2>Loading authoritative Story…</h2>
+            </section>
+          ) : storySelection.kind === "unavailable" ? (
+            <section className={styles.emptyWorkspace} role="alert">
+              <p className={styles.sectionKicker}>Story workspace</p>
+              <h2>Story inspection unavailable</h2>
+              <p>The authoritative Story inspection could not be loaded.</p>
+              <button
+                className={styles.storyCreationAction}
+                type="button"
+                onClick={() => void selectStory(storySelection.storyId)}
+              >
+                Retry inspection
+              </button>
+            </section>
           ) : (
-            <FixtureStoryWorkspace story={selectedStory} />
+            <section className={styles.emptyWorkspace} aria-labelledby="empty-workspace-title">
+              <p className={styles.sectionKicker}>Story workspace</p>
+              <h2 id="empty-workspace-title">No Story selected</h2>
+              <p>Choose a persisted Story card to load its authoritative inspection.</p>
+            </section>
           )}
         </div>
         <div hidden={workspaceMode !== "source-intake"}>
           <SourceEvidenceWorkspace
             requestSourceEvidence={requestSourceEvidence}
-            storyRequests={storyRequests}
+            storyRequests={requests}
+            onStoryCreated={(story) => {
+              upsertStoryListItem({ story, sourceCount: 0 });
+              setSelectedQueue(story.state);
+            }}
             onStoryLoaded={(inspection) => {
-              setStorySelection({ kind: "persisted", inspection });
+              upsertStoryListItem({
+                story: inspection.story,
+                sourceCount: inspection.sources.length,
+              });
+              setSelectedQueue(inspection.story.state);
+              setStorySelection({ kind: "loaded", inspection });
               setWorkspaceMode("story");
             }}
           />

@@ -57,7 +57,7 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The page should identify StoryRail as a pre-alpha editorial control plane. A fixture-backed newsroom shell exists, while editorial domain behavior and Source-extraction orchestration are not yet wired into the UI.
+Open [http://localhost:3000](http://localhost:3000). The page should identify StoryRail as a pre-alpha editorial control plane. Its newsroom queues load persisted Stories and the connected Source-intake workflow can preserve and extract a URL, create a Story, attach the Source, and load the authoritative Story inspection.
 
 Manual verification is maintainer-owned. Run the project checks in this order:
 
