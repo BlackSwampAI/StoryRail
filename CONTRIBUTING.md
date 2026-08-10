@@ -47,14 +47,16 @@ The single application package uses pnpm scripts:
 
 Agents may write or update the code, tests, and configuration behind these commands, but only Chris executes installation and validation. Handoffs must give Chris an ordered command sequence beginning with `pnpm install --frozen-lockfile` before project checks.
 
-## Source-evidence runtime configuration
+## Server runtime configuration
 
 The server-only Source-evidence runtime requires these production variable names:
 
 - `STORYRAIL_DATABASE_URL`
 - `FIRECRAWL_API_KEY`
 
-`.env.example` documents names only. Never commit credentials, connection strings, or working example values. Runtime unit tests inject Pool, fetch, UUID, and clock substitutes, so they require no real PostgreSQL or Firecrawl access. PostgreSQL migrations must be applied externally before a composed runtime can persist Source evidence; application runtime does not execute them. Ordinary validation must never make Firecrawl, other provider, or production database requests.
+The separate server-only Story runtime requires only `STORYRAIL_DATABASE_URL`; Story creation, Source attachment, and Story inspection do not require Firecrawl.
+
+`.env.example` documents names only. Never commit credentials, connection strings, or working example values. Runtime unit tests inject Pool, fetch, UUID, and clock substitutes, so they require no real PostgreSQL or Firecrawl access. PostgreSQL migrations must be applied externally before a composed runtime can persist Source evidence or Story state; application runtime does not execute them. Ordinary validation must never make Firecrawl, other provider, or production database requests.
 
 ## PostgreSQL integration tests
 
