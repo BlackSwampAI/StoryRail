@@ -87,6 +87,38 @@ describe("story-client", () => {
     expect(String(fetch.mock.calls[1]![1]?.body)).not.toMatch(/operator|provenance|actor/i);
   });
 
+  it("accepts opaque timestamp strings from the server and domain contract", async () => {
+    const opaqueInspection = {
+      story: {
+        ...STORY,
+        createdAt: "opaque-story-created",
+        updatedAt: "opaque-story-updated",
+      },
+      sources: [
+        {
+          attachment: { ...ATTACHMENT, attachedAt: "opaque-attachment-time" },
+          source: { ...SOURCE, receivedAt: "opaque-source-received" },
+        },
+      ],
+    };
+    const timestamps = [
+      opaqueInspection.story.createdAt,
+      opaqueInspection.story.updatedAt,
+      opaqueInspection.sources[0].source.receivedAt,
+      opaqueInspection.sources[0].attachment.attachedAt,
+    ];
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(200, { ok: true, inspection: opaqueInspection }),
+    );
+
+    expect(timestamps.every((timestamp) => Number.isNaN(Date.parse(timestamp)))).toBe(true);
+    await expect(createStoryClient({ fetch }).inspectStory(STORY.id)).resolves.toEqual({
+      kind: "completed",
+      value: opaqueInspection,
+    });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
   it.each([
     ["create", 422, "STORY_TITLE_REQUIRED"],
     ["attach", 409, "STORY_SOURCE_CONFLICT"],

@@ -47,10 +47,6 @@ function isString(value: unknown): value is string {
   return typeof value === "string";
 }
 
-function isTimestamp(value: unknown): value is string {
-  return isString(value) && !Number.isNaN(Date.parse(value));
-}
-
 function isActor(value: unknown): value is EditorialActor {
   if (!isRecord(value) || !isString(value.type)) return false;
   return value.type === "operator"
@@ -71,8 +67,8 @@ function isStory(value: unknown): value is Story {
     typeof value.revisionCycle === "number" &&
     Number.isInteger(value.revisionCycle) &&
     value.revisionCycle >= 0 &&
-    isTimestamp(value.createdAt) &&
-    isTimestamp(value.updatedAt)
+    isString(value.createdAt) &&
+    isString(value.updatedAt)
   );
 }
 
@@ -84,7 +80,7 @@ function isSource(value: unknown): value is UrlSource {
     isString(value.submittedUrl) &&
     isString(value.canonicalUrl) &&
     isActor(value.submittedBy) &&
-    isTimestamp(value.receivedAt)
+    isString(value.receivedAt)
   );
 }
 
@@ -95,7 +91,7 @@ function isAttachment(value: unknown): value is StorySourceAttachment {
     isString(value.sourceId) &&
     isString(value.relevance) &&
     isActor(value.attachedBy) &&
-    isTimestamp(value.attachedAt)
+    isString(value.attachedAt)
   );
 }
 
