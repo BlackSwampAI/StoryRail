@@ -38,6 +38,43 @@ function response(status: number, body: unknown): Response {
 }
 
 describe("story-client", () => {
+  it("sends the exact listing GET and parses complete and empty listings", async () => {
+    const opaqueStory = { ...STORY, createdAt: "opaque-created", updatedAt: "opaque-updated" };
+    const fetch = vi
+      .fn<StoryClientDependencies["fetch"]>()
+      .mockResolvedValueOnce(
+        response(200, { ok: true, stories: [{ story: opaqueStory, sourceCount: 3 }] }),
+      )
+      .mockResolvedValueOnce(response(200, { ok: true, stories: [] }));
+    const client = createStoryClient({ fetch });
+
+    await expect(client.listStories()).resolves.toEqual({
+      kind: "completed",
+      value: [{ story: opaqueStory, sourceCount: 3 }],
+    });
+    await expect(client.listStories()).resolves.toEqual({ kind: "completed", value: [] });
+    expect(fetch.mock.calls).toEqual([
+      ["/api/stories", { method: "GET", headers: { Accept: "application/json" } }],
+      ["/api/stories", { method: "GET", headers: { Accept: "application/json" } }],
+    ]);
+  });
+
+  it.each([
+    { ok: true, stories: [{ story: STORY, sourceCount: -1 }] },
+    { ok: true, stories: [{ story: STORY, sourceCount: 1.5 }] },
+    { ok: true, stories: [{ story: { id: STORY.id }, sourceCount: 0 }] },
+    { ok: true, stories: [{ story: { ...STORY, summary: "invented" }, sourceCount: 0 }] },
+    { ok: true, stories: {} },
+    { ok: false, stories: [] },
+  ])("fails closed for malformed listing response %# without retry", async (body) => {
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () => response(200, body));
+    await expect(createStoryClient({ fetch }).listStories()).resolves.toEqual({
+      kind: "unavailable",
+      message: STORY_REQUEST_UNAVAILABLE_MESSAGE,
+    });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
   it("sends the exact create, attach, and inspect requests and parses their complete results", async () => {
     const fetch = vi
       .fn<StoryClientDependencies["fetch"]>()
@@ -164,7 +201,7 @@ describe("story-client", () => {
     const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () => {
       throw new Error("postgresql://secret@internal/storyrail");
     });
-    const result = await createStoryClient({ fetch }).inspectStory(STORY.id);
+    const result = await createStoryClient({ fetch }).listStories();
 
     expect(result).toEqual({
       kind: "unavailable",

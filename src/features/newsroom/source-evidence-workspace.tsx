@@ -23,6 +23,7 @@ import {
 export interface SourceEvidenceWorkspaceProps {
   readonly requestSourceEvidence?: RequestSourceEvidenceUrl;
   readonly storyRequests?: StoryClient;
+  readonly onStoryCreated?: (story: Story) => void;
   readonly onStoryLoaded?: (inspection: StoryInspection) => void;
 }
 
@@ -310,19 +311,27 @@ type StoryProgress =
   | { readonly kind: "inspection-failure"; readonly story: Story }
   | { readonly kind: "completed"; readonly story: Story };
 
+interface StoryValidation {
+  readonly title?: string;
+  readonly relevance?: string;
+}
+
 function StoryCreationForm({
   eligible,
   requests,
+  onStoryCreated,
   onStoryLoaded,
 }: Readonly<{
   eligible: EligibleSource;
   requests: StoryClient;
+  onStoryCreated?: (story: Story) => void;
   onStoryLoaded?: (inspection: StoryInspection) => void;
 }>) {
   const [title, setTitle] = useState(eligible.suggestedTitle);
   const [relevance, setRelevance] = useState("");
   const [expanded, setExpanded] = useState(false);
   const [progress, setProgress] = useState<StoryProgress>({ kind: "idle" });
+  const [validation, setValidation] = useState<StoryValidation>({});
   const pendingRef = useRef(false);
   const pending = ["creating", "attaching", "inspecting"].includes(progress.kind);
   const storyExists = [
@@ -332,10 +341,69 @@ function StoryCreationForm({
     "inspection-failure",
     "completed",
   ].includes(progress.kind);
+  const canRetryAttachment =
+    progress.kind === "attachment-failure" &&
+    progress.error?.code === "STORY_SOURCE_RELEVANCE_REQUIRED";
+
+  function validate(requireTitle: boolean): boolean {
+    const next: StoryValidation = {
+      ...(requireTitle && title.trim().length === 0
+        ? { title: "Enter a non-empty Story title." }
+        : {}),
+      ...(relevance.trim().length === 0
+        ? { relevance: "Explain why this Source is relevant to the Story." }
+        : {}),
+    };
+    setValidation(next);
+    return Object.keys(next).length === 0;
+  }
+
+  async function inspectAttachedStory(story: Story): Promise<void> {
+    setProgress({ kind: "inspecting", story });
+    let inspection: Awaited<ReturnType<StoryClient["inspectStory"]>>;
+    try {
+      inspection = await requests.inspectStory(story.id);
+    } catch {
+      setProgress({ kind: "inspection-failure", story });
+      return;
+    }
+    if (inspection.kind !== "completed") {
+      setProgress({ kind: "inspection-failure", story });
+      return;
+    }
+    setProgress({ kind: "completed", story });
+    onStoryLoaded?.(inspection.value);
+  }
+
+  async function attachAndInspect(story: Story): Promise<void> {
+    setProgress({ kind: "attaching", story });
+    let attachment: Awaited<ReturnType<StoryClient["attachSource"]>>;
+    try {
+      attachment = await requests.attachSource(story.id, eligible.sourceId, relevance);
+    } catch {
+      setProgress({ kind: "attachment-failure", story, error: null });
+      return;
+    }
+    if (attachment.kind !== "completed") {
+      if (
+        attachment.kind === "application-failure" &&
+        attachment.error.code === "STORY_SOURCE_RELEVANCE_REQUIRED"
+      ) {
+        onStoryCreated?.(story);
+      }
+      setProgress({
+        kind: "attachment-failure",
+        story,
+        error: attachment.kind === "application-failure" ? attachment.error : null,
+      });
+      return;
+    }
+    await inspectAttachedStory(story);
+  }
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (pendingRef.current) return;
+    if (pendingRef.current || !validate(true)) return;
     pendingRef.current = true;
     setProgress({ kind: "creating" });
 
@@ -356,37 +424,19 @@ function StoryCreationForm({
       }
 
       const story = creation.value;
-      setProgress({ kind: "attaching", story });
-      let attachment: Awaited<ReturnType<StoryClient["attachSource"]>>;
-      try {
-        attachment = await requests.attachSource(story.id, eligible.sourceId, relevance);
-      } catch {
-        setProgress({ kind: "attachment-failure", story, error: null });
-        return;
-      }
-      if (attachment.kind !== "completed") {
-        setProgress({
-          kind: "attachment-failure",
-          story,
-          error: attachment.kind === "application-failure" ? attachment.error : null,
-        });
-        return;
-      }
+      await attachAndInspect(story);
+    } finally {
+      pendingRef.current = false;
+    }
+  }
 
-      setProgress({ kind: "inspecting", story });
-      let inspection: Awaited<ReturnType<StoryClient["inspectStory"]>>;
-      try {
-        inspection = await requests.inspectStory(story.id);
-      } catch {
-        setProgress({ kind: "inspection-failure", story });
-        return;
-      }
-      if (inspection.kind !== "completed") {
-        setProgress({ kind: "inspection-failure", story });
-        return;
-      }
-      setProgress({ kind: "completed", story });
-      onStoryLoaded?.(inspection.value);
+  async function retryAttachment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canRetryAttachment || pendingRef.current || !validate(false)) return;
+    const story = progress.story;
+    pendingRef.current = true;
+    try {
+      await attachAndInspect(story);
     } finally {
       pendingRef.current = false;
     }
@@ -406,21 +456,52 @@ function StoryCreationForm({
           Create Story from Source
         </button>
       ) : (
-        <form className={styles.storyCreationForm} onSubmit={create} aria-busy={pending}>
+        <form
+          className={styles.storyCreationForm}
+          onSubmit={canRetryAttachment ? retryAttachment : create}
+          aria-busy={pending}
+        >
           <label htmlFor="story-title">Story title</label>
           <input
             id="story-title"
             value={title}
-            onChange={(event) => setTitle(event.currentTarget.value)}
+            disabled={storyExists}
+            aria-invalid={validation.title === undefined ? undefined : true}
+            aria-describedby={validation.title === undefined ? undefined : "story-title-error"}
+            onChange={(event) => {
+              setTitle(event.currentTarget.value);
+              setValidation((current) => ({ ...current, title: undefined }));
+            }}
           />
+          {validation.title === undefined ? null : (
+            <p id="story-title-error" className={styles.fieldError} role="alert">
+              {validation.title}
+            </p>
+          )}
           <label htmlFor="source-relevance">Why is this Source relevant?</label>
           <textarea
             id="source-relevance"
             value={relevance}
-            onChange={(event) => setRelevance(event.currentTarget.value)}
+            aria-invalid={validation.relevance === undefined ? undefined : true}
+            aria-describedby={
+              validation.relevance === undefined ? undefined : "source-relevance-error"
+            }
+            onChange={(event) => {
+              setRelevance(event.currentTarget.value);
+              setValidation((current) => ({ ...current, relevance: undefined }));
+            }}
           />
-          <button type="submit" disabled={pending || storyExists}>
-            {storyExists && !pending ? "Story already created" : "Create Story"}
+          {validation.relevance === undefined ? null : (
+            <p id="source-relevance-error" className={styles.fieldError} role="alert">
+              {validation.relevance}
+            </p>
+          )}
+          <button type="submit" disabled={pending || (storyExists && !canRetryAttachment)}>
+            {canRetryAttachment
+              ? "Retry Source attachment"
+              : storyExists && !pending
+                ? "Story already created"
+                : "Create Story"}
           </button>
           {pending ? (
             <p className={styles.pendingStatus} role="status">
@@ -442,11 +523,22 @@ function StoryCreationForm({
       ) : null}
       {progress.kind === "attachment-failure" ? (
         <div className={styles.workflowPartial} role="alert">
-          <h3>Story created; Source not attached</h3>
-          <p>
-            “{progress.story.title}” already exists as Story {progress.story.id}. The Source could
-            not be attached; the Story was not rolled back or deleted.
-          </p>
+          <h3>
+            {progress.error === null
+              ? "Story created; Source attachment status unavailable"
+              : "Story created; Source not attached"}
+          </h3>
+          {progress.error === null ? (
+            <p>
+              “{progress.story.title}” already exists as Story {progress.story.id}. The attachment
+              request outcome could not be confirmed; the Story was not rolled back or deleted.
+            </p>
+          ) : (
+            <p>
+              “{progress.story.title}” already exists as Story {progress.story.id}. The Source could
+              not be attached; the Story was not rolled back or deleted.
+            </p>
+          )}
           <p>{progress.error?.message ?? STORY_REQUEST_UNAVAILABLE_MESSAGE}</p>
         </div>
       ) : null}
@@ -471,6 +563,7 @@ function StoryCreationForm({
 export function SourceEvidenceWorkspace({
   requestSourceEvidence = requestSourceEvidenceUrl,
   storyRequests = storyClient,
+  onStoryCreated,
   onStoryLoaded,
 }: SourceEvidenceWorkspaceProps) {
   const [submittedUrl, setSubmittedUrl] = useState("");
@@ -547,6 +640,7 @@ export function SourceEvidenceWorkspace({
           key={`${eligible.sourceId}:${eligible.suggestedTitle}`}
           eligible={eligible}
           requests={storyRequests}
+          onStoryCreated={onStoryCreated}
           onStoryLoaded={onStoryLoaded}
         />
       )}

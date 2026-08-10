@@ -11,6 +11,7 @@ function makeRuntime(): StoryRuntime {
     createStory: vi.fn<StoryRuntime["createStory"]>(),
     attachSourceToStory: vi.fn<StoryRuntime["attachSourceToStory"]>(),
     inspectStory: vi.fn<StoryRuntime["inspectStory"]>(),
+    listStories: vi.fn<StoryRuntime["listStories"]>(),
     close: vi.fn<StoryRuntime["close"]>(async () => undefined),
   });
 }
@@ -28,6 +29,7 @@ describe("createStoryRuntimeProvider", () => {
     expect(runtime.createStory).not.toHaveBeenCalled();
     expect(runtime.attachSourceToStory).not.toHaveBeenCalled();
     expect(runtime.inspectStory).not.toHaveBeenCalled();
+    expect(runtime.listStories).not.toHaveBeenCalled();
     expect(runtime.close).not.toHaveBeenCalled();
     expect(Object.keys(provider)).toEqual(["get"]);
   });

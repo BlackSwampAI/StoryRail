@@ -1,5 +1,6 @@
 import type { EditorialActor, Story, StorySourceAttachment, UrlSource } from "@/domain/editorial";
 import type { StoryInspection } from "@/application/story-inspection";
+import type { StoryListItem } from "@/application/story-listing";
 
 export const STORY_REQUEST_UNAVAILABLE_MESSAGE = "The Story request could not be completed.";
 
@@ -18,6 +19,7 @@ export type StoryClientResult<Value> =
   | { readonly kind: "unavailable"; readonly message: typeof STORY_REQUEST_UNAVAILABLE_MESSAGE };
 
 export interface StoryClient {
+  readonly listStories: () => Promise<StoryClientResult<readonly StoryListItem[]>>;
   readonly createStory: (title: string) => Promise<StoryClientResult<Story>>;
   readonly attachSource: (
     storyId: string,
@@ -41,6 +43,12 @@ const AGENT_ROLES = new Set(["assignment_editor", "writer", "fact_checker", "edi
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 }
 
 function isString(value: unknown): value is string {
@@ -108,6 +116,30 @@ function isInspection(value: unknown): value is StoryInspection {
   });
 }
 
+function isStoryListItem(value: unknown): value is StoryListItem {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ["story", "sourceCount"]) &&
+    isRecord(value.story) &&
+    hasExactKeys(value.story, [
+      "id",
+      "title",
+      "state",
+      "revisionCycle",
+      "createdAt",
+      "updatedAt",
+    ]) &&
+    isStory(value.story) &&
+    typeof value.sourceCount === "number" &&
+    Number.isSafeInteger(value.sourceCount) &&
+    value.sourceCount >= 0
+  );
+}
+
+function isStoryList(value: unknown): value is readonly StoryListItem[] {
+  return Array.isArray(value) && value.every(isStoryListItem);
+}
+
 function isApplicationError(value: unknown): value is StoryClientApplicationError {
   return isRecord(value) && isString(value.code) && isString(value.message);
 }
@@ -121,7 +153,7 @@ async function request<Value>(
   input: string,
   init: RequestInit,
   successStatus: number,
-  successKey: "story" | "attachment" | "inspection",
+  successKey: "story" | "stories" | "attachment" | "inspection",
   validate: (value: unknown) => value is Value,
   applicationErrors: Readonly<Record<number, ReadonlySet<string>>>,
 ): Promise<StoryClientResult<Value>> {
@@ -151,6 +183,16 @@ async function request<Value>(
 export function createStoryClient(dependencies: StoryClientDependencies): StoryClient {
   const jsonHeaders = { "Content-Type": "application/json", Accept: "application/json" };
   return {
+    listStories: () =>
+      request(
+        dependencies.fetch,
+        "/api/stories",
+        { method: "GET", headers: { Accept: "application/json" } },
+        200,
+        "stories",
+        isStoryList,
+        {},
+      ),
     createStory: (title) =>
       request(
         dependencies.fetch,

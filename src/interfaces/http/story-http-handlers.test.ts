@@ -16,6 +16,7 @@ import type { StoryRuntime } from "@/runtime";
 import { createAttachSourceToStoryHttpHandler } from "./attach-source-to-story-handler";
 import { createCreateStoryHttpHandler } from "./create-story-handler";
 import { createInspectStoryHttpHandler } from "./inspect-story-handler";
+import { createListStoriesHttpHandler } from "./list-stories-handler";
 
 const STORY_ID = storyId("story-http-0020");
 const SOURCE_ID = sourceId("source-http-0020");
@@ -50,10 +51,63 @@ function makeRuntime(overrides: Partial<StoryRuntime> = {}): StoryRuntime {
     createStory: vi.fn<StoryRuntime["createStory"]>(),
     attachSourceToStory: vi.fn<StoryRuntime["attachSourceToStory"]>(),
     inspectStory: vi.fn<StoryRuntime["inspectStory"]>(),
+    listStories: vi.fn<StoryRuntime["listStories"]>(),
     close: vi.fn<StoryRuntime["close"]>(async () => undefined),
     ...overrides,
   };
 }
+
+describe("createListStoriesHttpHandler", () => {
+  it("returns complete Story listing entries and an empty list as successful reads", async () => {
+    const listStories = vi
+      .fn<StoryRuntime["listStories"]>()
+      .mockResolvedValueOnce([{ story: STORY, sourceCount: 1 }])
+      .mockResolvedValueOnce([]);
+    const handler = createListStoriesHttpHandler({
+      getRuntime: () => makeRuntime({ listStories }),
+    });
+    const request = new Request("http://storyrail.test/api/stories", { method: "GET" });
+
+    const populated = await handler(request);
+    const empty = await handler(request);
+    expect(populated.status).toBe(200);
+    expect(await responseBody(populated)).toEqual({
+      ok: true,
+      stories: [{ story: STORY, sourceCount: 1 }],
+    });
+    expect(empty.status).toBe(200);
+    expect(await responseBody(empty)).toEqual({ ok: true, stories: [] });
+    expect(listStories).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns the safe generic Story 500 for construction and listing failures", async () => {
+    const failure = new Error("secret database detail");
+    const handlers = [
+      createListStoriesHttpHandler({
+        getRuntime: () => {
+          throw failure;
+        },
+      }),
+      createListStoriesHttpHandler({
+        getRuntime: () =>
+          makeRuntime({
+            listStories: vi.fn(async () => {
+              throw failure;
+            }),
+          }),
+      }),
+    ];
+    const request = new Request("http://storyrail.test/api/stories", { method: "GET" });
+
+    for (const handler of handlers) {
+      const response = await handler(request);
+      const serialized = JSON.stringify(await responseBody(response));
+      expect(response.status).toBe(500);
+      expect(serialized).toContain("INTERNAL_SERVER_ERROR");
+      expect(serialized).not.toContain("secret");
+    }
+  });
+});
 
 function postRequest(path: string, body: string, contentType = "application/json"): Request {
   return new Request(`http://storyrail.test${path}`, {

@@ -85,6 +85,10 @@ const ATTACHMENT = Object.freeze({
 
 function successfulStoryRequests(overrides: Partial<StoryClient> = {}): StoryClient {
   return {
+    listStories: vi.fn<StoryClient["listStories"]>(async () => ({
+      kind: "completed",
+      value: [],
+    })),
     createStory: vi.fn<StoryClient["createStory"]>(async () => ({
       kind: "completed",
       value: CREATED_STORY,
@@ -525,6 +529,183 @@ describe("SourceEvidenceWorkspace", () => {
     expect(requests.inspectStory).toHaveBeenCalledOnce();
   });
 
+  it.each(["", "   "])(
+    "prevents durable Story calls for missing relevance %j and leaves the form editable",
+    async (missingRelevance) => {
+      const requests = successfulStoryRequests();
+      render(
+        <SourceEvidenceWorkspace
+          requestSourceEvidence={requestReturning()}
+          storyRequests={requests}
+        />,
+      );
+      submit(SUBMITTED_URL);
+      fireEvent.click(await screen.findByRole("button", { name: "Create Story from Source" }));
+      const relevance = screen.getByRole("textbox", { name: "Why is this Source relevant?" });
+      fireEvent.change(relevance, { target: { value: missingRelevance } });
+      fireEvent.click(screen.getByRole("button", { name: "Create Story" }));
+
+      expect(relevance).toBeEnabled();
+      expect(relevance).toHaveAttribute("aria-invalid", "true");
+      expect(relevance).toHaveAttribute("aria-describedby", "source-relevance-error");
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Explain why this Source is relevant to the Story.",
+      );
+      expect(requests.createStory).not.toHaveBeenCalled();
+      expect(requests.attachSource).not.toHaveBeenCalled();
+      expect(requests.inspectStory).not.toHaveBeenCalled();
+
+      fireEvent.change(relevance, { target: { value: ATTACHMENT.relevance } });
+      expect(relevance).not.toHaveAttribute("aria-invalid");
+      expect(
+        screen.queryByText("Explain why this Source is relevant to the Story."),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it.each(["", "   "])(
+    "prevents durable calls for missing title %j and associates an editable error",
+    async (missingTitle) => {
+      const requests = successfulStoryRequests();
+      render(
+        <SourceEvidenceWorkspace
+          requestSourceEvidence={requestReturning()}
+          storyRequests={requests}
+        />,
+      );
+      submit(SUBMITTED_URL);
+      fireEvent.click(await screen.findByRole("button", { name: "Create Story from Source" }));
+      const title = screen.getByRole("textbox", { name: "Story title" });
+      fireEvent.change(title, { target: { value: missingTitle } });
+      fireEvent.change(screen.getByRole("textbox", { name: "Why is this Source relevant?" }), {
+        target: { value: ATTACHMENT.relevance },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Create Story" }));
+
+      expect(title).toBeEnabled();
+      expect(title).toHaveAttribute("aria-invalid", "true");
+      expect(title).toHaveAttribute("aria-describedby", "story-title-error");
+      expect(screen.getByRole("alert")).toHaveTextContent("Enter a non-empty Story title.");
+      expect(requests.createStory).not.toHaveBeenCalled();
+      expect(requests.attachSource).not.toHaveBeenCalled();
+      expect(requests.inspectStory).not.toHaveBeenCalled();
+    },
+  );
+
+  it("retries a known relevance failure against the existing Story and then inspects it", async () => {
+    const correctedRelevance = "Corrected Source relevance.";
+    const attachSource = vi
+      .fn<StoryClient["attachSource"]>()
+      .mockResolvedValueOnce({
+        kind: "application-failure",
+        error: {
+          code: "STORY_SOURCE_RELEVANCE_REQUIRED",
+          message: "A non-empty relevance is required to attach a Source to a Story.",
+        },
+      })
+      .mockResolvedValueOnce({ kind: "completed", value: ATTACHMENT });
+    const requests = successfulStoryRequests({ attachSource });
+    const onStoryCreated = vi.fn();
+    const onStoryLoaded = vi.fn();
+    render(
+      <SourceEvidenceWorkspace
+        requestSourceEvidence={requestReturning()}
+        storyRequests={requests}
+        onStoryCreated={onStoryCreated}
+        onStoryLoaded={onStoryLoaded}
+      />,
+    );
+    submit(SUBMITTED_URL);
+    fireEvent.click(await screen.findByRole("button", { name: "Create Story from Source" }));
+    const relevance = screen.getByRole("textbox", { name: "Why is this Source relevant?" });
+    fireEvent.change(relevance, { target: { value: ATTACHMENT.relevance } });
+    fireEvent.click(screen.getByRole("button", { name: "Create Story" }));
+
+    const retry = await screen.findByRole("button", { name: "Retry Source attachment" });
+    expect(screen.getByText("Story created; Source not attached").closest("div")).toHaveTextContent(
+      CREATED_STORY.id,
+    );
+    expect(relevance).toBeEnabled();
+    fireEvent.change(relevance, { target: { value: correctedRelevance } });
+    fireEvent.click(retry);
+
+    await waitFor(() => expect(onStoryLoaded).toHaveBeenCalledOnce());
+    expect(onStoryCreated).toHaveBeenCalledOnce();
+    expect(onStoryCreated).toHaveBeenCalledWith(CREATED_STORY);
+    expect(requests.createStory).toHaveBeenCalledOnce();
+    expect(attachSource).toHaveBeenNthCalledWith(
+      1,
+      CREATED_STORY.id,
+      SOURCE.id,
+      ATTACHMENT.relevance,
+    );
+    expect(attachSource).toHaveBeenNthCalledWith(
+      2,
+      CREATED_STORY.id,
+      SOURCE.id,
+      correctedRelevance,
+    );
+    expect(requests.inspectStory).toHaveBeenCalledOnce();
+    expect(requests.inspectStory).toHaveBeenCalledWith(CREATED_STORY.id);
+  });
+
+  it("does not offer or perform attachment retry after an ambiguous unavailable result", async () => {
+    const attachSource = vi.fn<StoryClient["attachSource"]>(async () => ({
+      kind: "unavailable",
+      message: STORY_REQUEST_UNAVAILABLE_MESSAGE,
+    }));
+    const requests = successfulStoryRequests({ attachSource });
+    render(
+      <SourceEvidenceWorkspace
+        requestSourceEvidence={requestReturning()}
+        storyRequests={requests}
+      />,
+    );
+    submit(SUBMITTED_URL);
+    fireEvent.click(await screen.findByRole("button", { name: "Create Story from Source" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Why is this Source relevant?" }), {
+      target: { value: ATTACHMENT.relevance },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create Story" }));
+
+    const partial = await screen.findByText("Story created; Source attachment status unavailable");
+    expect(partial.closest("div")).toHaveTextContent("not rolled back or deleted");
+    expect(
+      screen.queryByRole("button", { name: "Retry Source attachment" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Story already created" })).toBeDisabled();
+    expect(attachSource).toHaveBeenCalledOnce();
+    expect(requests.inspectStory).not.toHaveBeenCalled();
+  });
+
+  it("does not offer attachment retry when the attachment request throws", async () => {
+    const attachSource = vi.fn<StoryClient["attachSource"]>(async () => {
+      throw new Error("controlled network ambiguity");
+    });
+    const requests = successfulStoryRequests({ attachSource });
+    render(
+      <SourceEvidenceWorkspace
+        requestSourceEvidence={requestReturning()}
+        storyRequests={requests}
+      />,
+    );
+    submit(SUBMITTED_URL);
+    fireEvent.click(await screen.findByRole("button", { name: "Create Story from Source" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Why is this Source relevant?" }), {
+      target: { value: ATTACHMENT.relevance },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create Story" }));
+
+    expect(
+      await screen.findByText("Story created; Source attachment status unavailable"),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Retry Source attachment" }),
+    ).not.toBeInTheDocument();
+    expect(attachSource).toHaveBeenCalledOnce();
+    expect(requests.inspectStory).not.toHaveBeenCalled();
+  });
+
   it("prevents concurrent Story submissions while showing truthful progress", async () => {
     let resolveCreate:
       ((result: Awaited<ReturnType<StoryClient["createStory"]>>) => void) | undefined;
@@ -544,6 +725,9 @@ describe("SourceEvidenceWorkspace", () => {
     );
     submit(SUBMITTED_URL);
     fireEvent.click(await screen.findByRole("button", { name: "Create Story from Source" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Why is this Source relevant?" }), {
+      target: { value: ATTACHMENT.relevance },
+    });
     const button = await screen.findByRole("button", { name: "Create Story" });
     fireEvent.click(button);
 
@@ -571,6 +755,9 @@ describe("SourceEvidenceWorkspace", () => {
     );
     submit(SUBMITTED_URL);
     fireEvent.click(await screen.findByRole("button", { name: "Create Story from Source" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Why is this Source relevant?" }), {
+      target: { value: ATTACHMENT.relevance },
+    });
     fireEvent.click(await screen.findByRole("button", { name: "Create Story" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Story was not created");
@@ -593,6 +780,9 @@ describe("SourceEvidenceWorkspace", () => {
     );
     submit(SUBMITTED_URL);
     fireEvent.click(await screen.findByRole("button", { name: "Create Story from Source" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Why is this Source relevant?" }), {
+      target: { value: ATTACHMENT.relevance },
+    });
     fireEvent.click(await screen.findByRole("button", { name: "Create Story" }));
 
     const alert = await screen.findByText("Story created; Source not attached");
@@ -616,6 +806,9 @@ describe("SourceEvidenceWorkspace", () => {
     );
     submit(SUBMITTED_URL);
     fireEvent.click(await screen.findByRole("button", { name: "Create Story from Source" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Why is this Source relevant?" }), {
+      target: { value: ATTACHMENT.relevance },
+    });
     fireEvent.click(await screen.findByRole("button", { name: "Create Story" }));
 
     const heading = await screen.findByText(
