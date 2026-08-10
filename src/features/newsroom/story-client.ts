@@ -1,0 +1,204 @@
+import type { EditorialActor, Story, StorySourceAttachment, UrlSource } from "@/domain/editorial";
+import type { StoryInspection } from "@/application/story-inspection";
+
+export const STORY_REQUEST_UNAVAILABLE_MESSAGE = "The Story request could not be completed.";
+
+export interface StoryClientDependencies {
+  readonly fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+}
+
+export interface StoryClientApplicationError {
+  readonly code: string;
+  readonly message: string;
+}
+
+export type StoryClientResult<Value> =
+  | { readonly kind: "completed"; readonly value: Value }
+  | { readonly kind: "application-failure"; readonly error: StoryClientApplicationError }
+  | { readonly kind: "unavailable"; readonly message: typeof STORY_REQUEST_UNAVAILABLE_MESSAGE };
+
+export interface StoryClient {
+  readonly createStory: (title: string) => Promise<StoryClientResult<Story>>;
+  readonly attachSource: (
+    storyId: string,
+    sourceId: string,
+    relevance: string,
+  ) => Promise<StoryClientResult<StorySourceAttachment>>;
+  readonly inspectStory: (storyId: string) => Promise<StoryClientResult<StoryInspection>>;
+}
+
+const STORY_STATES = new Set([
+  "intake",
+  "assigned",
+  "in_progress",
+  "in_review",
+  "changes_requested",
+  "approved",
+  "rejected",
+  "published",
+]);
+const AGENT_ROLES = new Set(["assignment_editor", "writer", "fact_checker", "editor_in_chief"]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+function isActor(value: unknown): value is EditorialActor {
+  if (!isRecord(value) || !isString(value.type)) return false;
+  return value.type === "operator"
+    ? isString(value.operatorId)
+    : value.type === "agent" &&
+        isString(value.role) &&
+        AGENT_ROLES.has(value.role) &&
+        isString(value.runId);
+}
+
+function isStory(value: unknown): value is Story {
+  return (
+    isRecord(value) &&
+    isString(value.id) &&
+    isString(value.title) &&
+    isString(value.state) &&
+    STORY_STATES.has(value.state) &&
+    typeof value.revisionCycle === "number" &&
+    Number.isInteger(value.revisionCycle) &&
+    value.revisionCycle >= 0 &&
+    isString(value.createdAt) &&
+    isString(value.updatedAt)
+  );
+}
+
+function isSource(value: unknown): value is UrlSource {
+  return (
+    isRecord(value) &&
+    isString(value.id) &&
+    value.type === "url" &&
+    isString(value.submittedUrl) &&
+    isString(value.canonicalUrl) &&
+    isActor(value.submittedBy) &&
+    isString(value.receivedAt)
+  );
+}
+
+function isAttachment(value: unknown): value is StorySourceAttachment {
+  return (
+    isRecord(value) &&
+    isString(value.storyId) &&
+    isString(value.sourceId) &&
+    isString(value.relevance) &&
+    isActor(value.attachedBy) &&
+    isString(value.attachedAt)
+  );
+}
+
+function isInspection(value: unknown): value is StoryInspection {
+  if (!isRecord(value) || !isStory(value.story) || !Array.isArray(value.sources)) {
+    return false;
+  }
+  const story = value.story;
+  return value.sources.every((item) => {
+    if (!isRecord(item) || !isAttachment(item.attachment) || !isSource(item.source)) {
+      return false;
+    }
+    return item.attachment.storyId === story.id && item.attachment.sourceId === item.source.id;
+  });
+}
+
+function isApplicationError(value: unknown): value is StoryClientApplicationError {
+  return isRecord(value) && isString(value.code) && isString(value.message);
+}
+
+function unavailable(): StoryClientResult<never> {
+  return { kind: "unavailable", message: STORY_REQUEST_UNAVAILABLE_MESSAGE };
+}
+
+async function request<Value>(
+  fetch: StoryClientDependencies["fetch"],
+  input: string,
+  init: RequestInit,
+  successStatus: number,
+  successKey: "story" | "attachment" | "inspection",
+  validate: (value: unknown) => value is Value,
+  applicationErrors: Readonly<Record<number, ReadonlySet<string>>>,
+): Promise<StoryClientResult<Value>> {
+  try {
+    const response = await fetch(input, init);
+    const body: unknown = await response.json();
+    if (!isRecord(body)) return unavailable();
+    const value = body[successKey];
+    if (response.status === successStatus && body.ok === true && validate(value)) {
+      return { kind: "completed", value };
+    }
+    if (
+      response.status >= 400 &&
+      response.status < 500 &&
+      body.ok === false &&
+      isApplicationError(body.error) &&
+      applicationErrors[response.status]?.has(body.error.code) === true
+    ) {
+      return { kind: "application-failure", error: body.error };
+    }
+    return unavailable();
+  } catch {
+    return unavailable();
+  }
+}
+
+export function createStoryClient(dependencies: StoryClientDependencies): StoryClient {
+  const jsonHeaders = { "Content-Type": "application/json", Accept: "application/json" };
+  return {
+    createStory: (title) =>
+      request(
+        dependencies.fetch,
+        "/api/stories",
+        { method: "POST", headers: jsonHeaders, body: JSON.stringify({ title }) },
+        201,
+        "story",
+        isStory,
+        {
+          400: new Set(["INVALID_JSON", "INVALID_REQUEST"]),
+          409: new Set(["STORY_ID_CONFLICT"]),
+          415: new Set(["UNSUPPORTED_MEDIA_TYPE"]),
+          422: new Set(["STORY_TITLE_REQUIRED"]),
+        },
+      ),
+    attachSource: (storyId, sourceId, relevance) =>
+      request(
+        dependencies.fetch,
+        `/api/stories/${encodeURIComponent(storyId)}/sources`,
+        {
+          method: "POST",
+          headers: jsonHeaders,
+          body: JSON.stringify({ sourceId, relevance }),
+        },
+        200,
+        "attachment",
+        isAttachment,
+        {
+          400: new Set(["INVALID_JSON", "INVALID_REQUEST"]),
+          404: new Set(["STORY_NOT_FOUND", "SOURCE_NOT_FOUND"]),
+          409: new Set(["STORY_SOURCE_CONFLICT"]),
+          415: new Set(["UNSUPPORTED_MEDIA_TYPE"]),
+          422: new Set(["STORY_SOURCE_RELEVANCE_REQUIRED"]),
+        },
+      ),
+    inspectStory: (storyId) =>
+      request(
+        dependencies.fetch,
+        `/api/stories/${encodeURIComponent(storyId)}`,
+        { method: "GET", headers: { Accept: "application/json" } },
+        200,
+        "inspection",
+        isInspection,
+        { 404: new Set(["STORY_NOT_FOUND"]) },
+      ),
+  };
+}
+
+export const storyClient = createStoryClient({
+  fetch: (input, init) => globalThis.fetch(input, init),
+});

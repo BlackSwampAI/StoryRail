@@ -6,6 +6,7 @@ import {
   operatorId,
   sourceExtractionId,
   sourceId,
+  storyId,
   STORY_STATES,
   type SourceExtraction,
   type UrlSource,
@@ -17,6 +18,7 @@ import type {
   RequestSourceEvidenceUrl,
   SourceEvidenceUrlResult,
 } from "./source-evidence-url-client";
+import type { StoryClient } from "./story-client";
 
 const sourceCanonicalization = canonicalizeSourceUrl("https://example.com/newsroom-source");
 
@@ -58,6 +60,41 @@ const SHELL_RESULT = Object.freeze({
   source: SHELL_SOURCE,
   extraction: SHELL_EXTRACTION,
 } satisfies SourceEvidenceUrlResult);
+const PERSISTED_STORY = Object.freeze({
+  id: storyId("story-real-0021"),
+  title: "A persisted newsroom Story",
+  state: "intake",
+  revisionCycle: 0,
+  createdAt: "2026-08-09T21:00:00.000Z",
+  updatedAt: "2026-08-09T21:00:00.000Z",
+} as const);
+const PERSISTED_ATTACHMENT = Object.freeze({
+  storyId: PERSISTED_STORY.id,
+  sourceId: SHELL_SOURCE.id,
+  relevance: "Confirms the central report.",
+  attachedBy: SOURCE_ACTOR,
+  attachedAt: "2026-08-09T21:01:00.000Z",
+} as const);
+
+function controlledStoryRequests(): StoryClient {
+  return {
+    createStory: vi.fn<StoryClient["createStory"]>(async () => ({
+      kind: "completed",
+      value: PERSISTED_STORY,
+    })),
+    attachSource: vi.fn<StoryClient["attachSource"]>(async () => ({
+      kind: "completed",
+      value: PERSISTED_ATTACHMENT,
+    })),
+    inspectStory: vi.fn<StoryClient["inspectStory"]>(async () => ({
+      kind: "completed",
+      value: {
+        story: PERSISTED_STORY,
+        sources: [{ attachment: PERSISTED_ATTACHMENT, source: SHELL_SOURCE }],
+      },
+    })),
+  };
+}
 
 function controlledSourceRequest(): ReturnType<typeof vi.fn<RequestSourceEvidenceUrl>> {
   return vi.fn<RequestSourceEvidenceUrl>(async () => SHELL_RESULT);
@@ -82,6 +119,7 @@ describe("NewsroomShell", () => {
     render(<NewsroomShell />);
 
     const navigation = screen.getByRole("navigation", { name: "Story state queues" });
+    expect(within(navigation).getByText("Preview queues · fixture data")).toBeVisible();
 
     expect(within(navigation).getAllByRole("button")).toHaveLength(STORY_STATES.length);
 
@@ -308,12 +346,67 @@ describe("NewsroomShell", () => {
     expect(JSON.stringify({ queues: NEWSROOM_QUEUES, stories: NEWSROOM_STORIES })).toBe(
       fixturesBefore,
     );
-    expect(
-      screen.queryByRole("button", { name: /create Story|attach Source/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create Story from Source" })).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "Assistant" }));
     expect(screen.getByText("Not connected yet")).toBeVisible();
     expect(screen.getByRole("heading", { name: "Agent activity will appear here" })).toBeVisible();
+  });
+
+  it("renders authoritative inspection after the real workflow and can return to a fixture", async () => {
+    const sourceRequest = controlledSourceRequest();
+    const storyRequests = controlledStoryRequests();
+    const fixturesBefore = JSON.stringify({ queues: NEWSROOM_QUEUES, stories: NEWSROOM_STORIES });
+    render(<NewsroomShell requestSourceEvidence={sourceRequest} storyRequests={storyRequests} />);
+    fireEvent.click(screen.getByRole("button", { name: "Source intake" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Source URL" }), {
+      target: { value: SHELL_SOURCE.submittedUrl },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Preserve and extract" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Create Story from Source" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Story title" }), {
+      target: { value: PERSISTED_STORY.title },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Why is this Source relevant?" }), {
+      target: { value: PERSISTED_ATTACHMENT.relevance },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create Story" }));
+
+    expect(await screen.findByText("Persisted Story")).toBeVisible();
+    const heading = screen.getByRole("heading", { name: PERSISTED_STORY.title });
+    const workspace = heading.closest("article");
+    if (!workspace) throw new Error("Expected the persisted Story heading inside an article.");
+    expect(heading).toBeVisible();
+    expect(within(workspace).getByText("Intake")).toBeVisible();
+    expect(within(workspace).getByText(PERSISTED_ATTACHMENT.relevance)).toBeVisible();
+    expect(within(workspace).getByText(`Story ID: ${PERSISTED_STORY.id}`)).toBeVisible();
+    expect(within(workspace).getByText(SHELL_SOURCE.id)).toBeVisible();
+    expect(within(workspace).getAllByText(`operator: ${SOURCE_ACTOR.operatorId}`)).toHaveLength(2);
+    expect(workspace.querySelector(`time[datetime="${PERSISTED_STORY.createdAt}"]`)).toBeVisible();
+    expect(workspace.querySelector(`time[datetime="${PERSISTED_STORY.updatedAt}"]`)).toBeVisible();
+    expect(workspace.querySelector(`time[datetime="${SHELL_SOURCE.receivedAt}"]`)).toBeVisible();
+    expect(
+      workspace.querySelector(`time[datetime="${PERSISTED_ATTACHMENT.attachedAt}"]`),
+    ).toBeVisible();
+    expect(
+      within(workspace).getByRole("link", { name: SHELL_SOURCE.canonicalUrl }),
+    ).toHaveAttribute("href", SHELL_SOURCE.canonicalUrl);
+    expect(screen.getByText(/Assignments are not connected/)).toBeVisible();
+    expect(screen.getByText(/Durable Story activity is not connected/)).toBeVisible();
+    expect(storyRequests.createStory).toHaveBeenCalledWith(PERSISTED_STORY.title);
+    expect(storyRequests.attachSource).toHaveBeenCalledWith(
+      PERSISTED_STORY.id,
+      SHELL_SOURCE.id,
+      PERSISTED_ATTACHMENT.relevance,
+    );
+    expect(storyRequests.inspectStory).toHaveBeenCalledWith(PERSISTED_STORY.id);
+    expect(JSON.stringify({ queues: NEWSROOM_QUEUES, stories: NEWSROOM_STORIES })).toBe(
+      fixturesBefore,
+    );
+
+    const fixture = NEWSROOM_STORIES[0];
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(fixture.title) }));
+    expect(screen.getByRole("heading", { name: fixture.title })).toBeVisible();
+    expect(screen.queryByText("Persisted Story")).not.toBeInTheDocument();
   });
 });

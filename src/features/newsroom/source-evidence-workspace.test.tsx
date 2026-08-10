@@ -6,6 +6,7 @@ import {
   operatorId,
   sourceExtractionId,
   sourceId,
+  storyId,
   type SourceExtraction,
   type UrlSource,
 } from "@/domain/editorial";
@@ -16,6 +17,7 @@ import {
   type SourceEvidenceUrlResult,
 } from "./source-evidence-url-client";
 import { SourceEvidenceWorkspace } from "./source-evidence-workspace";
+import { STORY_REQUEST_UNAVAILABLE_MESSAGE, type StoryClient } from "./story-client";
 
 const SUBMITTED_URL = "  https://Example.com/report?utm_source=desk  ";
 const canonicalization = canonicalizeSourceUrl("https://example.com/report");
@@ -50,11 +52,54 @@ const SUCCESSFUL_EXTRACTION = Object.freeze({
     language: null,
   }),
 } satisfies SourceExtraction);
+const FAILED_EXTRACTION = Object.freeze({
+  id: sourceExtractionId("extraction-failed-0021"),
+  sourceId: SOURCE.id,
+  extractor: Object.freeze({ key: "controlled", version: "1" }),
+  requestedBy: ACTOR,
+  startedAt: "2026-08-09T19:00:01.000Z",
+  completedAt: "2026-08-09T19:00:02.000Z",
+  outcome: "failed",
+  failure: Object.freeze({ code: "RETRIEVAL_FAILED", retryable: true }),
+} satisfies SourceExtraction);
 const COMPLETED = Object.freeze({
   kind: "completed",
   source: SOURCE,
   extraction: SUCCESSFUL_EXTRACTION,
 } satisfies SourceEvidenceUrlResult);
+const CREATED_STORY = Object.freeze({
+  id: storyId("story-0021"),
+  title: "Operator Story title",
+  state: "intake",
+  revisionCycle: 0,
+  createdAt: "2026-08-09T21:00:00.000Z",
+  updatedAt: "2026-08-09T21:00:00.000Z",
+} as const);
+const ATTACHMENT = Object.freeze({
+  storyId: CREATED_STORY.id,
+  sourceId: SOURCE.id,
+  relevance: "The Source documents the event.",
+  attachedBy: ACTOR,
+  attachedAt: "2026-08-09T21:01:00.000Z",
+} as const);
+
+function successfulStoryRequests(overrides: Partial<StoryClient> = {}): StoryClient {
+  return {
+    createStory: vi.fn<StoryClient["createStory"]>(async () => ({
+      kind: "completed",
+      value: CREATED_STORY,
+    })),
+    attachSource: vi.fn<StoryClient["attachSource"]>(async () => ({
+      kind: "completed",
+      value: ATTACHMENT,
+    })),
+    inspectStory: vi.fn<StoryClient["inspectStory"]>(async () => ({
+      kind: "completed",
+      value: { story: CREATED_STORY, sources: [{ attachment: ATTACHMENT, source: SOURCE }] },
+    })),
+    ...overrides,
+  };
+}
 
 function requestReturning(result: SourceEvidenceUrlResult = COMPLETED) {
   return vi.fn<RequestSourceEvidenceUrl>(async () => result);
@@ -87,7 +132,7 @@ describe("SourceEvidenceWorkspace", () => {
     expect(input).not.toHaveAttribute("required");
     expect(screen.getByRole("button", { name: "Preserve and extract" })).toBeEnabled();
     expect(container.querySelector('[aria-live="polite"]')).toBeInTheDocument();
-    expect(screen.getByText(/not attached to a Story/i)).toBeVisible();
+    expect(screen.getByText(/remains distinct from a Story/i)).toBeVisible();
     expect(request).not.toHaveBeenCalled();
   });
 
@@ -237,7 +282,11 @@ describe("SourceEvidenceWorkspace", () => {
     submit(SUBMITTED_URL);
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Source was not preserved because preservation conflicted");
+    expect(alert).toHaveTextContent(
+      error.code === "DUPLICATE_SOURCE"
+        ? "Source already exists and can be reused"
+        : "Source was not preserved because preservation conflicted",
+    );
     expect(alert).toHaveTextContent(expectedIdentity);
     if (error.code === "DUPLICATE_SOURCE") {
       expect(alert).toHaveTextContent(error.canonicalUrl);
@@ -307,7 +356,7 @@ describe("SourceEvidenceWorkspace", () => {
     expect(request).toHaveBeenCalledOnce();
   });
 
-  it("allows one later explicit submission, does not mutate results, and renders no Story action", async () => {
+  it("allows one later explicit Source submission without mutating results", async () => {
     const before = JSON.stringify(COMPLETED);
     const request = requestReturning();
     render(<SourceEvidenceWorkspace requestSourceEvidence={request} />);
@@ -319,11 +368,259 @@ describe("SourceEvidenceWorkspace", () => {
 
     expect(request.mock.calls).toEqual([["first"], ["second"]]);
     expect(JSON.stringify(COMPLETED)).toBe(before);
-    expect(
-      screen.queryByRole("button", { name: /create Story|attach Source/i }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("link", { name: /create Story|attach Source/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create Story from Source" })).toBeVisible();
+  });
+
+  it.each([
+    ["completed Source", COMPLETED, true],
+    [
+      "failed durable extraction",
+      {
+        kind: "completed" as const,
+        source: SOURCE,
+        extraction: FAILED_EXTRACTION,
+      },
+      true,
+    ],
+    [
+      "extraction partial completion",
+      {
+        kind: "partial-completion" as const,
+        stage: "extraction" as const,
+        source: SOURCE,
+        error: { code: "SOURCE_NOT_FOUND" as const, message: "Missing.", sourceId: SOURCE.id },
+      },
+      true,
+    ],
+    [
+      "duplicate Source",
+      {
+        kind: "preservation-conflict" as const,
+        error: {
+          code: "DUPLICATE_SOURCE" as const,
+          message: "Exists.",
+          existingSourceId: sourceId("source-existing"),
+          canonicalUrl: SOURCE.canonicalUrl,
+        },
+      },
+      true,
+    ],
+    [
+      "Source ID conflict",
+      {
+        kind: "preservation-conflict" as const,
+        error: { code: "SOURCE_ID_CONFLICT" as const, message: "Conflict.", sourceId: SOURCE.id },
+      },
+      false,
+    ],
+    [
+      "validation failure",
+      {
+        kind: "preservation-validation-failure" as const,
+        error: { code: "SOURCE_URL_REQUIRED" as const, message: "Required." },
+      },
+      false,
+    ],
+    [
+      "interface failure",
+      {
+        kind: "interface-rejection" as const,
+        error: { code: "INVALID_REQUEST", message: "Invalid." },
+      },
+      false,
+    ],
+    [
+      "internal failure",
+      {
+        kind: "internal-failure" as const,
+        error: { code: "INTERNAL_SERVER_ERROR", message: SOURCE_EVIDENCE_UNAVAILABLE_MESSAGE },
+      },
+      false,
+    ],
+    [
+      "unavailable failure",
+      { kind: "unavailable" as const, message: SOURCE_EVIDENCE_UNAVAILABLE_MESSAGE },
+      false,
+    ],
+  ] as const)(
+    "%s exposes the Story action only when a durable Source identity exists",
+    async (_label, result, expected) => {
+      render(<SourceEvidenceWorkspace requestSourceEvidence={requestReturning(result)} />);
+      submit(SUBMITTED_URL);
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: "Create Story from Source" }) !== null).toBe(
+          expected,
+        ),
+      );
+    },
+  );
+
+  it("uses a duplicate's existing Source identity and does not invent a title", async () => {
+    const existingSourceId = sourceId("source-existing");
+    const requests = successfulStoryRequests();
+    render(
+      <SourceEvidenceWorkspace
+        requestSourceEvidence={requestReturning({
+          kind: "preservation-conflict",
+          error: {
+            code: "DUPLICATE_SOURCE",
+            message: "Exists.",
+            existingSourceId,
+            canonicalUrl: SOURCE.canonicalUrl,
+          },
+        })}
+        storyRequests={requests}
+      />,
+    );
+    submit(SUBMITTED_URL);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Create Story from Source" }));
+    const title = await screen.findByRole("textbox", { name: "Story title" });
+    expect(title).toHaveValue("");
+    fireEvent.change(title, { target: { value: CREATED_STORY.title } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Why is this Source relevant?" }), {
+      target: { value: ATTACHMENT.relevance },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create Story" }));
+
+    await waitFor(() => expect(requests.attachSource).toHaveBeenCalledOnce());
+    expect(requests.attachSource).toHaveBeenCalledWith(
+      CREATED_STORY.id,
+      existingSourceId,
+      ATTACHMENT.relevance,
+    );
+  });
+
+  it("prefills an editable extracted title and uses only operator-entered title and relevance", async () => {
+    const requests = successfulStoryRequests();
+    const onStoryLoaded = vi.fn();
+    render(
+      <SourceEvidenceWorkspace
+        requestSourceEvidence={requestReturning()}
+        storyRequests={requests}
+        onStoryLoaded={onStoryLoaded}
+      />,
+    );
+    submit(SUBMITTED_URL);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Create Story from Source" }));
+    const title = await screen.findByRole("textbox", { name: "Story title" });
+    expect(title).toHaveValue("Evidence title");
+    fireEvent.change(title, { target: { value: CREATED_STORY.title } });
+    const relevance = screen.getByRole("textbox", { name: "Why is this Source relevant?" });
+    expect(relevance).toHaveValue("");
+    fireEvent.change(relevance, { target: { value: ATTACHMENT.relevance } });
+    fireEvent.click(screen.getByRole("button", { name: "Create Story" }));
+
+    await waitFor(() => expect(onStoryLoaded).toHaveBeenCalledOnce());
+    expect(requests.createStory).toHaveBeenCalledWith(CREATED_STORY.title);
+    expect(requests.attachSource).toHaveBeenCalledWith(
+      CREATED_STORY.id,
+      SOURCE.id,
+      ATTACHMENT.relevance,
+    );
+    expect(requests.inspectStory).toHaveBeenCalledWith(CREATED_STORY.id);
+    expect(requests.createStory).toHaveBeenCalledOnce();
+    expect(requests.attachSource).toHaveBeenCalledOnce();
+    expect(requests.inspectStory).toHaveBeenCalledOnce();
+  });
+
+  it("prevents concurrent Story submissions while showing truthful progress", async () => {
+    let resolveCreate:
+      ((result: Awaited<ReturnType<StoryClient["createStory"]>>) => void) | undefined;
+    const requests = successfulStoryRequests({
+      createStory: vi.fn<StoryClient["createStory"]>(
+        () =>
+          new Promise<Awaited<ReturnType<StoryClient["createStory"]>>>((resolve) => {
+            resolveCreate = resolve;
+          }),
+      ),
+    });
+    render(
+      <SourceEvidenceWorkspace
+        requestSourceEvidence={requestReturning()}
+        storyRequests={requests}
+      />,
+    );
+    submit(SUBMITTED_URL);
+    fireEvent.click(await screen.findByRole("button", { name: "Create Story from Source" }));
+    const button = await screen.findByRole("button", { name: "Create Story" });
+    fireEvent.click(button);
+
+    expect(button).toBeDisabled();
+    const storyForm = button.closest("form");
+    if (!storyForm) throw new Error("Expected the Story submit control inside a form.");
+    expect(within(storyForm).getByRole("status")).toHaveTextContent("Creating Story");
+    fireEvent.click(button);
+    expect(requests.createStory).toHaveBeenCalledOnce();
+    await act(async () => resolveCreate?.({ kind: "completed", value: CREATED_STORY }));
+  });
+
+  it("stops after create failure and reports that no Story was created", async () => {
+    const requests = successfulStoryRequests({
+      createStory: vi.fn<StoryClient["createStory"]>(async () => ({
+        kind: "application-failure",
+        error: { code: "STORY_TITLE_REQUIRED", message: "A title is required." },
+      })),
+    });
+    render(
+      <SourceEvidenceWorkspace
+        requestSourceEvidence={requestReturning()}
+        storyRequests={requests}
+      />,
+    );
+    submit(SUBMITTED_URL);
+    fireEvent.click(await screen.findByRole("button", { name: "Create Story from Source" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Create Story" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Story was not created");
+    expect(requests.attachSource).not.toHaveBeenCalled();
+    expect(requests.inspectStory).not.toHaveBeenCalled();
+  });
+
+  it("preserves the created Story identity when attachment fails and does not inspect", async () => {
+    const requests = successfulStoryRequests({
+      attachSource: vi.fn<StoryClient["attachSource"]>(async () => ({
+        kind: "application-failure",
+        error: { code: "SOURCE_NOT_FOUND", message: "Source not found." },
+      })),
+    });
+    render(
+      <SourceEvidenceWorkspace
+        requestSourceEvidence={requestReturning()}
+        storyRequests={requests}
+      />,
+    );
+    submit(SUBMITTED_URL);
+    fireEvent.click(await screen.findByRole("button", { name: "Create Story from Source" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Create Story" }));
+
+    const alert = await screen.findByText("Story created; Source not attached");
+    expect(alert.closest("div")).toHaveTextContent(CREATED_STORY.id);
+    expect(alert.closest("div")).toHaveTextContent("not rolled back or deleted");
+    expect(requests.inspectStory).not.toHaveBeenCalled();
+  });
+
+  it("does not claim rollback when authoritative inspection cannot load", async () => {
+    const requests = successfulStoryRequests({
+      inspectStory: vi.fn<StoryClient["inspectStory"]>(async () => ({
+        kind: "unavailable",
+        message: STORY_REQUEST_UNAVAILABLE_MESSAGE,
+      })),
+    });
+    render(
+      <SourceEvidenceWorkspace
+        requestSourceEvidence={requestReturning()}
+        storyRequests={requests}
+      />,
+    );
+    submit(SUBMITTED_URL);
+    fireEvent.click(await screen.findByRole("button", { name: "Create Story from Source" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Create Story" }));
+
+    const heading = await screen.findByText(
+      "Story and Source attachment completed; Story could not be loaded",
+    );
+    expect(heading.closest("div")).toHaveTextContent("were not rolled back");
   });
 });
