@@ -1,0 +1,86 @@
+---
+type: Reference
+title: PostgreSQL schema and migrations
+description: StoryRail storyrail schema migrations for Sources, raw and prepared evidence, Stories, attachments, and triage decisions, with JSONB payload integrity constraints.
+tags: [database, postgresql, schema, migrations]
+---
+
+# PostgreSQL schema and migrations
+
+StoryRail persists editorial state in a `storyrail` schema in PostgreSQL. Migrations live in `database/migrations/` as numbered `.sql` files. The application runtime does **not** execute migrations; they must be applied externally before a composed runtime can persist Source evidence or Story state.
+
+PostgreSQL is intended to be authoritative for editorial state; agent memory must never become the database. All tables store a JSONB `payload` (the serialized domain object) alongside denormalized relational columns, and enforce that the payload matches those columns with `CHECK` constraints. This keeps the domain object authoritative while allowing relational queries and integrity.
+
+## Migration 0012 — source evidence
+
+`database/migrations/0012-source-evidence.sql` creates the `storyrail` schema and two tables.
+
+### storyrail.url_sources
+
+| Column          | Type    | Notes                                    |
+| --------------- | ------- | ---------------------------------------- |
+| `source_id`     | text PK |                                          |
+| `canonical_url` | text    | unique (`url_sources_canonical_url_key`) |
+| `payload`       | jsonb   | the serialized `UrlSource`               |
+
+Constraints ensure the payload is an object whose `id` = `source_id`, `canonicalUrl` = `canonical_url`, and `type` = `'url'`. The unique `canonical_url` enforces exact-URL duplicate prevention at the database level.
+
+### storyrail.source_extractions
+
+| Column            | Type    | Notes                                                  |
+| ----------------- | ------- | ------------------------------------------------------ |
+| `extraction_id`   | text PK |                                                        |
+| `source_id`       | text    | FK → `url_sources`, `ON UPDATE/DELETE RESTRICT`        |
+| `outcome`         | text    | `CHECK` in (`'succeeded'`, `'failed'`)                 |
+| `payload`         | jsonb   | the serialized `SourceExtraction`                      |
+| `append_position` | bigint  | `GENERATED ALWAYS AS IDENTITY`, preserves append order |
+
+Constraints ensure payload `id` = `extraction_id`, `sourceId` = `source_id`, `outcome` matches, and a `succeeded` outcome has `document` (and no `failure`) while a `failed` outcome has `failure` (and no `document`). The identity `append_position` preserves the order of extraction attempts so retries are retained in sequence.
+
+## Migration 0017 — durable Story creation
+
+`database/migrations/0017-durable-story-creation.sql` creates `storyrail.stories`.
+
+| Column           | Type    | Notes                               |
+| ---------------- | ------- | ----------------------------------- |
+| `story_id`       | text PK |                                     |
+| `state`          | text    | `CHECK` in the eight `STORY_STATES` |
+| `revision_cycle` | integer | `CHECK` between 0 and 2             |
+| `payload`        | jsonb   | the serialized `Story`              |
+
+Payload constraints ensure `id` = `story_id`, `state` matches, `revisionCycle` matches (including integer/text equality), and `title`, `createdAt`, `updatedAt` are present strings. The `revision_cycle` check mirrors the domain `MAX_REVISION_CYCLES = 2`.
+
+## Migration 0018 — durable Story-Source attachment
+
+`database/migrations/0018-durable-story-source-attachment.sql` creates `storyrail.story_source_attachments` with a composite primary key `(story_id, source_id)`.
+
+- Foreign keys to `stories` and `url_sources`, both `ON UPDATE/DELETE RESTRICT` — a Story or Source cannot be deleted while an attachment references it.
+- A `payload_shape_check` constraint reconstructs the payload from exactly its five fields (`storyId`, `sourceId`, `relevance`, `attachedBy`, `attachedAt`), rejecting extra or missing keys.
+- Payload/column consistency checks for `storyId`, `sourceId`, `relevance`, `attachedAt`, and a discriminated `attachedBy` object (operator or agent with a bounded role).
+
+## Migration 0024 — source triage decisions
+
+`database/migrations/0024-source-triage-decisions.sql` creates `storyrail.source_triage_decisions`.
+
+| Column      | Type    | Notes                                                          |
+| ----------- | ------- | -------------------------------------------------------------- |
+| `source_id` | text PK | FK → `url_sources`                                             |
+| `decision`  | text    | `CHECK` in (`'new_story'`, `'existing_story'`, `'skip'`)       |
+| `story_id`  | text    | nullable; FK → `story_source_attachments(story_id, source_id)` |
+| `payload`   | jsonb   | the serialized `SourceTriageDecision`                          |
+
+Key constraints:
+
+- `story_shape_check`: `skip` requires `story_id IS NULL`; `new_story`/`existing_story` require `story_id IS NOT NULL` — mirroring the domain `decideSourceTriage` rules.
+- The `story_id` foreign key references the **attachment** composite key, so a `new_story`/`existing_story` triage decision requires a pre-existing Story-Source attachment (the `STORY_SOURCE_ATTACHMENT_NOT_FOUND` error path).
+- `payload_reason_check` requires the reason be a non-empty, trimmed string.
+- `payload_decided_by_check` validates the operator/agent actor shape with bounded agent roles.
+- One row per `source_id` (PK) enforces a single final triage decision per Source (the `SOURCE_TRIAGE_CONFLICT` path).
+
+## Migration 0025 — prepared evidence
+
+`database/migrations/0025-source-evidence-preparations.sql` creates append-only `storyrail.source_evidence_preparations`. Each row references the exact `(extraction_id, source_id)` raw extraction, records a succeeded or failed preparation payload, and receives an identity `append_position`. Database constraints keep the relational identity, outcome, and serialized domain payload consistent. Prepared Evidence is derived history and never replaces `source_extractions`.
+
+## Integration test lifecycle
+
+The PostgreSQL integration tests (`src/adapters/source-persistence/postgres-source-repositories.test.ts` and the Story/attachment contracts) connect via `STORYRAIL_TEST_DATABASE_URL`, verify the database name is exactly `storyrail_test`, drop and recreate the `storyrail` schema, apply migrations `0012`, `0017`, `0018`, `0024`, and `0025` in order, and truncate the evidence/Story/attachment tables between cases. The suite never creates or drops a database.
