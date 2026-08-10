@@ -2,8 +2,7 @@
 
 import { useRef, useState, type FormEvent, type ReactNode } from "react";
 
-import type { StoryInspection } from "@/application/story-inspection";
-import type { EditorialActor, SourceExtraction, Story, UrlSource } from "@/domain/editorial";
+import type { EditorialActor, SourceExtraction, UrlSource } from "@/domain/editorial";
 
 import styles from "./newsroom-shell.module.css";
 import {
@@ -13,18 +12,9 @@ import {
   type SourceEvidenceApplicationError,
   type SourceEvidenceUrlResult,
 } from "./source-evidence-url-client";
-import {
-  storyClient,
-  STORY_REQUEST_UNAVAILABLE_MESSAGE,
-  type StoryClient,
-  type StoryClientApplicationError,
-} from "./story-client";
-
 export interface SourceEvidenceWorkspaceProps {
   readonly requestSourceEvidence?: RequestSourceEvidenceUrl;
-  readonly storyRequests?: StoryClient;
-  readonly onStoryCreated?: (story: Story) => void;
-  readonly onStoryLoaded?: (inspection: StoryInspection) => void;
+  readonly onSourceAvailable?: () => void;
 }
 
 function ActorValue({ actor }: Readonly<{ actor: EditorialActor }>) {
@@ -205,6 +195,7 @@ function ResultReceipt({ result }: Readonly<{ result: SourceEvidenceUrlResult }>
               ? "Source preserved and extraction completed"
               : "Source preserved; extraction failure recorded"}
           </h2>
+          <p>Source preserved and available for editorial review in Source Inbox.</p>
           <SourceFacts source={result.source} />
           <ExtractionFacts extraction={result.extraction} />
         </article>
@@ -277,300 +268,14 @@ function ResultReceipt({ result }: Readonly<{ result: SourceEvidenceUrlResult }>
   }
 }
 
-interface EligibleSource {
-  readonly sourceId: string;
-  readonly suggestedTitle: string;
-}
-
-function eligibleSource(result: SourceEvidenceUrlResult): EligibleSource | null {
-  if (result.kind === "completed") {
-    const title =
-      result.extraction.outcome === "succeeded" ? result.extraction.document.title?.trim() : "";
-    return { sourceId: result.source.id, suggestedTitle: title ?? "" };
-  }
-  if (result.kind === "partial-completion") {
-    return { sourceId: result.source.id, suggestedTitle: "" };
-  }
-  if (result.kind === "preservation-conflict" && result.error.code === "DUPLICATE_SOURCE") {
-    return { sourceId: result.error.existingSourceId, suggestedTitle: "" };
-  }
-  return null;
-}
-
-type StoryProgress =
-  | { readonly kind: "idle" }
-  | { readonly kind: "creating" }
-  | { readonly kind: "attaching"; readonly story: Story }
-  | { readonly kind: "inspecting"; readonly story: Story }
-  | { readonly kind: "create-failure"; readonly error: StoryClientApplicationError | null }
-  | {
-      readonly kind: "attachment-failure";
-      readonly story: Story;
-      readonly error: StoryClientApplicationError | null;
-    }
-  | { readonly kind: "inspection-failure"; readonly story: Story }
-  | { readonly kind: "completed"; readonly story: Story };
-
-interface StoryValidation {
-  readonly title?: string;
-  readonly relevance?: string;
-}
-
-function StoryCreationForm({
-  eligible,
-  requests,
-  onStoryCreated,
-  onStoryLoaded,
-}: Readonly<{
-  eligible: EligibleSource;
-  requests: StoryClient;
-  onStoryCreated?: (story: Story) => void;
-  onStoryLoaded?: (inspection: StoryInspection) => void;
-}>) {
-  const [title, setTitle] = useState(eligible.suggestedTitle);
-  const [relevance, setRelevance] = useState("");
-  const [expanded, setExpanded] = useState(false);
-  const [progress, setProgress] = useState<StoryProgress>({ kind: "idle" });
-  const [validation, setValidation] = useState<StoryValidation>({});
-  const pendingRef = useRef(false);
-  const pending = ["creating", "attaching", "inspecting"].includes(progress.kind);
-  const storyExists = [
-    "attaching",
-    "inspecting",
-    "attachment-failure",
-    "inspection-failure",
-    "completed",
-  ].includes(progress.kind);
-  const canRetryAttachment =
-    progress.kind === "attachment-failure" &&
-    progress.error?.code === "STORY_SOURCE_RELEVANCE_REQUIRED";
-
-  function validate(requireTitle: boolean): boolean {
-    const next: StoryValidation = {
-      ...(requireTitle && title.trim().length === 0
-        ? { title: "Enter a non-empty Story title." }
-        : {}),
-      ...(relevance.trim().length === 0
-        ? { relevance: "Explain why this Source is relevant to the Story." }
-        : {}),
-    };
-    setValidation(next);
-    return Object.keys(next).length === 0;
-  }
-
-  async function inspectAttachedStory(story: Story): Promise<void> {
-    setProgress({ kind: "inspecting", story });
-    let inspection: Awaited<ReturnType<StoryClient["inspectStory"]>>;
-    try {
-      inspection = await requests.inspectStory(story.id);
-    } catch {
-      setProgress({ kind: "inspection-failure", story });
-      return;
-    }
-    if (inspection.kind !== "completed") {
-      setProgress({ kind: "inspection-failure", story });
-      return;
-    }
-    setProgress({ kind: "completed", story });
-    onStoryLoaded?.(inspection.value);
-  }
-
-  async function attachAndInspect(story: Story): Promise<void> {
-    setProgress({ kind: "attaching", story });
-    let attachment: Awaited<ReturnType<StoryClient["attachSource"]>>;
-    try {
-      attachment = await requests.attachSource(story.id, eligible.sourceId, relevance);
-    } catch {
-      setProgress({ kind: "attachment-failure", story, error: null });
-      return;
-    }
-    if (attachment.kind !== "completed") {
-      if (
-        attachment.kind === "application-failure" &&
-        attachment.error.code === "STORY_SOURCE_RELEVANCE_REQUIRED"
-      ) {
-        onStoryCreated?.(story);
-      }
-      setProgress({
-        kind: "attachment-failure",
-        story,
-        error: attachment.kind === "application-failure" ? attachment.error : null,
-      });
-      return;
-    }
-    await inspectAttachedStory(story);
-  }
-
-  async function create(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (pendingRef.current || !validate(true)) return;
-    pendingRef.current = true;
-    setProgress({ kind: "creating" });
-
-    try {
-      let creation: Awaited<ReturnType<StoryClient["createStory"]>>;
-      try {
-        creation = await requests.createStory(title);
-      } catch {
-        setProgress({ kind: "create-failure", error: null });
-        return;
-      }
-      if (creation.kind !== "completed") {
-        setProgress({
-          kind: "create-failure",
-          error: creation.kind === "application-failure" ? creation.error : null,
-        });
-        return;
-      }
-
-      const story = creation.value;
-      await attachAndInspect(story);
-    } finally {
-      pendingRef.current = false;
-    }
-  }
-
-  async function retryAttachment(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!canRetryAttachment || pendingRef.current || !validate(false)) return;
-    const story = progress.story;
-    pendingRef.current = true;
-    try {
-      await attachAndInspect(story);
-    } finally {
-      pendingRef.current = false;
-    }
-  }
-
-  return (
-    <section className={styles.storyCreation} aria-labelledby="story-creation-title">
-      <p className={styles.sectionKicker}>Editorial action</p>
-      <h2 id="story-creation-title">Create Story from Source</h2>
-      <p>This explicitly creates a durable Story, then attaches Source {eligible.sourceId}.</p>
-      {!expanded ? (
-        <button
-          className={styles.storyCreationAction}
-          type="button"
-          onClick={() => setExpanded(true)}
-        >
-          Create Story from Source
-        </button>
-      ) : (
-        <form
-          className={styles.storyCreationForm}
-          onSubmit={canRetryAttachment ? retryAttachment : create}
-          aria-busy={pending}
-        >
-          <label htmlFor="story-title">Story title</label>
-          <input
-            id="story-title"
-            value={title}
-            disabled={storyExists}
-            aria-invalid={validation.title === undefined ? undefined : true}
-            aria-describedby={validation.title === undefined ? undefined : "story-title-error"}
-            onChange={(event) => {
-              setTitle(event.currentTarget.value);
-              setValidation((current) => ({ ...current, title: undefined }));
-            }}
-          />
-          {validation.title === undefined ? null : (
-            <p id="story-title-error" className={styles.fieldError} role="alert">
-              {validation.title}
-            </p>
-          )}
-          <label htmlFor="source-relevance">Why is this Source relevant?</label>
-          <textarea
-            id="source-relevance"
-            value={relevance}
-            aria-invalid={validation.relevance === undefined ? undefined : true}
-            aria-describedby={
-              validation.relevance === undefined ? undefined : "source-relevance-error"
-            }
-            onChange={(event) => {
-              setRelevance(event.currentTarget.value);
-              setValidation((current) => ({ ...current, relevance: undefined }));
-            }}
-          />
-          {validation.relevance === undefined ? null : (
-            <p id="source-relevance-error" className={styles.fieldError} role="alert">
-              {validation.relevance}
-            </p>
-          )}
-          <button type="submit" disabled={pending || (storyExists && !canRetryAttachment)}>
-            {canRetryAttachment
-              ? "Retry Source attachment"
-              : storyExists && !pending
-                ? "Story already created"
-                : "Create Story"}
-          </button>
-          {pending ? (
-            <p className={styles.pendingStatus} role="status">
-              {progress.kind === "creating"
-                ? "Creating Story…"
-                : progress.kind === "attaching"
-                  ? "Attaching Source…"
-                  : "Loading Story…"}
-            </p>
-          ) : null}
-        </form>
-      )}
-      {progress.kind === "create-failure" ? (
-        <div className={styles.workflowFailure} role="alert">
-          <h3>Story was not created</h3>
-          <p>{progress.error?.message ?? STORY_REQUEST_UNAVAILABLE_MESSAGE}</p>
-          {progress.error ? <p>Error code: {progress.error.code}</p> : null}
-        </div>
-      ) : null}
-      {progress.kind === "attachment-failure" ? (
-        <div className={styles.workflowPartial} role="alert">
-          <h3>
-            {progress.error === null
-              ? "Story created; Source attachment status unavailable"
-              : "Story created; Source not attached"}
-          </h3>
-          {progress.error === null ? (
-            <p>
-              “{progress.story.title}” already exists as Story {progress.story.id}. The attachment
-              request outcome could not be confirmed; the Story was not rolled back or deleted.
-            </p>
-          ) : (
-            <p>
-              “{progress.story.title}” already exists as Story {progress.story.id}. The Source could
-              not be attached; the Story was not rolled back or deleted.
-            </p>
-          )}
-          <p>{progress.error?.message ?? STORY_REQUEST_UNAVAILABLE_MESSAGE}</p>
-        </div>
-      ) : null}
-      {progress.kind === "inspection-failure" ? (
-        <div className={styles.workflowPartial} role="alert">
-          <h3>Story and Source attachment completed; Story could not be loaded</h3>
-          <p>
-            “{progress.story.title}” ({progress.story.id}) and its attachment may already be
-            durable. They were not rolled back.
-          </p>
-        </div>
-      ) : null}
-      {progress.kind === "completed" ? (
-        <p className={styles.workflowCompleted} role="status">
-          Story created, Source attached, and persisted Story loaded.
-        </p>
-      ) : null}
-    </section>
-  );
-}
-
 export function SourceEvidenceWorkspace({
   requestSourceEvidence = requestSourceEvidenceUrl,
-  storyRequests = storyClient,
-  onStoryCreated,
-  onStoryLoaded,
+  onSourceAvailable,
 }: SourceEvidenceWorkspaceProps) {
   const [submittedUrl, setSubmittedUrl] = useState("");
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<SourceEvidenceUrlResult | null>(null);
   const pendingRef = useRef(false);
-  const eligible = result === null ? null : eligibleSource(result);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -583,7 +288,16 @@ export function SourceEvidenceWorkspace({
     setPending(true);
 
     try {
-      setResult(await requestSourceEvidence(submittedUrl));
+      const nextResult = await requestSourceEvidence(submittedUrl);
+      setResult(nextResult);
+      if (
+        nextResult.kind === "completed" ||
+        nextResult.kind === "partial-completion" ||
+        (nextResult.kind === "preservation-conflict" &&
+          nextResult.error.code === "DUPLICATE_SOURCE")
+      ) {
+        onSourceAvailable?.();
+      }
     } catch {
       setResult({ kind: "unavailable", message: SOURCE_EVIDENCE_UNAVAILABLE_MESSAGE });
     } finally {
@@ -603,8 +317,8 @@ export function SourceEvidenceWorkspace({
         <h1 id="source-intake-title">Preserve one URL as Source evidence</h1>
         <p>
           Submit a caller-controlled URL to preserve the Source and attempt extraction. A preserved
-          Source remains distinct from a Story; after preservation, you may explicitly create a
-          Story and attach it.
+          Source remains distinct from a Story and becomes available for manual editorial triage in
+          Source Inbox.
         </p>
       </header>
 
@@ -635,15 +349,6 @@ export function SourceEvidenceWorkspace({
       <div className={styles.resultRegion} aria-live="polite" aria-atomic="true">
         {result === null ? null : <ResultReceipt result={result} />}
       </div>
-      {eligible === null ? null : (
-        <StoryCreationForm
-          key={`${eligible.sourceId}:${eligible.suggestedTitle}`}
-          eligible={eligible}
-          requests={storyRequests}
-          onStoryCreated={onStoryCreated}
-          onStoryLoaded={onStoryLoaded}
-        />
-      )}
     </section>
   );
 }

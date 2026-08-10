@@ -12,6 +12,8 @@ function makeRuntime(): StoryRuntime {
     attachSourceToStory: vi.fn<StoryRuntime["attachSourceToStory"]>(),
     inspectStory: vi.fn<StoryRuntime["inspectStory"]>(),
     listStories: vi.fn<StoryRuntime["listStories"]>(),
+    listPendingSources: vi.fn<StoryRuntime["listPendingSources"]>(),
+    recordSourceTriageDecision: vi.fn<StoryRuntime["recordSourceTriageDecision"]>(),
     close: vi.fn<StoryRuntime["close"]>(async () => undefined),
   });
 }
@@ -30,6 +32,8 @@ describe("createStoryRuntimeProvider", () => {
     expect(runtime.attachSourceToStory).not.toHaveBeenCalled();
     expect(runtime.inspectStory).not.toHaveBeenCalled();
     expect(runtime.listStories).not.toHaveBeenCalled();
+    expect(runtime.listPendingSources).not.toHaveBeenCalled();
+    expect(runtime.recordSourceTriageDecision).not.toHaveBeenCalled();
     expect(runtime.close).not.toHaveBeenCalled();
     expect(Object.keys(provider)).toEqual(["get"]);
   });

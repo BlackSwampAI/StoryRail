@@ -17,6 +17,7 @@ import {
   type FailedSourceExtraction,
   type OperatorActor,
   type SourceExtraction,
+  type SourceTriageDecision,
   type SuccessfulSourceExtraction,
   type Story,
   type StorySourceAttachment,
@@ -33,6 +34,8 @@ import { createPostgresStoryInspectionRepository } from "../story-inspection/pos
 import { createPostgresStoryListingRepository } from "../story-listing/postgres-story-listing-repository";
 import { createPostgresStoryRepository } from "../story-persistence/postgres-story-repository";
 import { createPostgresStorySourceAttachmentRepository } from "../story-source-persistence/postgres-story-source-attachment-repository";
+import { createPostgresSourceInboxRepository } from "../source-inbox/postgres-source-inbox-repository";
+import { createPostgresSourceTriageDecisionRepository } from "../source-triage-persistence/postgres-source-triage-decision-repository";
 
 const databaseUrl = process.env.STORYRAIL_TEST_DATABASE_URL;
 const describePostgres = databaseUrl ? describe : describe.skip;
@@ -44,6 +47,10 @@ const storyMigrationPath = resolve(
 const attachmentMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0018-durable-story-source-attachment.sql",
+);
+const triageMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0024-source-triage-decisions.sql",
 );
 
 const OPERATOR: OperatorActor = {
@@ -170,12 +177,14 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let sourceMigrationSql: string;
   let storyMigrationSql: string;
   let attachmentMigrationSql: string;
+  let triageMigrationSql: string;
   let destructiveSetupAllowed = false;
 
   beforeAll(async () => {
     sourceMigrationSql = await readFile(sourceMigrationPath, "utf8");
     storyMigrationSql = await readFile(storyMigrationPath, "utf8");
     attachmentMigrationSql = await readFile(attachmentMigrationPath, "utf8");
+    triageMigrationSql = await readFile(triageMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -195,6 +204,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await client.query(sourceMigrationSql);
       await client.query(storyMigrationSql);
       await client.query(attachmentMigrationSql);
+      await client.query(triageMigrationSql);
     } finally {
       client.release();
     }
@@ -206,7 +216,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     }
 
     await pool.query(
-      "TRUNCATE storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.stories RESTART IDENTITY",
+      "TRUNCATE storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.stories RESTART IDENTITY",
     );
   });
 
@@ -318,6 +328,160 @@ describePostgres("PostgreSQL persistence repositories", () => {
     };
   });
 
+  describe("Source Inbox and triage", () => {
+    it("lists each unattached and untriaged Source once with append-ordered extraction history", async () => {
+      const source = makeSource("inbox-pending");
+      const repositories = createPostgresSourceRepositories({ pool });
+      await repositories.sources.persist({ source });
+      const first = makeFailedExtraction(source, "inbox-first");
+      const second = makeSuccessfulExtraction(source, "inbox-second");
+      await repositories.extractions.append({ extraction: first });
+      await repositories.extractions.append({ extraction: second });
+
+      await expect(createPostgresSourceInboxRepository({ pool }).listPending()).resolves.toEqual([
+        { source, extractions: [first, second] },
+      ]);
+    });
+
+    it("returns a pending Source with no extraction and excludes historical attached Sources", async () => {
+      const pending = makeSource("inbox-no-extraction");
+      const attached = makeSource("inbox-historical-attached");
+      const story = makeStory("inbox-historical-attached");
+      const sources = createPostgresSourceRepositories({ pool }).sources;
+      await sources.persist({ source: pending });
+      await sources.persist({ source: attached });
+      await createPostgresStoryRepository({ pool }).persist({ story });
+      await createPostgresStorySourceAttachmentRepository({ pool }).attach({
+        attachment: makeAttachment("inbox-historical-attached", {
+          storyId: story.id,
+          sourceId: attached.id,
+        }),
+      });
+
+      await expect(createPostgresSourceInboxRepository({ pool }).listPending()).resolves.toEqual([
+        { source: pending, extractions: [] },
+      ]);
+    });
+
+    it("persists skip, preserves complete payload, and replays the original decidedAt", async () => {
+      const source = makeSource("triage-skip");
+      await createPostgresSourceRepositories({ pool }).sources.persist({ source });
+      const repository = createPostgresSourceTriageDecisionRepository({ pool });
+      const first: SourceTriageDecision = {
+        sourceId: source.id,
+        decision: "skip",
+        storyId: null,
+        reason: "No material new facts.",
+        decidedBy: OPERATOR,
+        decidedAt: "first-authoritative-time",
+      };
+      const replay = { ...first, decidedAt: "later-retry-time" };
+
+      await expect(repository.record(first)).resolves.toEqual({ ok: true, triageDecision: first });
+      await expect(repository.record(replay)).resolves.toEqual({ ok: true, triageDecision: first });
+      await expect(repository.findBySourceId(source.id)).resolves.toEqual(first);
+      await expect(createPostgresSourceInboxRepository({ pool }).listPending()).resolves.toEqual(
+        [],
+      );
+    });
+
+    it("requires the selected durable attachment for linked decisions and conflicts on divergence", async () => {
+      const source = makeSource("triage-linked");
+      const story = makeStory("triage-linked");
+      await createPostgresSourceRepositories({ pool }).sources.persist({ source });
+      await createPostgresStoryRepository({ pool }).persist({ story });
+      const repository = createPostgresSourceTriageDecisionRepository({ pool });
+      const decision: SourceTriageDecision = {
+        sourceId: source.id,
+        decision: "new_story",
+        storyId: story.id,
+        reason: "Material new subject.",
+        decidedBy: AGENT,
+        decidedAt: "decided-time",
+      };
+      await expect(repository.record(decision)).resolves.toMatchObject({
+        ok: false,
+        error: { code: "STORY_SOURCE_ATTACHMENT_NOT_FOUND" },
+      });
+      await createPostgresStorySourceAttachmentRepository({ pool }).attach({
+        attachment: makeAttachment("triage-linked", { storyId: story.id, sourceId: source.id }),
+      });
+      await expect(repository.record(decision)).resolves.toEqual({
+        ok: true,
+        triageDecision: decision,
+      });
+      await expect(
+        repository.record({ ...decision, reason: "Different final fact." }),
+      ).resolves.toMatchObject({
+        ok: false,
+        error: { code: "SOURCE_TRIAGE_CONFLICT" },
+      });
+    });
+
+    it("refuses to skip an already attached Source without mutating existing facts", async () => {
+      const source = makeSource("triage-attached-skip");
+      const story = makeStory("triage-attached-skip");
+      await createPostgresSourceRepositories({ pool }).sources.persist({ source });
+      await createPostgresStoryRepository({ pool }).persist({ story });
+      await createPostgresStorySourceAttachmentRepository({ pool }).attach({
+        attachment: makeAttachment("triage-attached-skip", {
+          storyId: story.id,
+          sourceId: source.id,
+        }),
+      });
+      const result = await createPostgresSourceTriageDecisionRepository({ pool }).record({
+        sourceId: source.id,
+        decision: "skip",
+        storyId: null,
+        reason: "Should be rejected.",
+        decidedBy: OPERATOR,
+        decidedAt: "decided-time",
+      });
+      expect(result).toMatchObject({ ok: false, error: { code: "SOURCE_ALREADY_ATTACHED" } });
+      await expect(
+        pool.query("SELECT count(*) FROM storyrail.source_triage_decisions"),
+      ).resolves.toMatchObject({ rows: [{ count: "0" }] });
+    });
+
+    it("turns malformed persisted triage payload into one safe PostgreSQL invariant failure", async () => {
+      const source = makeSource("triage-malformed");
+      await createPostgresSourceRepositories({ pool }).sources.persist({ source });
+      const repository = createPostgresSourceTriageDecisionRepository({ pool });
+      await repository.record({
+        sourceId: source.id,
+        decision: "skip",
+        storyId: null,
+        reason: "No coverage.",
+        decidedBy: OPERATOR,
+        decidedAt: "decided-time",
+      });
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(
+          "ALTER TABLE storyrail.source_triage_decisions DROP CONSTRAINT source_triage_decisions_payload_decided_at_check",
+        );
+        await client.query(
+          `UPDATE storyrail.source_triage_decisions
+           SET payload = jsonb_set(payload, '{decidedAt}', '123'::jsonb)
+           WHERE source_id = $1`,
+          [source.id],
+        );
+        await expect(
+          createPostgresSourceTriageDecisionRepository({
+            pool: client as unknown as Pool,
+          }).findBySourceId(source.id),
+        ).rejects.toMatchObject({
+          name: "PostgresSourceTriageInvariantError",
+          message: "PostgreSQL Source triage returned an invalid or impossible persisted result.",
+        });
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    });
+  });
+
   describe("migration", () => {
     it("creates only the dedicated evidence schema objects with the required columns", async () => {
       const tables = await pool.query<{ table_name: string }>(
@@ -341,6 +505,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
       expect(tables.rows.map((row) => row.table_name)).toEqual([
         "source_extractions",
+        "source_triage_decisions",
         "stories",
         "story_source_attachments",
         "url_sources",
@@ -380,6 +545,34 @@ describePostgres("PostgreSQL persistence repositories", () => {
           data_type: "bigint",
           is_nullable: "NO",
           is_identity: "YES",
+        },
+        {
+          table_name: "source_triage_decisions",
+          column_name: "source_id",
+          data_type: "text",
+          is_nullable: "NO",
+          is_identity: "NO",
+        },
+        {
+          table_name: "source_triage_decisions",
+          column_name: "decision",
+          data_type: "text",
+          is_nullable: "NO",
+          is_identity: "NO",
+        },
+        {
+          table_name: "source_triage_decisions",
+          column_name: "story_id",
+          data_type: "text",
+          is_nullable: "YES",
+          is_identity: "NO",
+        },
+        {
+          table_name: "source_triage_decisions",
+          column_name: "payload",
+          data_type: "jsonb",
+          is_nullable: "NO",
+          is_identity: "NO",
         },
         {
           table_name: "stories",
@@ -510,6 +703,61 @@ describePostgres("PostgreSQL persistence repositories", () => {
         {
           table_name: "source_extractions",
           constraint_name: "source_extractions_source_id_fkey",
+          constraint_type: "f",
+        },
+        {
+          table_name: "source_triage_decisions",
+          constraint_name: "source_triage_decisions_decision_check",
+          constraint_type: "c",
+        },
+        {
+          table_name: "source_triage_decisions",
+          constraint_name: "source_triage_decisions_payload_decided_at_check",
+          constraint_type: "c",
+        },
+        {
+          table_name: "source_triage_decisions",
+          constraint_name: "source_triage_decisions_payload_decided_by_check",
+          constraint_type: "c",
+        },
+        {
+          table_name: "source_triage_decisions",
+          constraint_name: "source_triage_decisions_payload_object_check",
+          constraint_type: "c",
+        },
+        {
+          table_name: "source_triage_decisions",
+          constraint_name: "source_triage_decisions_payload_reason_check",
+          constraint_type: "c",
+        },
+        {
+          table_name: "source_triage_decisions",
+          constraint_name: "source_triage_decisions_payload_relational_check",
+          constraint_type: "c",
+        },
+        {
+          table_name: "source_triage_decisions",
+          constraint_name: "source_triage_decisions_payload_shape_check",
+          constraint_type: "c",
+        },
+        {
+          table_name: "source_triage_decisions",
+          constraint_name: "source_triage_decisions_pkey",
+          constraint_type: "p",
+        },
+        {
+          table_name: "source_triage_decisions",
+          constraint_name: "source_triage_decisions_source_id_fkey",
+          constraint_type: "f",
+        },
+        {
+          table_name: "source_triage_decisions",
+          constraint_name: "source_triage_decisions_story_shape_check",
+          constraint_type: "c",
+        },
+        {
+          table_name: "source_triage_decisions",
+          constraint_name: "source_triage_decisions_story_source_attachment_fkey",
           constraint_type: "f",
         },
         {
@@ -1943,7 +2191,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
       try {
         await client.query("BEGIN");
-        await client.query("DROP TABLE storyrail.story_source_attachments");
+        await client.query("DROP TABLE storyrail.story_source_attachments CASCADE");
         const repository = createPostgresStoryListingRepository({
           pool: client as unknown as Pool,
         });
@@ -1960,7 +2208,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
       try {
         await client.query("BEGIN");
-        await client.query("DROP TABLE storyrail.story_source_attachments");
+        await client.query("DROP TABLE storyrail.story_source_attachments CASCADE");
         const repository = createPostgresStoryInspectionRepository({
           pool: client as unknown as Pool,
         });
@@ -2041,6 +2289,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         await pool.query(sourceMigrationSql);
         await pool.query(storyMigrationSql);
         await pool.query(attachmentMigrationSql);
+        await pool.query(triageMigrationSql);
       }
     });
 
@@ -2055,6 +2304,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
     it("does not translate Story query failures into expected persistence results", async () => {
       const repository = createPostgresStoryRepository({ pool });
       const story = makeStory("query-failure");
+      await pool.query("DROP TABLE storyrail.source_triage_decisions");
+      await pool.query("DROP FUNCTION storyrail.reject_attached_source_skip()");
       await pool.query("DROP TABLE storyrail.story_source_attachments");
       await pool.query("DROP TABLE storyrail.stories");
 
@@ -2068,6 +2319,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       } finally {
         await pool.query(storyMigrationSql);
         await pool.query(attachmentMigrationSql);
+        await pool.query(triageMigrationSql);
       }
     });
 
@@ -2082,6 +2334,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
     it("does not translate attachment query failures into expected repository results", async () => {
       const repository = createPostgresStorySourceAttachmentRepository({ pool });
       const attachment = makeAttachment("query-failure");
+      await pool.query("DROP TABLE storyrail.source_triage_decisions");
+      await pool.query("DROP FUNCTION storyrail.reject_attached_source_skip()");
       await pool.query("DROP TABLE storyrail.story_source_attachments");
 
       try {
@@ -2097,6 +2351,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         });
       } finally {
         await pool.query(attachmentMigrationSql);
+        await pool.query(triageMigrationSql);
       }
     });
 

@@ -16,13 +16,16 @@ import styles from "./newsroom-shell.module.css";
 import { STORY_STATE_LABELS } from "./newsroom-state";
 import { SourceEvidenceWorkspace } from "./source-evidence-workspace";
 import type { RequestSourceEvidenceUrl } from "./source-evidence-url-client";
+import { SourceInboxWorkspace } from "./source-inbox-workspace";
+import type { SourceInboxClient } from "./source-inbox-client";
 import { storyClient, type StoryClient } from "./story-client";
 
-type WorkspaceMode = "story" | "source-intake" | "assistant";
+type WorkspaceMode = "story" | "source-inbox" | "source-intake" | "assistant";
 
 export interface NewsroomShellProps {
   readonly requestSourceEvidence?: RequestSourceEvidenceUrl;
   readonly storyRequests?: StoryClient;
+  readonly sourceInboxRequests?: SourceInboxClient;
 }
 
 function pluralizeStories(count: number): string {
@@ -283,12 +286,17 @@ type StorySelection =
   | { readonly kind: "loaded"; readonly inspection: StoryInspection }
   | { readonly kind: "unavailable"; readonly storyId: StoryId };
 
-export function NewsroomShell({ requestSourceEvidence, storyRequests }: NewsroomShellProps) {
+export function NewsroomShell({
+  requestSourceEvidence,
+  storyRequests,
+  sourceInboxRequests,
+}: NewsroomShellProps) {
   const requests = storyRequests ?? storyClient;
   const [selectedQueue, setSelectedQueue] = useState<StoryState>("intake");
   const [listing, setListing] = useState<StoryListingState>({ kind: "loading" });
   const [storySelection, setStorySelection] = useState<StorySelection>({ kind: "none" });
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("story");
+  const [sourceInboxRefreshVersion, setSourceInboxRefreshVersion] = useState(0);
 
   const loadStories = useCallback(async () => {
     setListing({ kind: "loading" });
@@ -468,6 +476,13 @@ export function NewsroomShell({ requestSourceEvidence, storyRequests }: Newsroom
             </button>
             <button
               type="button"
+              aria-pressed={workspaceMode === "source-inbox"}
+              onClick={() => setWorkspaceMode("source-inbox")}
+            >
+              Source inbox
+            </button>
+            <button
+              type="button"
               aria-pressed={workspaceMode === "source-intake"}
               onClick={() => setWorkspaceMode("source-intake")}
             >
@@ -512,12 +527,14 @@ export function NewsroomShell({ requestSourceEvidence, storyRequests }: Newsroom
             </section>
           )}
         </div>
-        <div hidden={workspaceMode !== "source-intake"}>
-          <SourceEvidenceWorkspace
-            requestSourceEvidence={requestSourceEvidence}
+        <div hidden={workspaceMode !== "source-inbox"}>
+          <SourceInboxWorkspace
+            refreshVersion={sourceInboxRefreshVersion}
+            stories={items}
+            inboxRequests={sourceInboxRequests}
             storyRequests={requests}
-            onStoryCreated={(story) => {
-              upsertStoryListItem({ story, sourceCount: 0 });
+            onStoryKnown={(story, sourceCount) => {
+              upsertStoryListItem({ story, sourceCount });
               setSelectedQueue(story.state);
             }}
             onStoryLoaded={(inspection) => {
@@ -529,6 +546,12 @@ export function NewsroomShell({ requestSourceEvidence, storyRequests }: Newsroom
               setStorySelection({ kind: "loaded", inspection });
               setWorkspaceMode("story");
             }}
+          />
+        </div>
+        <div hidden={workspaceMode !== "source-intake"}>
+          <SourceEvidenceWorkspace
+            requestSourceEvidence={requestSourceEvidence}
+            onSourceAvailable={() => setSourceInboxRefreshVersion((current) => current + 1)}
           />
         </div>
         <div hidden={workspaceMode !== "assistant"}>

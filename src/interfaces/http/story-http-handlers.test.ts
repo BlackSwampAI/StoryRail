@@ -80,6 +80,8 @@ function makeRuntime(overrides: Partial<StoryRuntime> = {}): StoryRuntime {
     attachSourceToStory: vi.fn<StoryRuntime["attachSourceToStory"]>(),
     inspectStory: vi.fn<StoryRuntime["inspectStory"]>(),
     listStories: vi.fn<StoryRuntime["listStories"]>(),
+    listPendingSources: vi.fn<StoryRuntime["listPendingSources"]>(),
+    recordSourceTriageDecision: vi.fn<StoryRuntime["recordSourceTriageDecision"]>(),
     close: vi.fn<StoryRuntime["close"]>(async () => undefined),
     ...overrides,
   };

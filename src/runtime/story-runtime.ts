@@ -6,6 +6,13 @@ import { createPostgresStoryInspectionRepository } from "@/adapters/story-inspec
 import { createPostgresStoryListingRepository } from "@/adapters/story-listing";
 import { createPostgresStoryRepository } from "@/adapters/story-persistence";
 import { createPostgresStorySourceAttachmentRepository } from "@/adapters/story-source-persistence";
+import { createPostgresSourceInboxRepository } from "@/adapters/source-inbox";
+import { createPostgresSourceTriageDecisionRepository } from "@/adapters/source-triage-persistence";
+import type { SourceInboxRepository } from "@/application/source-inbox";
+import {
+  createRecordSourceTriageDecision,
+  type RecordSourceTriageDecisionWorkflow,
+} from "@/application/source-triage";
 import { createCreateStory, type CreateStoryWorkflow } from "@/application/story-creation";
 import type { StoryInspectionRepository } from "@/application/story-inspection";
 import type { StoryListingRepository } from "@/application/story-listing";
@@ -20,6 +27,8 @@ export interface StoryRuntime {
   readonly attachSourceToStory: AttachSourceToStoryWorkflow;
   readonly inspectStory: StoryInspectionRepository["inspect"];
   readonly listStories: StoryListingRepository["list"];
+  readonly listPendingSources: SourceInboxRepository["listPending"];
+  readonly recordSourceTriageDecision: RecordSourceTriageDecisionWorkflow;
   close(): Promise<void>;
 }
 
@@ -55,6 +64,8 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
   const attachmentRepository = createPostgresStorySourceAttachmentRepository({ pool });
   const inspectionRepository = createPostgresStoryInspectionRepository({ pool });
   const listingRepository = createPostgresStoryListingRepository({ pool });
+  const sourceInboxRepository = createPostgresSourceInboxRepository({ pool });
+  const sourceTriageRepository = createPostgresSourceTriageDecisionRepository({ pool });
   const createStory = createCreateStory({
     storyRepository,
     createStoryId: () => storyId(createUuid()),
@@ -64,6 +75,12 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
   const inspectStory: StoryInspectionRepository["inspect"] = (identity) =>
     inspectionRepository.inspect(identity);
   const listStories: StoryListingRepository["list"] = () => listingRepository.list();
+  const listPendingSources: SourceInboxRepository["listPending"] = () =>
+    sourceInboxRepository.listPending();
+  const recordSourceTriageDecision = createRecordSourceTriageDecision({
+    repository: sourceTriageRepository,
+    now,
+  });
   let closePromise: Promise<void> | undefined;
 
   return Object.freeze({
@@ -71,6 +88,8 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
     attachSourceToStory,
     inspectStory,
     listStories,
+    listPendingSources,
+    recordSourceTriageDecision,
     close() {
       closePromise ??= Promise.resolve().then(() => pool.end());
       return closePromise;

@@ -6,15 +6,16 @@ The first vertical slice uses Marvel Cinematic Universe (MCU) coverage to exerci
 
 1. Paste a URL.
 2. Preserve and extract the source.
-3. Create a story.
-4. Produce an assignment brief.
-5. Run one general MCU writer.
-6. Produce research notes and a claim/source ledger.
-7. Generate an article draft.
-8. Run an independent editor-in-chief review.
-9. Approve, reject, or request changes.
-10. Permit no more than two revision cycles.
-11. Publish an approved Story through a separate, explicit operator transition, exporting its Article as Markdown and structured JSON.
+3. Review the preserved evidence in Source Inbox.
+4. Create a new Story, attach the Source to an existing Story, or durably skip coverage.
+5. Produce an assignment brief.
+6. Run one general MCU writer.
+7. Produce research notes and a claim/source ledger.
+8. Generate an article draft.
+9. Run an independent editor-in-chief review.
+10. Approve, reject, or request changes.
+11. Permit no more than two revision cycles.
+12. Publish an approved Story through a separate, explicit operator transition, exporting its Article as Markdown and structured JSON.
 
 ## In scope
 
@@ -26,7 +27,9 @@ The server-only Source-evidence runtime exposes the combined workflow alongside 
 
 StoryRail now has one Node.js Route Handler at `POST /api/source-evidence/url`. It accepts an exact JSON request containing only `submittedUrl`, derives fixed single-operator provenance from `STORYRAIL_OPERATOR_ID`, and lazily reuses one Source-evidence runtime within each provider instance. Stable status mapping distinguishes transport, URL-validation, preservation-conflict, extraction-stage, and unexpected failures. A completed response contains both the preserved Source and durable extraction fact; a durable expected provider failure is also completed and returns `201`. If extraction orchestration fails after preservation, the `500` response retains the preserved Source as durable partial progress.
 
-The newsroom now has a connected, separate Source-intake workspace. It submits the exact operator-entered URL to the existing route and presents complete Source and extraction receipts. Durable expected provider failures remain visibly completed operations. Preservation validation, preservation conflicts, extraction-stage partial completion, interface failures, and unavailable responses have explicit states; partial completion retains the preserved Source. Unknown or unavailable responses expose only a safe message. From any durable Source result, including an exact duplicate, the operator can explicitly create a titled Story, supply the Source relevance, attach the Source, and immediately inspect the authoritative persisted Story and attachment in the newsroom. The transient input, pending operation, and latest intake receipt survive workspace switching within the current page session. Although a reload does not reconstruct that intake receipt, reopening its persisted Story restores the attached Source's durable extraction evidence from PostgreSQL.
+The newsroom now separates Source intake from Source Inbox. Intake submits the exact operator-entered URL, preserves complete Source and extraction receipts, and never creates a Story. Source Inbox reads pending evidence from PostgreSQL without calling Firecrawl and lets the operator make one durable final decision: create a new Story and attach the Source, attach it to an existing Story, or skip coverage without deleting evidence. Every decision requires a trimmed editorial reason and records server-derived operator provenance; the provider-neutral model also supports the future `assignment_editor` agent. Attached historical Sources are treated as resolved even when they predate triage decisions. Story queues begin only after a Story actually exists.
+
+The manual triage workflows keep Story creation, Source attachment, and final triage persistence as explicit operations. Semantic replay of the same final decision returns the authoritative original decision and timestamp, while divergent replay conflicts. Partial progress is reported without destructive rollback or accidental automatic replay. Assignment Editor automation and all LLM/model integration remain deferred.
 
 The newsroom's eight Story queues are backed by persisted Stories rather than illustrative fixtures. One durable listing supplies real queue counts and real title/source-count cards, including truthful zero counts. Story cards survive browser reload because the listing is reconstructed from PostgreSQL, and selecting a card loads the authoritative Story inspection with its attached Sources. A newly created Story is added to the real Intake queue immediately from its authoritative inspection. Fixture-backed newsroom Stories have been removed; durable transitions and assignments remain deferred.
 
@@ -36,14 +39,14 @@ Durable Source-to-Story attachment is now implemented as a separate provider-neu
 
 A provider-neutral durable Story inspection read model now returns one authoritative Story together with each explicitly attached authoritative URL Source, the immutable attachment facts connecting them, and every durable Source extraction attempt in append order. Existing Stories without attachments return an empty Source collection, attached Sources without attempts return an empty extraction history, and a missing Story returns `STORY_NOT_FOUND`. PostgreSQL performs the Story-centered read in one query and uses opaque Source identity only for deterministic technical ordering, not editorial chronology or priority. The Story workspace shows successful extraction metadata and full persisted Markdown, durable failed-extraction code and retryability facts, and a truthful zero-extraction state. Reopening a Story after a browser reload reconstructs this evidence from PostgreSQL. Scraper fallback and manual evidence entry remain deferred, as do Assignment Editor and LLM-provider behavior.
 
-A separate server-only Story runtime composes creation, Source attachment, listing, and inspection over one owned PostgreSQL Pool without requiring Firecrawl. Lazy Node.js Route Handlers expose `GET /api/stories`, `POST /api/stories`, `POST /api/stories/{storyId}/sources`, and `GET /api/stories/{storyId}`. They provide exact JSON transport validation, stable expected-error status mapping, safe unexpected-failure responses, and operator attachment provenance from `STORYRAIL_OPERATOR_ID`.
+A separate server-only Story runtime composes creation, Source attachment, listing, inspection, pending Source listing, and final Source triage persistence over one owned PostgreSQL Pool without requiring Firecrawl. Lazy Node.js Route Handlers additionally expose `GET /api/source-inbox` and `PUT /api/sources/{sourceId}/triage`. They provide exact JSON transport validation, stable expected-error status mapping, safe unexpected-failure responses, and operator provenance from `STORYRAIL_OPERATOR_ID`.
 
-Fixed operator provenance is not authentication, and the routes still must not be exposed publicly. Source intake never creates a Story automatically: one explicit Story form submission performs creation, attachment, and authoritative inspection without browser persistence or automatic retries. Story listing has no searching, filtering, pagination, polling, or browser persistence. Migrations remain external. Story transitions and assignments, authentication, graceful shutdown, and development hot-reload lifecycle policy remain deferred. StoryRail is therefore not yet an end-to-end operational editorial workflow, deployed system, or production-ready product.
+Fixed operator provenance is not authentication, and the routes still must not be exposed publicly. Source intake never creates a Story automatically; manual triage is required. Story listing has no searching, filtering, pagination, polling, or browser persistence. Migrations remain external. Assignment Editor automation, LLM/model integration, Story transitions and assignments, authentication, graceful shutdown, and development hot-reload lifecycle policy remain deferred. StoryRail is therefore not yet an end-to-end operational editorial workflow, deployed system, or production-ready product.
 
 ## Acceptance criteria
 
 - An operator can enter a URL and inspect the preserved Source and each attributable extraction outcome, including failed attempts and later retries.
-- The operator can create a distinct story and attach the source to it.
+- The operator can review a pending Source and durably choose new Story, existing Story, or skip.
 - The system can produce a structured assignment for the single MCU writer role.
 - Research notes distinguish sourced facts, unresolved claims, and original synthesis.
 - A claim/source ledger connects material draft claims to evidence or flags them as unsupported.
