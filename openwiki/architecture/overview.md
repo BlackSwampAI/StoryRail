@@ -7,7 +7,7 @@ tags: [architecture, overview, hexagonal]
 
 # StoryRail architecture overview
 
-StoryRail is an open-source, agent-first editorial control plane. It is deliberately **not** a page-building CMS. It manages editorial state and publishes through replaceable adapters; Postgres is intended to be authoritative for editorial state, and agent memory must never become the database.
+StoryRail is an open-source, agent-first editorial control plane. It is deliberately **not** a page-building CMS. It manages editorial state and is designed to publish through replaceable adapters in the future; Postgres is intended to be authoritative for editorial state, and agent memory must never become the database.
 
 ## Core editorial model
 
@@ -49,7 +49,7 @@ flowchart TD
 | ---------------- | ----------------------- | ------------------------------------------------------------------------------------------------------- |
 | Domain           | `src/domain/editorial`  | Pure editorial types, validation, and the Story state machine. No I/O.                                  |
 | Application      | `src/application`       | Use-case workflows that orchestrate domain rules with repository ports.                                 |
-| Adapters         | `src/adapters`          | PostgreSQL persistence and Firecrawl extraction implementations of the ports.                           |
+| Adapters         | `src/adapters`          | PostgreSQL persistence, Firecrawl extraction, and LangChain/OpenRouter structured-model implementations of the ports. |
 | Runtime          | `src/runtime`           | Composes adapters and application services into focused frozen runtimes with injectable external seams. |
 | Server providers | `src/server`            | Lazy singletons that build runtimes from environment on first use.                                      |
 | HTTP interface   | `src/interfaces/http`   | Hand-rolled request/response handlers that validate JSON and map workflow results to status codes.      |

@@ -73,7 +73,7 @@ Always returns 200 on success or 500 on internal failure.
 - Provider: `storyRuntimeProvider`
 - Response: the full `InspectStoryResult` (`{ ok: true, inspection: StoryInspection }` on 200, or `{ ok: false, error: { code: "STORY_NOT_FOUND" } }` on 404).
 
-`StoryInspection` (from `src/application/story-inspection/story-inspection-repository.ts`) assembles the Story with its attached Sources and each Source's extraction attempts.
+`StoryInspection` (from `src/application/story-inspection/story-inspection-repository.ts`) assembles the Story with its attached Sources. Each Source entry contains `{ attachment, source, extractions, preparations }`, preserving both raw extraction attempts and derived preparation attempts.
 
 ## POST /api/stories/[storyId]/sources — attach a Source to a Story
 
@@ -97,7 +97,7 @@ Always returns 200 on success or 500 on internal failure.
 - Route: `src/app/api/source-inbox/route.ts`
 - Handler: `src/interfaces/http/list-source-inbox-handler.ts`
 - Provider: `storyRuntimeProvider`
-- Response: `{ "ok": true, "sources": SourceInboxItem[] }` where `SourceInboxItem` is `{ source: UrlSource, extractions: SourceExtraction[] }`. Lists preserved Sources that have not yet received a final triage decision.
+- Response: `{ "ok": true, "sources": SourceInboxItem[] }` where each `SourceInboxItem` contains `{ source, extractions, preparations }`. A Source is pending only when it has no final triage decision **and** no Story attachment.
 
 ## PUT /api/sources/[sourceId]/triage — record a Source triage decision
 

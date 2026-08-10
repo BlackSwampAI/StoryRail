@@ -23,7 +23,7 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-Open <http://localhost:3000>. The page should identify StoryRail as a pre-alpha editorial control plane. Its newsroom shell loads persisted Stories and exposes a Source-intake workflow that can preserve and extract a URL, create a Story, attach the Source, and load the authoritative Story inspection.
+Open <http://localhost:3000>. The page should identify StoryRail as a pre-alpha editorial control plane. Source Intake preserves and extracts a URL; the resulting Source then moves to Source Inbox, where an operator may optionally prepare evidence before creating a new Story, attaching to an existing Story, or skipping coverage. The newsroom shell also loads persisted Stories and their authoritative inspections.
 
 ## Runtime configuration
 
