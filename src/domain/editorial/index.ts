@@ -5,5 +5,7 @@ export * from "./source-types";
 export * from "./source-url";
 export * from "./story-creation";
 export * from "./story-creation-types";
+export * from "./story-source-attachment";
+export * from "./story-source-attachment-types";
 export * from "./state-machine";
 export * from "./types";

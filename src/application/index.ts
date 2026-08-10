@@ -3,3 +3,5 @@ export * from "./source-evidence";
 export * from "./source-persistence";
 export * from "./story-creation";
 export * from "./story-persistence";
+export * from "./story-source-attachment";
+export * from "./story-source-persistence";
