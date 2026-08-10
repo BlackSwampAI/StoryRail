@@ -23,10 +23,12 @@ import {
   type UrlSource,
 } from "@/domain/editorial";
 import { describeSourceRepositoriesContract } from "@/application/source-persistence/source-repositories.contract";
+import { describeStoryInspectionRepositoryContract } from "@/application/story-inspection/story-inspection-repository.contract";
 import { describeStoryRepositoryContract } from "@/application/story-persistence/story-repository.contract";
 import { describeStorySourceAttachmentRepositoryContract } from "@/application/story-source-persistence/story-source-attachment-repository.contract";
 
 import { createPostgresSourceRepositories } from "./postgres-source-repositories";
+import { createPostgresStoryInspectionRepository } from "../story-inspection/postgres-story-inspection-repository";
 import { createPostgresStoryRepository } from "../story-persistence/postgres-story-repository";
 import { createPostgresStorySourceAttachmentRepository } from "../story-source-persistence/postgres-story-source-attachment-repository";
 
@@ -222,6 +224,29 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
   describeSourceRepositoriesContract(() => createPostgresSourceRepositories({ pool }));
   describeStoryRepositoryContract(() => createPostgresStoryRepository({ pool }));
+  describeStoryInspectionRepositoryContract(() => ({
+    createRepository: () => createPostgresStoryInspectionRepository({ pool }),
+    async addStory(story) {
+      const result = await createPostgresStoryRepository({ pool }).persist({ story });
+      if (!result.ok) {
+        throw new Error("The PostgreSQL Story inspection contract Story write must succeed.");
+      }
+    },
+    async addSource(source) {
+      const result = await createPostgresSourceRepositories({ pool }).sources.persist({ source });
+      if (!result.ok) {
+        throw new Error("The PostgreSQL Story inspection contract Source write must succeed.");
+      }
+    },
+    async addAttachment(attachment) {
+      const result = await createPostgresStorySourceAttachmentRepository({ pool }).attach({
+        attachment,
+      });
+      if (!result.ok) {
+        throw new Error("The PostgreSQL Story inspection contract attachment write must succeed.");
+      }
+    },
+  }));
   describeStorySourceAttachmentRepositoryContract(() => {
     let sourceSequence = 0;
     return {
@@ -1339,6 +1364,123 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
   });
 
+  describe("durable Story inspection", () => {
+    it("returns exact durable facts repeatedly in deterministic non-editorial Source-ID order", async () => {
+      const story = makeStory("inspection-exact", {
+        title: "Inspectable $1; DROP SCHEMA storyrail; --",
+        createdAt: "opaque created value; not chronological",
+        updatedAt: "opaque updated value; not chronological",
+      });
+      const sourceZ = makeSource(
+        "inspection-z",
+        AGENT,
+        "https://example.com/inspection/z?utm_source=preserved",
+      );
+      const sourceA = makeSource(
+        "inspection-a",
+        OPERATOR,
+        "https://example.com/inspection/a?utm_source=preserved",
+      );
+      const orderedSourceA = { ...sourceA, id: sourceId("a-inspection-source") };
+      const orderedSourceZ = { ...sourceZ, id: sourceId("z-inspection-source") };
+      const attachmentZ = makeAttachment("inspection-z", {
+        storyId: story.id,
+        sourceId: orderedSourceZ.id,
+        relevance: "Agent evidence with exact  interior spacing",
+        attachedBy: {
+          type: "agent",
+          role: "assignment_editor",
+          runId: agentRunId("inspection-assignment-editor-run"),
+        },
+        attachedAt: "0000-apparently-earlier",
+      });
+      const attachmentA = makeAttachment("inspection-a", {
+        storyId: story.id,
+        sourceId: orderedSourceA.id,
+        relevance: "Operator evidence $2; DELETE FROM storyrail.stories; --",
+        attachedBy: {
+          type: "operator",
+          operatorId: operatorId("inspection-operator"),
+        },
+        attachedAt: "9999-apparently-later",
+      });
+      await createPostgresStoryRepository({ pool }).persist({ story });
+      const sourceRepository = createPostgresSourceRepositories({ pool }).sources;
+      await sourceRepository.persist({ source: orderedSourceZ });
+      await sourceRepository.persist({ source: orderedSourceA });
+      const attachmentRepository = createPostgresStorySourceAttachmentRepository({ pool });
+      await attachmentRepository.attach({ attachment: attachmentZ });
+      await attachmentRepository.attach({ attachment: attachmentA });
+      const repository = createPostgresStoryInspectionRepository({ pool });
+      const expected = {
+        ok: true as const,
+        inspection: {
+          story,
+          sources: [
+            { attachment: attachmentA, source: orderedSourceA },
+            { attachment: attachmentZ, source: orderedSourceZ },
+          ],
+        },
+      };
+      const countsBefore = await pool.query<{
+        stories: string;
+        sources: string;
+        attachments: string;
+      }>(
+        `SELECT (SELECT count(*) FROM storyrail.stories) AS stories,
+                (SELECT count(*) FROM storyrail.url_sources) AS sources,
+                (SELECT count(*) FROM storyrail.story_source_attachments) AS attachments`,
+      );
+
+      await expect(repository.inspect(story.id)).resolves.toEqual(expected);
+      await expect(repository.inspect(story.id)).resolves.toEqual(expected);
+      await expect(
+        pool.query<{
+          stories: string;
+          sources: string;
+          attachments: string;
+        }>(
+          `SELECT (SELECT count(*) FROM storyrail.stories) AS stories,
+                  (SELECT count(*) FROM storyrail.url_sources) AS sources,
+                  (SELECT count(*) FROM storyrail.story_source_attachments) AS attachments`,
+        ),
+      ).resolves.toMatchObject({ rows: countsBefore.rows });
+    });
+
+    it("rejects an impossible persisted attachment whose Source parent is absent", async () => {
+      const story = makeStory("inspection-corrupt-parent");
+      const source = makeSource("inspection-corrupt-parent");
+      const attachment = makeAttachment("inspection-corrupt-parent", {
+        storyId: story.id,
+        sourceId: source.id,
+      });
+      await createPostgresStoryRepository({ pool }).persist({ story });
+      await createPostgresSourceRepositories({ pool }).sources.persist({ source });
+      await createPostgresStorySourceAttachmentRepository({ pool }).attach({ attachment });
+      const client = await pool.connect();
+
+      try {
+        await client.query("BEGIN");
+        await client.query(
+          "ALTER TABLE storyrail.story_source_attachments DROP CONSTRAINT story_source_attachments_source_id_fkey",
+        );
+        await client.query("DELETE FROM storyrail.url_sources WHERE source_id = $1", [source.id]);
+        const repository = createPostgresStoryInspectionRepository({
+          pool: client as unknown as Pool,
+        });
+
+        await expect(repository.inspect(story.id)).rejects.toMatchObject({
+          name: "PostgresStoryInspectionPersistenceInvariantError",
+          message:
+            "PostgreSQL Story inspection returned an invalid or impossible persisted result.",
+        });
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    });
+  });
+
   describe("database races", () => {
     it("uses a Pool capable of assigning concurrent work to distinct PostgreSQL connections", async () => {
       const [firstClient, secondClient] = await Promise.all([pool.connect(), pool.connect()]);
@@ -1692,6 +1834,36 @@ describePostgres("PostgreSQL persistence repositories", () => {
   });
 
   describe("safe failure boundaries", () => {
+    it("does not translate Story inspection query failures into STORY_NOT_FOUND", async () => {
+      const client = await pool.connect();
+
+      try {
+        await client.query("BEGIN");
+        await client.query("DROP TABLE storyrail.story_source_attachments");
+        const repository = createPostgresStoryInspectionRepository({
+          pool: client as unknown as Pool,
+        });
+        const operation = repository.inspect(storyId("inspection-query-failure"));
+
+        await expect(operation).rejects.toBeTruthy();
+        await expect(operation).rejects.not.toMatchObject({
+          ok: false,
+          error: { code: "STORY_NOT_FOUND" },
+        });
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    });
+
+    it("does not translate Story inspection connection failures into STORY_NOT_FOUND", async () => {
+      const closedPool = new Pool({ connectionString: databaseUrl });
+      await closedPool.end();
+      const repository = createPostgresStoryInspectionRepository({ pool: closedPool });
+
+      await expect(repository.inspect(storyId("inspection-closed-pool"))).rejects.toBeTruthy();
+    });
+
     it("rejects a corrupt Source payload with only a safe adapter invariant", async () => {
       const repositories = createPostgresSourceRepositories({ pool });
       const source = makeSource("corrupt-source");
@@ -1855,6 +2027,24 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await expect(
         repository.persist({ story: makeStory("factory-boundary") }),
       ).resolves.toMatchObject({ ok: true });
+      await expect(pool.query("SELECT 1 AS healthy")).resolves.toMatchObject({
+        rows: [{ healthy: 1 }],
+      });
+    });
+
+    it("does not connect or close the injected Pool while constructing the Story inspection repository", async () => {
+      const connectionCountBefore = pool.totalCount;
+      const repository = createPostgresStoryInspectionRepository({ pool });
+
+      expect(pool.totalCount).toBe(connectionCountBefore);
+      await expect(repository.inspect(storyId("inspection-factory-boundary"))).resolves.toEqual({
+        ok: false,
+        error: {
+          code: "STORY_NOT_FOUND",
+          message: "The Story to inspect does not exist.",
+          storyId: storyId("inspection-factory-boundary"),
+        },
+      });
       await expect(pool.query("SELECT 1 AS healthy")).resolves.toMatchObject({
         rows: [{ healthy: 1 }],
       });
