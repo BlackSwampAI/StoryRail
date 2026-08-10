@@ -7,6 +7,7 @@ import type { StoryListItem } from "@/application/story-listing";
 import {
   STORY_STATES,
   type EditorialActor,
+  type SourceExtraction,
   type StoryId,
   type StoryState,
 } from "@/domain/editorial";
@@ -47,6 +48,99 @@ function safeUrl(value: string): string | null {
   }
 }
 
+function PersistedExtractionAttempt({
+  extraction,
+  attemptNumber,
+}: Readonly<{ extraction: SourceExtraction; attemptNumber: number }>) {
+  return (
+    <article className={styles.persistedExtraction}>
+      <header className={styles.extractionHeader}>
+        <h5>Extraction attempt {attemptNumber}</h5>
+        <span>{extraction.outcome === "succeeded" ? "Succeeded" : "Failed"}</span>
+      </header>
+
+      {extraction.outcome === "succeeded" ? (
+        <>
+          <dl className={styles.receiptFacts}>
+            <div>
+              <dt>Extracted document title</dt>
+              <dd>{extraction.document.title ?? "Unavailable"}</dd>
+            </div>
+            <div>
+              <dt>Byline</dt>
+              <dd>{extraction.document.byline ?? "Unavailable"}</dd>
+            </div>
+            <div>
+              <dt>Publication timestamp</dt>
+              <dd>
+                {extraction.document.publishedAt === null ? (
+                  "Unavailable"
+                ) : (
+                  <time dateTime={extraction.document.publishedAt}>
+                    {extraction.document.publishedAt}
+                  </time>
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>Language</dt>
+              <dd>{extraction.document.language ?? "Unavailable"}</dd>
+            </div>
+          </dl>
+          <h6>Actual persisted Markdown</h6>
+          <pre className={styles.extractedContent}>{extraction.document.content}</pre>
+        </>
+      ) : (
+        <div className={styles.extractionFailure}>
+          <h6>Extraction failed</h6>
+          <dl className={styles.receiptFacts}>
+            <div>
+              <dt>Failure code</dt>
+              <dd>{extraction.failure.code}</dd>
+            </div>
+            <div>
+              <dt>Retryable</dt>
+              <dd>{extraction.failure.retryable ? "Yes" : "No"}</dd>
+            </div>
+          </dl>
+        </div>
+      )}
+
+      <details className={styles.extractionAudit}>
+        <summary>Technical extraction record</summary>
+        <dl className={styles.receiptFacts}>
+          <div>
+            <dt>Extraction ID</dt>
+            <dd>{extraction.id}</dd>
+          </div>
+          <div>
+            <dt>Extractor</dt>
+            <dd>
+              {extraction.extractor.key} / {extraction.extractor.version}
+            </dd>
+          </div>
+          <div>
+            <dt>Requested by</dt>
+            <dd>{actorLabel(extraction.requestedBy)}</dd>
+          </div>
+          <div>
+            <dt>Started</dt>
+            <dd>
+              <time dateTime={extraction.startedAt}>{extraction.startedAt}</time>
+            </dd>
+          </div>
+          <div>
+            <dt>Completed</dt>
+            <dd>
+              <time dateTime={extraction.completedAt}>{extraction.completedAt}</time>
+            </dd>
+          </div>
+        </dl>
+      </details>
+    </article>
+  );
+}
+
 function PersistedStoryWorkspace({ inspection }: Readonly<{ inspection: StoryInspection }>) {
   const { story, sources } = inspection;
   return (
@@ -82,7 +176,7 @@ function PersistedStoryWorkspace({ inspection }: Readonly<{ inspection: StoryIns
       <div className={styles.persistedSources}>
         <p className={styles.sectionNumber}>01</p>
         <h3>Attached Sources</h3>
-        {sources.map(({ attachment, source }) => {
+        {sources.map(({ attachment, source, extractions }) => {
           const canonicalHref = safeUrl(source.canonicalUrl);
           return (
             <section className={styles.persistedSource} key={`${story.id}:${source.id}`}>
@@ -129,6 +223,20 @@ function PersistedStoryWorkspace({ inspection }: Readonly<{ inspection: StoryIns
                   <dd>{source.id}</dd>
                 </div>
               </dl>
+              <div className={styles.persistedEvidence}>
+                <h5>Evidence / extraction history</h5>
+                {extractions.length === 0 ? (
+                  <p className={styles.noExtraction}>No extraction is recorded for this Source.</p>
+                ) : (
+                  extractions.map((extraction, index) => (
+                    <PersistedExtractionAttempt
+                      extraction={extraction}
+                      attemptNumber={index + 1}
+                      key={extraction.id}
+                    />
+                  ))
+                )}
+              </div>
             </section>
           );
         })}

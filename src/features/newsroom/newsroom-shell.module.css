@@ -453,6 +453,83 @@
   white-space: pre-wrap;
 }
 
+.persistedEvidence {
+  margin-top: 1.5rem;
+  border-top: 1px solid #29443a;
+  padding-top: 1.5rem;
+}
+
+.persistedEvidence > h5,
+.persistedExtraction h5,
+.persistedExtraction h6 {
+  margin: 0;
+  color: #e8f0eb;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.1rem;
+  font-weight: 500;
+}
+
+.persistedExtraction {
+  margin-top: 1rem;
+  border: 1px solid #315044;
+  border-radius: 0.75rem;
+  background: #0a1612;
+  padding: 1rem;
+}
+
+.persistedExtraction .extractedContent {
+  max-height: none;
+}
+
+.extractionHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.extractionHeader > span {
+  color: #9fc7b7;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.persistedExtraction h6 {
+  margin-top: 1.5rem;
+  font-size: 0.95rem;
+}
+
+.noExtraction {
+  margin: 1rem 0 0;
+  border-left: 0.2rem solid #61766d;
+  background: #111d19;
+  padding: 0.9rem 1rem;
+  color: #aebdb6;
+}
+
+.extractionFailure {
+  margin-top: 1.25rem;
+  border-left: 0.2rem solid #d27a70;
+  background: #251714;
+  padding: 0.9rem 1rem;
+}
+
+.extractionFailure h6 {
+  margin-top: 0;
+}
+
+.extractionAudit {
+  margin-top: 1.25rem;
+  color: #91a69c;
+  font-size: 0.8rem;
+}
+
+.extractionAudit summary {
+  cursor: pointer;
+}
+
 .storyCreation {
   border: 1px solid #41695a;
   border-radius: 0.9rem;

@@ -99,7 +99,10 @@ function successfulStoryRequests(overrides: Partial<StoryClient> = {}): StoryCli
     })),
     inspectStory: vi.fn<StoryClient["inspectStory"]>(async () => ({
       kind: "completed",
-      value: { story: CREATED_STORY, sources: [{ attachment: ATTACHMENT, source: SOURCE }] },
+      value: {
+        story: CREATED_STORY,
+        sources: [{ attachment: ATTACHMENT, source: SOURCE, extractions: [SUCCESSFUL_EXTRACTION] }],
+      },
     })),
     ...overrides,
   };

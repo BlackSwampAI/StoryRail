@@ -8,6 +8,7 @@ import type {
   CanonicalSourceUrl,
   EditorialActor,
   OperatorId,
+  SourceExtraction,
   SourceId,
   Story,
   StoryId,
@@ -16,11 +17,9 @@ import type {
   UrlSource,
 } from "@/domain/editorial";
 import { AGENT_ROLES, STORY_STATES } from "@/domain/editorial";
-import type {
-  InspectStoryResult,
-  StoryInspectionRepository,
-  StoryInspectionSource,
-} from "@/application/story-inspection";
+import type { InspectStoryResult, StoryInspectionRepository } from "@/application/story-inspection";
+
+import { decodePostgresSourceExtraction } from "../source-persistence/postgres-source-extraction-decoder";
 
 export interface CreatePostgresStoryInspectionRepositoryOptions {
   readonly pool: Pool;
@@ -37,6 +36,17 @@ interface StoryInspectionRow extends QueryResultRow {
   readonly source_id: unknown;
   readonly source_canonical_url: unknown;
   readonly source_payload: unknown;
+  readonly extraction_id: unknown;
+  readonly extraction_source_id: unknown;
+  readonly extraction_outcome: unknown;
+  readonly extraction_payload: unknown;
+  readonly extraction_append_position: unknown;
+}
+
+interface AssembledStoryInspectionSource {
+  readonly attachment: StorySourceAttachment;
+  readonly source: UrlSource;
+  readonly extractions: SourceExtraction[];
 }
 
 class PostgresStoryInspectionPersistenceInvariantError extends Error {
@@ -194,8 +204,42 @@ function hasNoAttachedSource(row: StoryInspectionRow): boolean {
     row.attachment_payload === null &&
     row.source_id === null &&
     row.source_canonical_url === null &&
-    row.source_payload === null
+    row.source_payload === null &&
+    hasNoExtraction(row)
   );
+}
+
+function hasNoExtraction(row: StoryInspectionRow): boolean {
+  return (
+    row.extraction_id === null &&
+    row.extraction_source_id === null &&
+    row.extraction_outcome === null &&
+    row.extraction_payload === null &&
+    row.extraction_append_position === null
+  );
+}
+
+function decodeExtraction(row: StoryInspectionRow, source: UrlSource): SourceExtraction {
+  if (
+    typeof row.extraction_id !== "string" ||
+    typeof row.extraction_source_id !== "string" ||
+    row.extraction_source_id !== source.id ||
+    (row.extraction_outcome !== "succeeded" && row.extraction_outcome !== "failed") ||
+    (typeof row.extraction_append_position !== "string" &&
+      typeof row.extraction_append_position !== "number")
+  ) {
+    throw invariantError();
+  }
+
+  const extraction = decodePostgresSourceExtraction(row.extraction_payload, invariantError);
+  if (
+    extraction.id !== row.extraction_id ||
+    extraction.sourceId !== row.extraction_source_id ||
+    extraction.outcome !== row.extraction_outcome
+  ) {
+    throw invariantError();
+  }
+  return extraction;
 }
 
 export function createPostgresStoryInspectionRepository(
@@ -215,14 +259,22 @@ export function createPostgresStoryInspectionRepository(
                 attachment.payload AS attachment_payload,
                 source.source_id,
                 source.canonical_url AS source_canonical_url,
-                source.payload AS source_payload
+                source.payload AS source_payload,
+                extraction.extraction_id,
+                extraction.source_id AS extraction_source_id,
+                extraction.outcome AS extraction_outcome,
+                extraction.payload AS extraction_payload,
+                extraction.append_position AS extraction_append_position
          FROM storyrail.stories AS story
          LEFT JOIN storyrail.story_source_attachments AS attachment
            ON attachment.story_id = story.story_id
          LEFT JOIN storyrail.url_sources AS source
            ON source.source_id = attachment.source_id
+         LEFT JOIN storyrail.source_extractions AS extraction
+           ON extraction.source_id = source.source_id
          WHERE story.story_id = $1
-         ORDER BY attachment.source_id COLLATE "C" ASC`,
+         ORDER BY attachment.source_id COLLATE "C" ASC,
+                  extraction.append_position ASC`,
         [storyIdentity],
       );
 
@@ -245,7 +297,8 @@ export function createPostgresStoryInspectionRepository(
       if (story.id !== storyIdentity) {
         throw invariantError();
       }
-      const sources: StoryInspectionSource[] = [];
+      const sources: AssembledStoryInspectionSource[] = [];
+      const seenSourceIds = new Set<SourceId>();
 
       for (const row of result.rows) {
         const rowStory = decodeStory(row);
@@ -260,7 +313,31 @@ export function createPostgresStoryInspectionRepository(
           continue;
         }
 
-        sources.push({ attachment: decodeAttachment(row), source: decodeSource(row) });
+        const attachment = decodeAttachment(row);
+        const source = decodeSource(row);
+        const previous = sources.at(-1);
+
+        if (previous?.source.id === source.id) {
+          if (
+            !isDeepStrictEqual(previous.attachment, attachment) ||
+            !isDeepStrictEqual(previous.source, source) ||
+            hasNoExtraction(row)
+          ) {
+            throw invariantError();
+          }
+          previous.extractions.push(decodeExtraction(row, source));
+          continue;
+        }
+
+        if (seenSourceIds.has(source.id)) {
+          throw invariantError();
+        }
+        seenSourceIds.add(source.id);
+        sources.push({
+          attachment,
+          source,
+          extractions: hasNoExtraction(row) ? [] : [decodeExtraction(row, source)],
+        });
       }
 
       return { ok: true, inspection: { story, sources } };

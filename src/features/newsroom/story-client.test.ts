@@ -31,7 +31,43 @@ const ATTACHMENT = {
   attachedBy: { type: "operator", operatorId: "operator-0021" },
   attachedAt: "2026-08-09T21:01:00.000Z",
 } as const;
-const INSPECTION = { story: STORY, sources: [{ attachment: ATTACHMENT, source: SOURCE }] };
+const SUCCESSFUL_EXTRACTION = {
+  id: "extraction-success-0023",
+  sourceId: SOURCE.id,
+  extractor: { key: "controlled", version: "1" },
+  requestedBy: { type: "operator", operatorId: "operator-0021" },
+  startedAt: "opaque-started",
+  completedAt: "opaque-completed",
+  outcome: "succeeded",
+  document: {
+    format: "markdown",
+    content: "# Exact persisted Markdown\n\n  Spacing remains.  ",
+    title: "Persisted evidence",
+    byline: null,
+    publishedAt: null,
+    language: "en",
+  },
+} as const;
+const FAILED_EXTRACTION = {
+  id: "extraction-failed-0023",
+  sourceId: SOURCE.id,
+  extractor: { key: "controlled", version: "1" },
+  requestedBy: { type: "agent", role: "fact_checker", runId: "run-0023" },
+  startedAt: "opaque-failed-started",
+  completedAt: "opaque-failed-completed",
+  outcome: "failed",
+  failure: { code: "RETRIEVAL_FAILED", retryable: true },
+} as const;
+const INSPECTION = {
+  story: STORY,
+  sources: [
+    {
+      attachment: ATTACHMENT,
+      source: SOURCE,
+      extractions: [SUCCESSFUL_EXTRACTION, FAILED_EXTRACTION],
+    },
+  ],
+};
 
 function response(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status });
@@ -135,6 +171,14 @@ describe("story-client", () => {
         {
           attachment: { ...ATTACHMENT, attachedAt: "opaque-attachment-time" },
           source: { ...SOURCE, receivedAt: "opaque-source-received" },
+          extractions: [
+            {
+              ...SUCCESSFUL_EXTRACTION,
+              startedAt: "opaque-extraction-started",
+              completedAt: "opaque-extraction-completed",
+              document: { ...SUCCESSFUL_EXTRACTION.document, publishedAt: "opaque-published" },
+            },
+          ],
         },
       ],
     };
@@ -143,6 +187,9 @@ describe("story-client", () => {
       opaqueInspection.story.updatedAt,
       opaqueInspection.sources[0].source.receivedAt,
       opaqueInspection.sources[0].attachment.attachedAt,
+      opaqueInspection.sources[0].extractions[0].startedAt,
+      opaqueInspection.sources[0].extractions[0].completedAt,
+      opaqueInspection.sources[0].extractions[0].document.publishedAt,
     ];
     const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
       response(200, { ok: true, inspection: opaqueInspection }),
@@ -152,6 +199,63 @@ describe("story-client", () => {
     await expect(createStoryClient({ fetch }).inspectStory(STORY.id)).resolves.toEqual({
       kind: "completed",
       value: opaqueInspection,
+    });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("parses zero extractions, exact Markdown, nullable metadata, and failed evidence", async () => {
+    const inspections = [
+      { story: STORY, sources: [{ attachment: ATTACHMENT, source: SOURCE, extractions: [] }] },
+      INSPECTION,
+    ];
+    const fetch = vi
+      .fn<StoryClientDependencies["fetch"]>()
+      .mockResolvedValueOnce(response(200, { ok: true, inspection: inspections[0] }))
+      .mockResolvedValueOnce(response(200, { ok: true, inspection: inspections[1] }));
+    const client = createStoryClient({ fetch });
+
+    await expect(client.inspectStory(STORY.id)).resolves.toEqual({
+      kind: "completed",
+      value: inspections[0],
+    });
+    await expect(client.inspectStory(STORY.id)).resolves.toEqual({
+      kind: "completed",
+      value: inspections[1],
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { attachment: ATTACHMENT, source: SOURCE },
+    { attachment: ATTACHMENT, source: SOURCE, extractions: {} },
+    {
+      attachment: ATTACHMENT,
+      source: SOURCE,
+      extractions: [
+        {
+          ...SUCCESSFUL_EXTRACTION,
+          document: { ...SUCCESSFUL_EXTRACTION.document, content: 42 },
+        },
+      ],
+    },
+    {
+      attachment: ATTACHMENT,
+      source: SOURCE,
+      extractions: [{ ...FAILED_EXTRACTION, failure: { code: "INVENTED", retryable: true } }],
+    },
+    {
+      attachment: ATTACHMENT,
+      source: SOURCE,
+      extractions: [{ ...FAILED_EXTRACTION, sourceId: "another-source" }],
+    },
+  ])("rejects malformed extraction entry %# without retry", async (sourceEntry) => {
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(200, { ok: true, inspection: { story: STORY, sources: [sourceEntry] } }),
+    );
+
+    await expect(createStoryClient({ fetch }).inspectStory(STORY.id)).resolves.toEqual({
+      kind: "unavailable",
+      message: STORY_REQUEST_UNAVAILABLE_MESSAGE,
     });
     expect(fetch).toHaveBeenCalledOnce();
   });

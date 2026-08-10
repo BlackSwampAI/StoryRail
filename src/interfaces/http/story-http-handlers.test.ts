@@ -8,6 +8,7 @@ import {
   sourceId,
   storyId,
   type Story,
+  type SourceExtraction,
   type StorySourceAttachment,
   type UrlSource,
 } from "@/domain/editorial";
@@ -45,6 +46,33 @@ const SOURCE: UrlSource = Object.freeze({
   submittedBy: { type: "operator" as const, operatorId: operatorId("operator-http-0020") },
   receivedAt: CREATED_AT,
 });
+const EXTRACTION = Object.freeze({
+  id: "extraction-http-0023" as SourceExtraction["id"],
+  sourceId: SOURCE_ID,
+  extractor: Object.freeze({ key: "controlled", version: "1" }),
+  requestedBy: ATTACHMENT.attachedBy,
+  startedAt: "opaque-http-started",
+  completedAt: "opaque-http-completed",
+  outcome: "succeeded",
+  document: Object.freeze({
+    format: "markdown",
+    content: "# HTTP persisted Markdown",
+    title: null,
+    byline: null,
+    publishedAt: null,
+    language: "en",
+  }),
+} satisfies SourceExtraction);
+const FAILED_EXTRACTION = Object.freeze({
+  id: "extraction-http-failed-0023" as SourceExtraction["id"],
+  sourceId: SOURCE_ID,
+  extractor: Object.freeze({ key: "controlled", version: "1" }),
+  requestedBy: ATTACHMENT.attachedBy,
+  startedAt: "opaque-http-failed-started",
+  completedAt: "opaque-http-failed-completed",
+  outcome: "failed",
+  failure: Object.freeze({ code: "RETRIEVAL_FAILED", retryable: true }),
+} satisfies SourceExtraction);
 
 function makeRuntime(overrides: Partial<StoryRuntime> = {}): StoryRuntime {
   return {
@@ -396,7 +424,10 @@ describe("createInspectStoryHttpHandler", () => {
   const context = { params: Promise.resolve({ storyId: STORY_ID }) };
 
   it("returns a complete existing Story inspection", async () => {
-    const inspection = { story: STORY, sources: [{ attachment: ATTACHMENT, source: SOURCE }] };
+    const inspection = {
+      story: STORY,
+      sources: [{ attachment: ATTACHMENT, source: SOURCE, extractions: [EXTRACTION] }],
+    };
     const inspectStory = vi.fn<StoryRuntime["inspectStory"]>(async () => ({
       ok: true,
       inspection,
@@ -430,6 +461,35 @@ describe("createInspectStoryHttpHandler", () => {
       ok: true,
       inspection: { story: STORY, sources: [] },
     });
+  });
+
+  it("serializes zero-extraction and failed-extraction Source evidence unchanged", async () => {
+    const inspections = [
+      {
+        story: STORY,
+        sources: [{ attachment: ATTACHMENT, source: SOURCE, extractions: [] }],
+      },
+      {
+        story: STORY,
+        sources: [{ attachment: ATTACHMENT, source: SOURCE, extractions: [FAILED_EXTRACTION] }],
+      },
+    ] as const;
+    const inspectStory = vi
+      .fn<StoryRuntime["inspectStory"]>()
+      .mockResolvedValueOnce({ ok: true, inspection: inspections[0] })
+      .mockResolvedValueOnce({ ok: true, inspection: inspections[1] });
+    const handler = createInspectStoryHttpHandler({
+      getRuntime: () => makeRuntime({ inspectStory }),
+    });
+
+    for (const inspection of inspections) {
+      const response = await handler(
+        new Request(`http://storyrail.test/api/stories/${STORY_ID}`),
+        context,
+      );
+      expect(response.status).toBe(200);
+      expect(await responseBody(response)).toEqual({ ok: true, inspection });
+    }
   });
 
   it("maps a missing Story to 404", async () => {

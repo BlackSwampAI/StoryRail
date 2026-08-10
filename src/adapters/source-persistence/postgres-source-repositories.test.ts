@@ -248,6 +248,14 @@ describePostgres("PostgreSQL persistence repositories", () => {
         throw new Error("The PostgreSQL Story inspection contract attachment write must succeed.");
       }
     },
+    async addExtraction(extraction) {
+      const result = await createPostgresSourceRepositories({ pool }).extractions.append({
+        extraction,
+      });
+      if (!result.ok) {
+        throw new Error("The PostgreSQL Story inspection contract extraction write must succeed.");
+      }
+    },
   }));
   describeStoryListingRepositoryContract(() => {
     let sourceSequence = 0;
@@ -1448,6 +1456,26 @@ describePostgres("PostgreSQL persistence repositories", () => {
       const sourceRepository = createPostgresSourceRepositories({ pool }).sources;
       await sourceRepository.persist({ source: orderedSourceZ });
       await sourceRepository.persist({ source: orderedSourceA });
+      const extractionAFirst = makeSuccessfulExtraction(orderedSourceA, "inspection-a-first", {
+        startedAt: "9999-apparently-later",
+        document: {
+          format: "markdown",
+          content: "# Exact Story inspection Markdown\n\n  Preserve this content exactly.  ",
+          title: "Durable inspection evidence",
+          byline: null,
+          publishedAt: null,
+          language: "en",
+        },
+      });
+      const extractionZ = makeFailedExtraction(orderedSourceZ, "inspection-z-failed");
+      const extractionASecond = makeFailedExtraction(orderedSourceA, "inspection-a-second", {
+        startedAt: "0000-apparently-earlier",
+        failure: { code: "RETRIEVAL_FAILED", retryable: false },
+      });
+      const extractionRepository = createPostgresSourceRepositories({ pool }).extractions;
+      await extractionRepository.append({ extraction: extractionAFirst });
+      await extractionRepository.append({ extraction: extractionZ });
+      await extractionRepository.append({ extraction: extractionASecond });
       const attachmentRepository = createPostgresStorySourceAttachmentRepository({ pool });
       await attachmentRepository.attach({ attachment: attachmentZ });
       await attachmentRepository.attach({ attachment: attachmentA });
@@ -1457,8 +1485,12 @@ describePostgres("PostgreSQL persistence repositories", () => {
         inspection: {
           story,
           sources: [
-            { attachment: attachmentA, source: orderedSourceA },
-            { attachment: attachmentZ, source: orderedSourceZ },
+            {
+              attachment: attachmentA,
+              source: orderedSourceA,
+              extractions: [extractionAFirst, extractionASecond],
+            },
+            { attachment: attachmentZ, source: orderedSourceZ, extractions: [extractionZ] },
           ],
         },
       };
@@ -1466,10 +1498,12 @@ describePostgres("PostgreSQL persistence repositories", () => {
         stories: string;
         sources: string;
         attachments: string;
+        extractions: string;
       }>(
         `SELECT (SELECT count(*) FROM storyrail.stories) AS stories,
                 (SELECT count(*) FROM storyrail.url_sources) AS sources,
-                (SELECT count(*) FROM storyrail.story_source_attachments) AS attachments`,
+                (SELECT count(*) FROM storyrail.story_source_attachments) AS attachments,
+                (SELECT count(*) FROM storyrail.source_extractions) AS extractions`,
       );
 
       await expect(repository.inspect(story.id)).resolves.toEqual(expected);
@@ -1479,10 +1513,12 @@ describePostgres("PostgreSQL persistence repositories", () => {
           stories: string;
           sources: string;
           attachments: string;
+          extractions: string;
         }>(
           `SELECT (SELECT count(*) FROM storyrail.stories) AS stories,
                   (SELECT count(*) FROM storyrail.url_sources) AS sources,
-                  (SELECT count(*) FROM storyrail.story_source_attachments) AS attachments`,
+                  (SELECT count(*) FROM storyrail.story_source_attachments) AS attachments,
+                  (SELECT count(*) FROM storyrail.source_extractions) AS extractions`,
         ),
       ).resolves.toMatchObject({ rows: countsBefore.rows });
     });
@@ -1518,6 +1554,34 @@ describePostgres("PostgreSQL persistence repositories", () => {
         await client.query("ROLLBACK");
         client.release();
       }
+    });
+
+    it("rejects corrupt joined extraction evidence through the Story inspection invariant", async () => {
+      const story = makeStory("inspection-corrupt-extraction");
+      const source = makeSource("inspection-corrupt-extraction");
+      const attachment = makeAttachment("inspection-corrupt-extraction", {
+        storyId: story.id,
+        sourceId: source.id,
+      });
+      const extraction = makeSuccessfulExtraction(source, "inspection-corrupt-extraction");
+      await createPostgresStoryRepository({ pool }).persist({ story });
+      const sourceRepositories = createPostgresSourceRepositories({ pool });
+      await sourceRepositories.sources.persist({ source });
+      await sourceRepositories.extractions.append({ extraction });
+      await createPostgresStorySourceAttachmentRepository({ pool }).attach({ attachment });
+      await pool.query(
+        `UPDATE storyrail.source_extractions
+         SET payload = payload - 'extractor'
+         WHERE extraction_id = $1`,
+        [extraction.id],
+      );
+
+      await expect(
+        createPostgresStoryInspectionRepository({ pool }).inspect(story.id),
+      ).rejects.toMatchObject({
+        name: "PostgresStoryInspectionPersistenceInvariantError",
+        message: "PostgreSQL Story inspection returned an invalid or impossible persisted result.",
+      });
     });
   });
 

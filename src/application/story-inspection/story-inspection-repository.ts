@@ -1,8 +1,15 @@
-import type { Story, StoryId, StorySourceAttachment, UrlSource } from "@/domain/editorial";
+import type {
+  SourceExtraction,
+  Story,
+  StoryId,
+  StorySourceAttachment,
+  UrlSource,
+} from "@/domain/editorial";
 
 export interface StoryInspectionSource {
   readonly attachment: StorySourceAttachment;
   readonly source: UrlSource;
+  readonly extractions: readonly SourceExtraction[];
 }
 
 export interface StoryInspection {
