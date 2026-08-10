@@ -7,6 +7,10 @@ import { createPostgresStoryInspectionRepository } from "@/adapters/story-inspec
 import { createPostgresStoryListingRepository } from "@/adapters/story-listing";
 import { createPostgresStoryRepository } from "@/adapters/story-persistence";
 import { createPostgresStorySourceAttachmentRepository } from "@/adapters/story-source-persistence";
+import { createPostgresSourceInboxRepository } from "@/adapters/source-inbox";
+import { createPostgresSourceTriageDecisionRepository } from "@/adapters/source-triage-persistence";
+import type { SourceInboxRepository } from "@/application/source-inbox";
+import type { SourceTriageDecisionRepository } from "@/application/source-triage";
 import type { StoryInspectionRepository } from "@/application/story-inspection";
 import type { StoryListingRepository } from "@/application/story-listing";
 import type { StoryRepository } from "@/application/story-persistence";
@@ -24,6 +28,8 @@ const factoryMocks = vi.hoisted(() => ({
   createAttachmentRepository: vi.fn(),
   createInspectionRepository: vi.fn(),
   createListingRepository: vi.fn(),
+  createSourceInboxRepository: vi.fn(),
+  createSourceTriageRepository: vi.fn(),
 }));
 
 vi.mock("@/adapters/story-persistence", () => ({
@@ -40,6 +46,14 @@ vi.mock("@/adapters/story-inspection", () => ({
 
 vi.mock("@/adapters/story-listing", () => ({
   createPostgresStoryListingRepository: factoryMocks.createListingRepository,
+}));
+
+vi.mock("@/adapters/source-inbox", () => ({
+  createPostgresSourceInboxRepository: factoryMocks.createSourceInboxRepository,
+}));
+
+vi.mock("@/adapters/source-triage-persistence", () => ({
+  createPostgresSourceTriageDecisionRepository: factoryMocks.createSourceTriageRepository,
 }));
 
 const DATABASE_URL = "opaque-story-runtime-database-configuration";
@@ -91,8 +105,25 @@ function makeRepositories() {
   const listingRepository: StoryListingRepository = {
     list: vi.fn<StoryListingRepository["list"]>(async () => []),
   };
+  const sourceInboxRepository: SourceInboxRepository = {
+    listPending: vi.fn<SourceInboxRepository["listPending"]>(async () => []),
+  };
+  const sourceTriageRepository: SourceTriageDecisionRepository = {
+    findBySourceId: vi.fn<SourceTriageDecisionRepository["findBySourceId"]>(async () => null),
+    record: vi.fn<SourceTriageDecisionRepository["record"]>(async (triageDecision) => ({
+      ok: true,
+      triageDecision,
+    })),
+  };
 
-  return { storyRepository, attachmentRepository, inspectionRepository, listingRepository };
+  return {
+    storyRepository,
+    attachmentRepository,
+    inspectionRepository,
+    listingRepository,
+    sourceInboxRepository,
+    sourceTriageRepository,
+  };
 }
 
 beforeEach(() => {
@@ -104,6 +135,8 @@ beforeEach(() => {
   factoryMocks.createAttachmentRepository.mockReturnValue(repositories.attachmentRepository);
   factoryMocks.createInspectionRepository.mockReturnValue(repositories.inspectionRepository);
   factoryMocks.createListingRepository.mockReturnValue(repositories.listingRepository);
+  factoryMocks.createSourceInboxRepository.mockReturnValue(repositories.sourceInboxRepository);
+  factoryMocks.createSourceTriageRepository.mockReturnValue(repositories.sourceTriageRepository);
 });
 
 describe("createStoryRuntime", () => {
@@ -131,6 +164,10 @@ describe("createStoryRuntime", () => {
     expect(createPostgresStoryListingRepository).toHaveBeenCalledWith({
       pool: controlledPool.pool,
     });
+    expect(createPostgresSourceInboxRepository).toHaveBeenCalledWith({ pool: controlledPool.pool });
+    expect(createPostgresSourceTriageDecisionRepository).toHaveBeenCalledWith({
+      pool: controlledPool.pool,
+    });
     expect(controlledPool.query).not.toHaveBeenCalled();
     expect(createUuid).not.toHaveBeenCalled();
     expect(now).not.toHaveBeenCalled();
@@ -140,6 +177,8 @@ describe("createStoryRuntime", () => {
       "attachSourceToStory",
       "inspectStory",
       "listStories",
+      "listPendingSources",
+      "recordSourceTriageDecision",
       "close",
     ]);
     expect(JSON.stringify(runtime)).not.toContain(DATABASE_URL);

@@ -2,6 +2,8 @@ export * from "./source-intake";
 export * from "./source-extraction";
 export * from "./source-extraction-types";
 export * from "./source-types";
+export * from "./source-triage";
+export * from "./source-triage-types";
 export * from "./source-url";
 export * from "./story-creation";
 export * from "./story-creation-types";

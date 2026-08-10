@@ -589,6 +589,7 @@
 
 .storyCreationForm input,
 .storyCreationForm textarea,
+.storyCreationForm select,
 .storyCreationForm button {
   border: 1px solid #41695a;
   border-radius: 0.6rem;
@@ -596,7 +597,11 @@
 }
 
 .storyCreationForm input,
-.storyCreationForm textarea {
+.storyCreationForm textarea,
+.storyCreationForm select {
+  display: block;
+  width: 100%;
+  margin-top: 0.35rem;
   background: #08110e;
   padding: 0.75rem 0.85rem;
   color: #eef5f0;
