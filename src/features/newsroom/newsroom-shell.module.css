@@ -453,6 +453,137 @@
   white-space: pre-wrap;
 }
 
+.storyCreation {
+  border: 1px solid #41695a;
+  border-radius: 0.9rem;
+  background: #10231c;
+  padding: clamp(1.25rem, 3vw, 2rem);
+}
+
+.storyCreation h2,
+.persistedSources h3 {
+  margin: 0.55rem 0 0;
+  color: #f1f6f3;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.7rem;
+  font-weight: 500;
+}
+
+.storyCreation > p:not(.sectionKicker) {
+  color: #9fb2a9;
+  line-height: 1.6;
+}
+
+.storyCreationAction {
+  min-height: 3rem;
+  border: 1px solid #41695a;
+  border-radius: 0.6rem;
+  background: #2d664f;
+  padding: 0.7rem 1.1rem;
+  color: #f4faf6;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.storyCreationAction:focus-visible {
+  outline: 3px solid #8ee4c2;
+  outline-offset: 3px;
+}
+
+.storyCreationForm {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 1.5rem;
+}
+
+.storyCreationForm label {
+  color: #dce8e1;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.storyCreationForm input,
+.storyCreationForm textarea,
+.storyCreationForm button {
+  border: 1px solid #41695a;
+  border-radius: 0.6rem;
+  font: inherit;
+}
+
+.storyCreationForm input,
+.storyCreationForm textarea {
+  background: #08110e;
+  padding: 0.75rem 0.85rem;
+  color: #eef5f0;
+}
+
+.storyCreationForm textarea {
+  min-height: 7rem;
+  resize: vertical;
+}
+
+.storyCreationForm button {
+  justify-self: start;
+  min-height: 3rem;
+  margin-top: 0.35rem;
+  background: #2d664f;
+  padding: 0.7rem 1.1rem;
+  color: #f4faf6;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.storyCreationForm button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.storyCreationForm[aria-busy="true"] button:disabled {
+  cursor: wait;
+}
+
+.storyCreationForm :focus-visible {
+  outline: 3px solid #8ee4c2;
+  outline-offset: 3px;
+}
+
+.workflowFailure,
+.workflowPartial {
+  margin-top: 1.25rem;
+  border-left: 0.3rem solid #d27a70;
+  background: #251714;
+  padding: 1rem 1.2rem;
+  color: #d9e2dd;
+}
+
+.workflowPartial {
+  border-left-color: #dfb867;
+  background: #252015;
+}
+
+.workflowFailure h3,
+.workflowPartial h3 {
+  margin: 0;
+  color: #f1f5f2;
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 500;
+}
+
+.workflowFailure p,
+.workflowPartial p {
+  margin: 0.65rem 0 0;
+  line-height: 1.55;
+}
+
+.workflowCompleted {
+  margin: 1.25rem 0 0;
+  border-left: 0.3rem solid #76d5b1;
+  background: #12271f;
+  padding: 1rem 1.2rem;
+  color: #cde8dc;
+}
+
 .workspaceHeader {
   display: flex;
   align-items: flex-start;
@@ -544,6 +675,42 @@
 
 .timestamps time {
   color: #a9b8b1;
+}
+
+.auditFact {
+  margin: 0.7rem 0 0;
+  overflow-wrap: anywhere;
+  color: #687f74;
+  font-size: 0.68rem;
+}
+
+.persistedSources {
+  margin-top: 3.5rem;
+}
+
+.persistedSources > .sectionNumber {
+  margin-bottom: 0.5rem;
+}
+
+.persistedSource {
+  margin-top: 1.25rem;
+  border: 1px solid #29443a;
+  border-radius: 0.9rem;
+  background: rgb(15 29 24 / 78%);
+  padding: 1.35rem;
+}
+
+.persistedSource h4 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #dfeae4;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.persistedSource a {
+  color: #9de0c5;
 }
 
 .workspaceSections {

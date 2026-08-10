@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 
-import type { StoryId, StoryState } from "@/domain/editorial";
+import type { StoryInspection } from "@/application/story-inspection";
+import type { EditorialActor, StoryId, StoryState } from "@/domain/editorial";
 
 import {
   NEWSROOM_QUEUES,
@@ -13,11 +14,13 @@ import {
 import styles from "./newsroom-shell.module.css";
 import { SourceEvidenceWorkspace } from "./source-evidence-workspace";
 import type { RequestSourceEvidenceUrl } from "./source-evidence-url-client";
+import type { StoryClient } from "./story-client";
 
 type WorkspaceMode = "story" | "source-intake" | "assistant";
 
 export interface NewsroomShellProps {
   readonly requestSourceEvidence?: RequestSourceEvidenceUrl;
+  readonly storyRequests?: StoryClient;
 }
 
 const dateFormatter = new Intl.DateTimeFormat("en-US", {
@@ -38,7 +41,7 @@ function pluralizeSources(count: number): string {
   return `${count} ${count === 1 ? "source" : "sources"}`;
 }
 
-function StoryWorkspace({ story }: Readonly<{ story: NewsroomStoryFixture | undefined }>) {
+function FixtureStoryWorkspace({ story }: Readonly<{ story: NewsroomStoryFixture | undefined }>) {
   if (!story) {
     return (
       <section className={styles.emptyWorkspace} aria-labelledby="empty-workspace-title">
@@ -115,6 +118,126 @@ function StoryWorkspace({ story }: Readonly<{ story: NewsroomStoryFixture | unde
   );
 }
 
+function actorLabel(actor: EditorialActor): string {
+  return actor.type === "operator"
+    ? `operator: ${actor.operatorId}`
+    : `agent: ${actor.role}, run ${actor.runId}`;
+}
+
+function safeUrl(value: string): string | null {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.href : null;
+  } catch {
+    return null;
+  }
+}
+
+function PersistedStoryWorkspace({ inspection }: Readonly<{ inspection: StoryInspection }>) {
+  const { story, sources } = inspection;
+  return (
+    <article className={styles.storyWorkspace} aria-labelledby="workspace-story-title">
+      <header className={styles.workspaceHeader}>
+        <div>
+          <p className={styles.sectionKicker}>Persisted Story</p>
+          <h2 id="workspace-story-title">{story.title}</h2>
+        </div>
+        <span className={styles.stateBadge}>{STORY_STATE_LABELS[story.state]}</span>
+      </header>
+
+      <dl className={styles.storyFacts}>
+        <div>
+          <dt>Revision cycle</dt>
+          <dd>{story.revisionCycle}</dd>
+        </div>
+        <div>
+          <dt>Attached Sources</dt>
+          <dd>{sources.length}</dd>
+        </div>
+      </dl>
+      <div className={styles.timestamps}>
+        <p>
+          Created <time dateTime={story.createdAt}>{formatDate(story.createdAt)}</time>
+        </p>
+        <p>
+          Updated <time dateTime={story.updatedAt}>{formatDate(story.updatedAt)}</time>
+        </p>
+      </div>
+      <p className={styles.auditFact}>Story ID: {story.id}</p>
+
+      <div className={styles.persistedSources}>
+        <p className={styles.sectionNumber}>01</p>
+        <h3>Attached Sources</h3>
+        {sources.map(({ attachment, source }) => {
+          const canonicalHref = safeUrl(source.canonicalUrl);
+          return (
+            <section className={styles.persistedSource} key={`${story.id}:${source.id}`}>
+              <h4>
+                {canonicalHref === null ? (
+                  source.canonicalUrl
+                ) : (
+                  <a href={canonicalHref} target="_blank" rel="noreferrer">
+                    {source.canonicalUrl}
+                  </a>
+                )}
+              </h4>
+              <dl className={styles.receiptFacts}>
+                <div>
+                  <dt>Submitted URL</dt>
+                  <dd>{source.submittedUrl}</dd>
+                </div>
+                <div>
+                  <dt>Relevance</dt>
+                  <dd>{attachment.relevance}</dd>
+                </div>
+                <div>
+                  <dt>Source provenance</dt>
+                  <dd>{actorLabel(source.submittedBy)}</dd>
+                </div>
+                <div>
+                  <dt>Source received</dt>
+                  <dd>
+                    <time dateTime={source.receivedAt}>{formatDate(source.receivedAt)}</time>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Attachment provenance</dt>
+                  <dd>{actorLabel(attachment.attachedBy)}</dd>
+                </div>
+                <div>
+                  <dt>Attached</dt>
+                  <dd>
+                    <time dateTime={attachment.attachedAt}>
+                      {formatDate(attachment.attachedAt)}
+                    </time>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Source ID</dt>
+                  <dd>{source.id}</dd>
+                </div>
+              </dl>
+            </section>
+          );
+        })}
+      </div>
+
+      <div className={styles.workspaceSections}>
+        <section aria-labelledby="assignment-heading">
+          <p className={styles.sectionNumber}>02</p>
+          <h3 id="assignment-heading">Assignment</h3>
+          <p>Assignments are not connected to persisted Story views yet.</p>
+        </section>
+        <section aria-labelledby="activity-heading">
+          <p className={styles.sectionNumber}>03</p>
+          <h3 id="activity-heading">Activity</h3>
+          <p>Durable Story activity is not connected to this workspace yet.</p>
+        </section>
+      </div>
+    </article>
+  );
+}
+
 function AssistantWorkspace() {
   return (
     <section className={styles.assistantWorkspace} aria-labelledby="assistant-workspace-title">
@@ -129,20 +252,30 @@ function AssistantWorkspace() {
   );
 }
 
-export function NewsroomShell({ requestSourceEvidence }: NewsroomShellProps) {
+type StorySelection =
+  | { readonly kind: "fixture"; readonly storyId: StoryId | undefined }
+  | { readonly kind: "persisted"; readonly inspection: StoryInspection };
+
+export function NewsroomShell({ requestSourceEvidence, storyRequests }: NewsroomShellProps) {
   const [selectedQueue, setSelectedQueue] = useState<StoryState>("intake");
   const initialStory = NEWSROOM_STORIES.find((story) => story.state === "intake");
-  const [selectedStoryId, setSelectedStoryId] = useState<StoryId | undefined>(initialStory?.id);
+  const [storySelection, setStorySelection] = useState<StorySelection>({
+    kind: "fixture",
+    storyId: initialStory?.id,
+  });
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("story");
 
   const visibleStories = NEWSROOM_STORIES.filter((story) => story.state === selectedQueue);
-  const selectedStory = NEWSROOM_STORIES.find((story) => story.id === selectedStoryId);
+  const selectedStory =
+    storySelection.kind === "fixture"
+      ? NEWSROOM_STORIES.find((story) => story.id === storySelection.storyId)
+      : undefined;
 
   function selectQueue(state: StoryState) {
     const firstStory = NEWSROOM_STORIES.find((story) => story.state === state);
 
     setSelectedQueue(state);
-    setSelectedStoryId(firstStory?.id);
+    setStorySelection({ kind: "fixture", storyId: firstStory?.id });
   }
 
   return (
@@ -157,7 +290,7 @@ export function NewsroomShell({ requestSourceEvidence }: NewsroomShellProps) {
         </header>
 
         <nav className={styles.queueNavigation} aria-label="Story state queues">
-          <p className={styles.navigationLabel}>Queues</p>
+          <p className={styles.navigationLabel}>Preview queues · fixture data</p>
           <div className={styles.queueList}>
             {NEWSROOM_QUEUES.map((queue) => (
               <button
@@ -191,8 +324,13 @@ export function NewsroomShell({ requestSourceEvidence }: NewsroomShellProps) {
                   className={styles.storyCard}
                   type="button"
                   key={story.id}
-                  aria-pressed={selectedStoryId === story.id}
-                  onClick={() => setSelectedStoryId(story.id)}
+                  aria-pressed={
+                    storySelection.kind === "fixture" && storySelection.storyId === story.id
+                  }
+                  onClick={() => {
+                    setStorySelection({ kind: "fixture", storyId: story.id });
+                    setWorkspaceMode("story");
+                  }}
                 >
                   <span className={styles.storyCardTitle}>{story.title}</span>
                   <span className={styles.storyCardMeta}>
@@ -242,10 +380,21 @@ export function NewsroomShell({ requestSourceEvidence }: NewsroomShellProps) {
         </header>
 
         <div hidden={workspaceMode !== "story"}>
-          <StoryWorkspace story={selectedStory} />
+          {storySelection.kind === "persisted" ? (
+            <PersistedStoryWorkspace inspection={storySelection.inspection} />
+          ) : (
+            <FixtureStoryWorkspace story={selectedStory} />
+          )}
         </div>
         <div hidden={workspaceMode !== "source-intake"}>
-          <SourceEvidenceWorkspace requestSourceEvidence={requestSourceEvidence} />
+          <SourceEvidenceWorkspace
+            requestSourceEvidence={requestSourceEvidence}
+            storyRequests={storyRequests}
+            onStoryLoaded={(inspection) => {
+              setStorySelection({ kind: "persisted", inspection });
+              setWorkspaceMode("story");
+            }}
+          />
         </div>
         <div hidden={workspaceMode !== "assistant"}>
           <AssistantWorkspace />
