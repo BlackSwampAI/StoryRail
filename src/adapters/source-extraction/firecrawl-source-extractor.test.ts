@@ -175,7 +175,7 @@ describe("Firecrawl request contract", () => {
         maxAge: 0,
         storeInCache: false,
         skipTlsVerification: false,
-        proxy: "basic",
+        proxy: "auto",
         removeBase64Images: true,
         blockAds: true,
       }),
@@ -199,6 +199,20 @@ describe("Firecrawl request contract", () => {
 });
 
 describe("Firecrawl successful response mapping", () => {
+  it("does not reject ordinary reporting that mentions verification", async () => {
+    const markdown =
+      "# Election report\n\nOfficials described verification rules and CAPTCHA accessibility in detail.";
+    const extractor = createFirecrawlSourceExtractor({
+      apiKey: makeApiKey(),
+      fetch: mockFetch(jsonResponse(successfulBody(markdown))),
+    });
+
+    await expect(extractor.extract(makeSource())).resolves.toMatchObject({
+      ok: true,
+      document: { content: markdown },
+    });
+  });
+
   it("preserves structured, hostile-looking, and whitespace-surrounded Markdown exactly", async () => {
     const markdown = [
       "  ",
@@ -350,6 +364,36 @@ describe("Firecrawl successful response mapping", () => {
 });
 
 describe("Firecrawl failure mapping", () => {
+  it.each([
+    [
+      "an explicit reCAPTCHA shell",
+      "# Security check\n\nRecaptcha requires verification. This site is protected by **reCAPTCHA**.",
+    ],
+    ["an explicit human-verification shell", "Please verify you are human to continue."],
+  ])("maps %s to a non-retryable rejected response without retrying", async (_case, markdown) => {
+    const providerBody = {
+      ...successfulBody(markdown),
+      requestId: "provider-request-that-must-not-leak",
+      details: { proxyUsed: "stealth", creditsUsed: 5 },
+    };
+    const fetchImplementation = mockFetch(jsonResponse(providerBody));
+    const extractor = createFirecrawlSourceExtractor({
+      apiKey: makeApiKey(),
+      fetch: fetchImplementation,
+    });
+
+    const result = await extractor.extract(makeSource());
+
+    expect(result).toEqual({
+      ok: false,
+      failure: { code: "RESPONSE_REJECTED", retryable: false },
+    });
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(result)).not.toContain(markdown);
+    expect(JSON.stringify(result)).not.toContain("provider-request-that-must-not-leak");
+    expect(JSON.stringify(result)).not.toContain("stealth");
+  });
+
   it.each([
     [408, "RETRIEVAL_TIMED_OUT", true],
     [429, "RETRIEVAL_FAILED", true],

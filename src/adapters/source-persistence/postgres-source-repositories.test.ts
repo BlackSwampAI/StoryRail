@@ -8,6 +8,7 @@ import {
   agentRunId,
   intakeUrlSource,
   operatorId,
+  sourceEvidencePreparationId,
   sourceExtractionId,
   sourceId,
   storyId,
@@ -17,6 +18,7 @@ import {
   type FailedSourceExtraction,
   type OperatorActor,
   type SourceExtraction,
+  type SourceEvidencePreparation,
   type SourceTriageDecision,
   type SuccessfulSourceExtraction,
   type Story,
@@ -36,6 +38,7 @@ import { createPostgresStoryRepository } from "../story-persistence/postgres-sto
 import { createPostgresStorySourceAttachmentRepository } from "../story-source-persistence/postgres-story-source-attachment-repository";
 import { createPostgresSourceInboxRepository } from "../source-inbox/postgres-source-inbox-repository";
 import { createPostgresSourceTriageDecisionRepository } from "../source-triage-persistence/postgres-source-triage-decision-repository";
+import { createPostgresSourceEvidencePreparationRepository } from "../source-evidence-preparation-persistence/postgres-source-evidence-preparation-repository";
 
 const databaseUrl = process.env.STORYRAIL_TEST_DATABASE_URL;
 const describePostgres = databaseUrl ? describe : describe.skip;
@@ -51,6 +54,10 @@ const attachmentMigrationPath = resolve(
 const triageMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0024-source-triage-decisions.sql",
+);
+const preparationMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0025-source-evidence-preparations.sql",
 );
 
 const OPERATOR: OperatorActor = {
@@ -142,6 +149,42 @@ function makeFailedExtraction(
   };
 }
 
+function makePreparation(
+  source: UrlSource,
+  extraction: SuccessfulSourceExtraction,
+  suffix: string,
+  outcome: "succeeded" | "failed" = "succeeded",
+): SourceEvidencePreparation {
+  const common = {
+    id: sourceEvidencePreparationId(`opaque-preparation-${suffix}`),
+    sourceId: source.id,
+    extractionId: extraction.id,
+    model: { provider: "openrouter", model: `operator/model-${suffix}` },
+    preparer: { key: "storyrail_evidence_preparer", version: "1" },
+    requestedBy: OPERATOR,
+    startedAt: `opaque-preparation-started-${suffix}`,
+    completedAt: `opaque-preparation-completed-${suffix}`,
+  };
+  return outcome === "succeeded"
+    ? {
+        ...common,
+        outcome,
+        document: {
+          format: "markdown",
+          content: `# Prepared ${suffix}\n\nExact derived evidence.`,
+          title: null,
+          byline: null,
+          publishedAt: "opaque-published",
+          language: null,
+        },
+      }
+    : {
+        ...common,
+        outcome,
+        failure: { code: "MODEL_OUTPUT_INVALID", retryable: false },
+      };
+}
+
 function canonicalUrl(value: string): CanonicalSourceUrl {
   return value as CanonicalSourceUrl;
 }
@@ -178,6 +221,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let storyMigrationSql: string;
   let attachmentMigrationSql: string;
   let triageMigrationSql: string;
+  let preparationMigrationSql: string;
   let destructiveSetupAllowed = false;
 
   beforeAll(async () => {
@@ -185,6 +229,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     storyMigrationSql = await readFile(storyMigrationPath, "utf8");
     attachmentMigrationSql = await readFile(attachmentMigrationPath, "utf8");
     triageMigrationSql = await readFile(triageMigrationPath, "utf8");
+    preparationMigrationSql = await readFile(preparationMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -205,6 +250,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await client.query(storyMigrationSql);
       await client.query(attachmentMigrationSql);
       await client.query(triageMigrationSql);
+      await client.query(preparationMigrationSql);
     } finally {
       client.release();
     }
@@ -216,7 +262,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     }
 
     await pool.query(
-      "TRUNCATE storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.stories RESTART IDENTITY",
+      "TRUNCATE storyrail.source_evidence_preparations, storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.stories RESTART IDENTITY",
     );
   });
 
@@ -264,6 +310,14 @@ describePostgres("PostgreSQL persistence repositories", () => {
       });
       if (!result.ok) {
         throw new Error("The PostgreSQL Story inspection contract extraction write must succeed.");
+      }
+    },
+    async addPreparation(preparation) {
+      const result = await createPostgresSourceEvidencePreparationRepository({ pool }).append(
+        preparation,
+      );
+      if (!result.ok) {
+        throw new Error("The PostgreSQL Story inspection contract preparation write must succeed.");
       }
     },
   }));
@@ -329,6 +383,76 @@ describePostgres("PostgreSQL persistence repositories", () => {
   });
 
   describe("Source Inbox and triage", () => {
+    it("round-trips append-ordered preparations without duplicating their raw extraction", async () => {
+      const source = makeSource("inbox-preparations");
+      const sourceRepositories = createPostgresSourceRepositories({ pool });
+      await sourceRepositories.sources.persist({ source });
+      const extraction = makeSuccessfulExtraction(source, "inbox-preparations");
+      await sourceRepositories.extractions.append({ extraction });
+      const preparations = createPostgresSourceEvidencePreparationRepository({ pool });
+      const first = makePreparation(source, extraction, "inbox-first");
+      const second = makePreparation(source, extraction, "inbox-second", "failed");
+      await expect(preparations.append(first)).resolves.toEqual({ ok: true, preparation: first });
+      await expect(preparations.append(structuredClone(first))).resolves.toEqual({
+        ok: true,
+        preparation: first,
+      });
+      await expect(preparations.append(second)).resolves.toEqual({ ok: true, preparation: second });
+      await expect(preparations.listBySourceId(source.id)).resolves.toEqual([first, second]);
+      const mutableRead = await preparations.listBySourceId(source.id);
+      const mutableFirst = mutableRead[0];
+      if (mutableFirst?.outcome !== "succeeded") {
+        throw new Error("The first preparation fixture must be successful.");
+      }
+      (mutableFirst.document as { content: string }).content = "mutated read";
+      await expect(preparations.listBySourceId(source.id)).resolves.toEqual([first, second]);
+      await expect(createPostgresSourceInboxRepository({ pool }).listPending()).resolves.toEqual([
+        { source, extractions: [extraction], preparations: [first, second] },
+      ]);
+      await expect(
+        preparations.append({ ...first, completedAt: "conflicting-completion" }),
+      ).resolves.toMatchObject({
+        ok: false,
+        error: { code: "SOURCE_EVIDENCE_PREPARATION_ID_CONFLICT" },
+      });
+      await expect(sourceRepositories.extractions.listBySourceId(source.id)).resolves.toEqual([
+        extraction,
+      ]);
+    });
+
+    it("fails safely when a persisted preparation payload has an unexpected key", async () => {
+      const source = makeSource("preparation-malformed");
+      const sourceRepositories = createPostgresSourceRepositories({ pool });
+      await sourceRepositories.sources.persist({ source });
+      const extraction = makeSuccessfulExtraction(source, "preparation-malformed");
+      await sourceRepositories.extractions.append({ extraction });
+      const repository = createPostgresSourceEvidencePreparationRepository({ pool });
+      const preparation = makePreparation(source, extraction, "malformed");
+      await repository.append(preparation);
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(
+          `UPDATE storyrail.source_evidence_preparations
+           SET payload = payload || '{"unexpected":"unsafe"}'::jsonb
+           WHERE preparation_id = $1`,
+          [preparation.id],
+        );
+        await expect(
+          createPostgresSourceEvidencePreparationRepository({
+            pool: client as unknown as Pool,
+          }).listBySourceId(source.id),
+        ).rejects.toMatchObject({
+          name: "PostgresSourceEvidencePreparationInvariantError",
+          message:
+            "PostgreSQL evidence preparation returned an invalid or impossible persisted result.",
+        });
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    });
+
     it("lists each unattached and untriaged Source once with append-ordered extraction history", async () => {
       const source = makeSource("inbox-pending");
       const repositories = createPostgresSourceRepositories({ pool });
@@ -339,7 +463,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await repositories.extractions.append({ extraction: second });
 
       await expect(createPostgresSourceInboxRepository({ pool }).listPending()).resolves.toEqual([
-        { source, extractions: [first, second] },
+        { source, extractions: [first, second], preparations: [] },
       ]);
     });
 
@@ -359,7 +483,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       });
 
       await expect(createPostgresSourceInboxRepository({ pool }).listPending()).resolves.toEqual([
-        { source: pending, extractions: [] },
+        { source: pending, extractions: [], preparations: [] },
       ]);
     });
 
@@ -504,147 +628,193 @@ describePostgres("PostgreSQL persistence repositories", () => {
       );
 
       expect(tables.rows.map((row) => row.table_name)).toEqual([
+        "source_evidence_preparations",
         "source_extractions",
         "source_triage_decisions",
         "stories",
         "story_source_attachments",
         "url_sources",
       ]);
-      expect(columns.rows).toEqual([
-        {
-          table_name: "source_extractions",
-          column_name: "extraction_id",
-          data_type: "text",
-          is_nullable: "NO",
-          is_identity: "NO",
-        },
-        {
-          table_name: "source_extractions",
-          column_name: "source_id",
-          data_type: "text",
-          is_nullable: "NO",
-          is_identity: "NO",
-        },
-        {
-          table_name: "source_extractions",
-          column_name: "outcome",
-          data_type: "text",
-          is_nullable: "NO",
-          is_identity: "NO",
-        },
-        {
-          table_name: "source_extractions",
-          column_name: "payload",
-          data_type: "jsonb",
-          is_nullable: "NO",
-          is_identity: "NO",
-        },
-        {
-          table_name: "source_extractions",
-          column_name: "append_position",
-          data_type: "bigint",
-          is_nullable: "NO",
-          is_identity: "YES",
-        },
-        {
-          table_name: "source_triage_decisions",
-          column_name: "source_id",
-          data_type: "text",
-          is_nullable: "NO",
-          is_identity: "NO",
-        },
-        {
-          table_name: "source_triage_decisions",
-          column_name: "decision",
-          data_type: "text",
-          is_nullable: "NO",
-          is_identity: "NO",
-        },
-        {
-          table_name: "source_triage_decisions",
-          column_name: "story_id",
-          data_type: "text",
-          is_nullable: "YES",
-          is_identity: "NO",
-        },
-        {
-          table_name: "source_triage_decisions",
-          column_name: "payload",
-          data_type: "jsonb",
-          is_nullable: "NO",
-          is_identity: "NO",
-        },
-        {
-          table_name: "stories",
-          column_name: "story_id",
-          data_type: "text",
-          is_nullable: "NO",
-          is_identity: "NO",
-        },
-        {
-          table_name: "stories",
-          column_name: "state",
-          data_type: "text",
-          is_nullable: "NO",
-          is_identity: "NO",
-        },
-        {
-          table_name: "stories",
-          column_name: "revision_cycle",
-          data_type: "integer",
-          is_nullable: "NO",
-          is_identity: "NO",
-        },
-        {
-          table_name: "stories",
-          column_name: "payload",
-          data_type: "jsonb",
-          is_nullable: "NO",
-          is_identity: "NO",
-        },
-        {
-          table_name: "story_source_attachments",
-          column_name: "story_id",
-          data_type: "text",
-          is_nullable: "NO",
-          is_identity: "NO",
-        },
-        {
-          table_name: "story_source_attachments",
-          column_name: "source_id",
-          data_type: "text",
-          is_nullable: "NO",
-          is_identity: "NO",
-        },
-        {
-          table_name: "story_source_attachments",
-          column_name: "payload",
-          data_type: "jsonb",
-          is_nullable: "NO",
-          is_identity: "NO",
-        },
-        {
-          table_name: "url_sources",
-          column_name: "source_id",
-          data_type: "text",
-          is_nullable: "NO",
-          is_identity: "NO",
-        },
-        {
-          table_name: "url_sources",
-          column_name: "canonical_url",
-          data_type: "text",
-          is_nullable: "NO",
-          is_identity: "NO",
-        },
-        {
-          table_name: "url_sources",
-          column_name: "payload",
-          data_type: "jsonb",
-          is_nullable: "NO",
-          is_identity: "NO",
-        },
-      ]);
+      expect(columns.rows).toEqual(
+        expect.arrayContaining([
+          {
+            table_name: "source_evidence_preparations",
+            column_name: "preparation_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "source_evidence_preparations",
+            column_name: "source_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "source_evidence_preparations",
+            column_name: "extraction_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "source_evidence_preparations",
+            column_name: "outcome",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "source_evidence_preparations",
+            column_name: "payload",
+            data_type: "jsonb",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "source_evidence_preparations",
+            column_name: "append_position",
+            data_type: "bigint",
+            is_nullable: "NO",
+            is_identity: "YES",
+          },
+          {
+            table_name: "source_extractions",
+            column_name: "extraction_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "source_extractions",
+            column_name: "source_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "source_extractions",
+            column_name: "outcome",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "source_extractions",
+            column_name: "payload",
+            data_type: "jsonb",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "source_extractions",
+            column_name: "append_position",
+            data_type: "bigint",
+            is_nullable: "NO",
+            is_identity: "YES",
+          },
+          {
+            table_name: "source_triage_decisions",
+            column_name: "source_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "source_triage_decisions",
+            column_name: "decision",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "source_triage_decisions",
+            column_name: "story_id",
+            data_type: "text",
+            is_nullable: "YES",
+            is_identity: "NO",
+          },
+          {
+            table_name: "source_triage_decisions",
+            column_name: "payload",
+            data_type: "jsonb",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "stories",
+            column_name: "story_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "stories",
+            column_name: "state",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "stories",
+            column_name: "revision_cycle",
+            data_type: "integer",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "stories",
+            column_name: "payload",
+            data_type: "jsonb",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "story_source_attachments",
+            column_name: "story_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "story_source_attachments",
+            column_name: "source_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "story_source_attachments",
+            column_name: "payload",
+            data_type: "jsonb",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "url_sources",
+            column_name: "source_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "url_sources",
+            column_name: "canonical_url",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "url_sources",
+            column_name: "payload",
+            data_type: "jsonb",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+        ]),
+      );
+      expect(columns.rows).toHaveLength(25);
     });
 
     it("creates the required primary, unique, foreign-key, and check constraints", async () => {
@@ -664,233 +834,275 @@ describePostgres("PostgreSQL persistence repositories", () => {
          ORDER BY rel.relname, con.conname`,
       );
 
-      expect(constraints.rows).toEqual([
-        {
-          table_name: "source_extractions",
-          constraint_name: "source_extractions_outcome_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "source_extractions",
-          constraint_name: "source_extractions_payload_id_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "source_extractions",
-          constraint_name: "source_extractions_payload_object_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "source_extractions",
-          constraint_name: "source_extractions_payload_outcome_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "source_extractions",
-          constraint_name: "source_extractions_payload_shape_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "source_extractions",
-          constraint_name: "source_extractions_payload_source_id_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "source_extractions",
-          constraint_name: "source_extractions_pkey",
-          constraint_type: "p",
-        },
-        {
-          table_name: "source_extractions",
-          constraint_name: "source_extractions_source_id_fkey",
-          constraint_type: "f",
-        },
-        {
-          table_name: "source_triage_decisions",
-          constraint_name: "source_triage_decisions_decision_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "source_triage_decisions",
-          constraint_name: "source_triage_decisions_payload_decided_at_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "source_triage_decisions",
-          constraint_name: "source_triage_decisions_payload_decided_by_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "source_triage_decisions",
-          constraint_name: "source_triage_decisions_payload_object_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "source_triage_decisions",
-          constraint_name: "source_triage_decisions_payload_reason_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "source_triage_decisions",
-          constraint_name: "source_triage_decisions_payload_relational_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "source_triage_decisions",
-          constraint_name: "source_triage_decisions_payload_shape_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "source_triage_decisions",
-          constraint_name: "source_triage_decisions_pkey",
-          constraint_type: "p",
-        },
-        {
-          table_name: "source_triage_decisions",
-          constraint_name: "source_triage_decisions_source_id_fkey",
-          constraint_type: "f",
-        },
-        {
-          table_name: "source_triage_decisions",
-          constraint_name: "source_triage_decisions_story_shape_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "source_triage_decisions",
-          constraint_name: "source_triage_decisions_story_source_attachment_fkey",
-          constraint_type: "f",
-        },
-        {
-          table_name: "stories",
-          constraint_name: "stories_payload_created_at_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "stories",
-          constraint_name: "stories_payload_id_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "stories",
-          constraint_name: "stories_payload_object_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "stories",
-          constraint_name: "stories_payload_revision_cycle_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "stories",
-          constraint_name: "stories_payload_state_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "stories",
-          constraint_name: "stories_payload_title_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "stories",
-          constraint_name: "stories_payload_updated_at_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "stories",
-          constraint_name: "stories_pkey",
-          constraint_type: "p",
-        },
-        {
-          table_name: "stories",
-          constraint_name: "stories_revision_cycle_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "stories",
-          constraint_name: "stories_state_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "story_source_attachments",
-          constraint_name: "story_source_attachments_payload_attached_at_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "story_source_attachments",
-          constraint_name: "story_source_attachments_payload_attached_by_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "story_source_attachments",
-          constraint_name: "story_source_attachments_payload_object_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "story_source_attachments",
-          constraint_name: "story_source_attachments_payload_relevance_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "story_source_attachments",
-          constraint_name: "story_source_attachments_payload_shape_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "story_source_attachments",
-          constraint_name: "story_source_attachments_payload_source_id_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "story_source_attachments",
-          constraint_name: "story_source_attachments_payload_story_id_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "story_source_attachments",
-          constraint_name: "story_source_attachments_pkey",
-          constraint_type: "p",
-        },
-        {
-          table_name: "story_source_attachments",
-          constraint_name: "story_source_attachments_source_id_fkey",
-          constraint_type: "f",
-        },
-        {
-          table_name: "story_source_attachments",
-          constraint_name: "story_source_attachments_story_id_fkey",
-          constraint_type: "f",
-        },
-        {
-          table_name: "url_sources",
-          constraint_name: "url_sources_canonical_url_key",
-          constraint_type: "u",
-        },
-        {
-          table_name: "url_sources",
-          constraint_name: "url_sources_payload_canonical_url_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "url_sources",
-          constraint_name: "url_sources_payload_id_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "url_sources",
-          constraint_name: "url_sources_payload_object_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "url_sources",
-          constraint_name: "url_sources_payload_type_check",
-          constraint_type: "c",
-        },
-        {
-          table_name: "url_sources",
-          constraint_name: "url_sources_pkey",
-          constraint_type: "p",
-        },
-      ]);
+      expect(constraints.rows).toEqual(
+        expect.arrayContaining([
+          {
+            table_name: "source_evidence_preparations",
+            constraint_name: "source_evidence_preparations_extraction_source_fkey",
+            constraint_type: "f",
+          },
+          {
+            table_name: "source_evidence_preparations",
+            constraint_name: "source_evidence_preparations_outcome_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "source_evidence_preparations",
+            constraint_name: "source_evidence_preparations_payload_identity_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "source_evidence_preparations",
+            constraint_name: "source_evidence_preparations_payload_object_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "source_evidence_preparations",
+            constraint_name: "source_evidence_preparations_payload_outcome_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "source_evidence_preparations",
+            constraint_name: "source_evidence_preparations_payload_shape_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "source_evidence_preparations",
+            constraint_name: "source_evidence_preparations_pkey",
+            constraint_type: "p",
+          },
+          {
+            table_name: "source_extractions",
+            constraint_name: "source_extractions_extraction_id_source_id_key",
+            constraint_type: "u",
+          },
+          {
+            table_name: "source_extractions",
+            constraint_name: "source_extractions_outcome_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "source_extractions",
+            constraint_name: "source_extractions_payload_id_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "source_extractions",
+            constraint_name: "source_extractions_payload_object_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "source_extractions",
+            constraint_name: "source_extractions_payload_outcome_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "source_extractions",
+            constraint_name: "source_extractions_payload_shape_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "source_extractions",
+            constraint_name: "source_extractions_payload_source_id_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "source_extractions",
+            constraint_name: "source_extractions_pkey",
+            constraint_type: "p",
+          },
+          {
+            table_name: "source_extractions",
+            constraint_name: "source_extractions_source_id_fkey",
+            constraint_type: "f",
+          },
+          {
+            table_name: "source_triage_decisions",
+            constraint_name: "source_triage_decisions_decision_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "source_triage_decisions",
+            constraint_name: "source_triage_decisions_payload_decided_at_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "source_triage_decisions",
+            constraint_name: "source_triage_decisions_payload_decided_by_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "source_triage_decisions",
+            constraint_name: "source_triage_decisions_payload_object_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "source_triage_decisions",
+            constraint_name: "source_triage_decisions_payload_reason_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "source_triage_decisions",
+            constraint_name: "source_triage_decisions_payload_relational_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "source_triage_decisions",
+            constraint_name: "source_triage_decisions_payload_shape_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "source_triage_decisions",
+            constraint_name: "source_triage_decisions_pkey",
+            constraint_type: "p",
+          },
+          {
+            table_name: "source_triage_decisions",
+            constraint_name: "source_triage_decisions_source_id_fkey",
+            constraint_type: "f",
+          },
+          {
+            table_name: "source_triage_decisions",
+            constraint_name: "source_triage_decisions_story_shape_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "source_triage_decisions",
+            constraint_name: "source_triage_decisions_story_source_attachment_fkey",
+            constraint_type: "f",
+          },
+          {
+            table_name: "stories",
+            constraint_name: "stories_payload_created_at_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "stories",
+            constraint_name: "stories_payload_id_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "stories",
+            constraint_name: "stories_payload_object_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "stories",
+            constraint_name: "stories_payload_revision_cycle_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "stories",
+            constraint_name: "stories_payload_state_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "stories",
+            constraint_name: "stories_payload_title_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "stories",
+            constraint_name: "stories_payload_updated_at_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "stories",
+            constraint_name: "stories_pkey",
+            constraint_type: "p",
+          },
+          {
+            table_name: "stories",
+            constraint_name: "stories_revision_cycle_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "stories",
+            constraint_name: "stories_state_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "story_source_attachments",
+            constraint_name: "story_source_attachments_payload_attached_at_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "story_source_attachments",
+            constraint_name: "story_source_attachments_payload_attached_by_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "story_source_attachments",
+            constraint_name: "story_source_attachments_payload_object_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "story_source_attachments",
+            constraint_name: "story_source_attachments_payload_relevance_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "story_source_attachments",
+            constraint_name: "story_source_attachments_payload_shape_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "story_source_attachments",
+            constraint_name: "story_source_attachments_payload_source_id_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "story_source_attachments",
+            constraint_name: "story_source_attachments_payload_story_id_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "story_source_attachments",
+            constraint_name: "story_source_attachments_pkey",
+            constraint_type: "p",
+          },
+          {
+            table_name: "story_source_attachments",
+            constraint_name: "story_source_attachments_source_id_fkey",
+            constraint_type: "f",
+          },
+          {
+            table_name: "story_source_attachments",
+            constraint_name: "story_source_attachments_story_id_fkey",
+            constraint_type: "f",
+          },
+          {
+            table_name: "url_sources",
+            constraint_name: "url_sources_canonical_url_key",
+            constraint_type: "u",
+          },
+          {
+            table_name: "url_sources",
+            constraint_name: "url_sources_payload_canonical_url_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "url_sources",
+            constraint_name: "url_sources_payload_id_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "url_sources",
+            constraint_name: "url_sources_payload_object_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "url_sources",
+            constraint_name: "url_sources_payload_type_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "url_sources",
+            constraint_name: "url_sources_pkey",
+            constraint_type: "p",
+          },
+        ]),
+      );
 
       const foreignKey = await pool.query<{ definition: string }>(
         `SELECT pg_get_constraintdef(con.oid) AS definition
@@ -901,6 +1113,18 @@ describePostgres("PostgreSQL persistence repositories", () => {
            AND con.conname = 'source_extractions_source_id_fkey'`,
       );
       expect(foreignKey.rows[0]?.definition).toContain("ON UPDATE RESTRICT ON DELETE RESTRICT");
+
+      const preparationForeignKey = await pool.query<{ definition: string }>(
+        `SELECT pg_get_constraintdef(con.oid) AS definition
+         FROM pg_constraint AS con
+         JOIN pg_class AS rel ON rel.oid = con.conrelid
+         JOIN pg_namespace AS namespace ON namespace.oid = rel.relnamespace
+         WHERE namespace.nspname = 'storyrail'
+           AND con.conname = 'source_evidence_preparations_extraction_source_fkey'`,
+      );
+      expect(preparationForeignKey.rows[0]?.definition).toBe(
+        "FOREIGN KEY (extraction_id, source_id) REFERENCES storyrail.source_extractions(extraction_id, source_id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+      );
 
       const attachmentForeignKeys = await pool.query<{
         constraint_name: string;
@@ -1737,8 +1961,14 @@ describePostgres("PostgreSQL persistence repositories", () => {
               attachment: attachmentA,
               source: orderedSourceA,
               extractions: [extractionAFirst, extractionASecond],
+              preparations: [],
             },
-            { attachment: attachmentZ, source: orderedSourceZ, extractions: [extractionZ] },
+            {
+              attachment: attachmentZ,
+              source: orderedSourceZ,
+              extractions: [extractionZ],
+              preparations: [],
+            },
           ],
         },
       };
@@ -2290,6 +2520,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         await pool.query(storyMigrationSql);
         await pool.query(attachmentMigrationSql);
         await pool.query(triageMigrationSql);
+        await pool.query(preparationMigrationSql);
       }
     });
 

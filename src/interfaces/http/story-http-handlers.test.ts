@@ -428,7 +428,9 @@ describe("createInspectStoryHttpHandler", () => {
   it("returns a complete existing Story inspection", async () => {
     const inspection = {
       story: STORY,
-      sources: [{ attachment: ATTACHMENT, source: SOURCE, extractions: [EXTRACTION] }],
+      sources: [
+        { attachment: ATTACHMENT, source: SOURCE, extractions: [EXTRACTION], preparations: [] },
+      ],
     };
     const inspectStory = vi.fn<StoryRuntime["inspectStory"]>(async () => ({
       ok: true,
@@ -469,11 +471,18 @@ describe("createInspectStoryHttpHandler", () => {
     const inspections = [
       {
         story: STORY,
-        sources: [{ attachment: ATTACHMENT, source: SOURCE, extractions: [] }],
+        sources: [{ attachment: ATTACHMENT, source: SOURCE, extractions: [], preparations: [] }],
       },
       {
         story: STORY,
-        sources: [{ attachment: ATTACHMENT, source: SOURCE, extractions: [FAILED_EXTRACTION] }],
+        sources: [
+          {
+            attachment: ATTACHMENT,
+            source: SOURCE,
+            extractions: [FAILED_EXTRACTION],
+            preparations: [],
+          },
+        ],
       },
     ] as const;
     const inspectStory = vi

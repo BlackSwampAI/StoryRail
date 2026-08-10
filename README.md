@@ -59,6 +59,8 @@ pnpm dev
 
 Open [http://localhost:3000](http://localhost:3000). The page should identify StoryRail as a pre-alpha editorial control plane. Its newsroom queues load persisted Stories and the connected Source-intake workflow can preserve and extract a URL, create a Story, attach the Source, and load the authoritative Story inspection.
 
+Copy `.env.example` to `.env` and provide `STORYRAIL_DATABASE_URL`, `FIRECRAWL_API_KEY`, and `STORYRAIL_OPERATOR_ID` for the existing local workflows. Manual evidence preparation additionally requires `OPENROUTER_API_KEY` and an operator-selected `STORYRAIL_EVIDENCE_PREPARATION_MODEL`; normal Story, Inbox, triage, and raw Source intake do not require OpenRouter. Apply database migrations externally in order, including `database/migrations/0025-source-evidence-preparations.sql`; the application does not run migrations automatically.
+
 Manual verification is maintainer-owned. Run the project checks in this order:
 
 ```bash

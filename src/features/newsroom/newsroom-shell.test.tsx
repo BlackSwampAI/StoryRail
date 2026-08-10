@@ -1,7 +1,14 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { operatorId, sourceId, storyId, type Story } from "@/domain/editorial";
+import {
+  operatorId,
+  sourceEvidencePreparationId,
+  sourceExtractionId,
+  sourceId,
+  storyId,
+  type Story,
+} from "@/domain/editorial";
 
 import { NewsroomShell } from "./newsroom-shell";
 import type { SourceInboxClient } from "./source-inbox-client";
@@ -53,6 +60,10 @@ function inboxRequests(): SourceInboxClient {
       kind: "unavailable",
       message: "The Source Inbox request could not be completed.",
     })),
+    prepareEvidence: vi.fn<SourceInboxClient["prepareEvidence"]>(async () => ({
+      kind: "unavailable",
+      message: "The Source Inbox request could not be completed.",
+    })),
   };
 }
 
@@ -67,6 +78,89 @@ describe("NewsroomShell", () => {
     expect(workspace).toHaveTextContent("Source inbox");
     expect(workspace).toHaveTextContent("Source intake");
     expect(workspace).toHaveTextContent("Assistant");
+  });
+
+  it("shows prepared evidence before retained raw evidence after authoritative Story reopen", async () => {
+    const source = {
+      id: sourceId("source-story-prepared-25"),
+      type: "url" as const,
+      submittedUrl: "https://example.com/prepared",
+      canonicalUrl: "https://example.com/prepared" as never,
+      submittedBy: { type: "operator" as const, operatorId: operatorId("operator-25") },
+      receivedAt: "received",
+    };
+    const extraction = {
+      id: sourceExtractionId("extraction-story-prepared-25"),
+      sourceId: source.id,
+      extractor: { key: "firecrawl", version: "v2" },
+      requestedBy: source.submittedBy,
+      startedAt: "raw-started",
+      completedAt: "raw-completed",
+      outcome: "succeeded" as const,
+      document: {
+        format: "markdown" as const,
+        content: "# Raw Story evidence",
+        title: null,
+        byline: null,
+        publishedAt: null,
+        language: null,
+      },
+    };
+    const preparation = {
+      id: sourceEvidencePreparationId("preparation-story-25"),
+      sourceId: source.id,
+      extractionId: extraction.id,
+      model: { provider: "openrouter", model: "operator/model" },
+      preparer: { key: "storyrail_evidence_preparer", version: "1" },
+      requestedBy: source.submittedBy,
+      startedAt: "preparation-started",
+      completedAt: "preparation-completed",
+      outcome: "succeeded" as const,
+      document: {
+        format: "markdown" as const,
+        content: "# Prepared Story evidence",
+        title: null,
+        byline: null,
+        publishedAt: null,
+        language: null,
+      },
+    };
+    const requests: StoryClient = {
+      ...storyRequests(),
+      listStories: vi.fn<StoryClient["listStories"]>(async () => ({
+        kind: "completed",
+        value: [{ story: STORY, sourceCount: 1 }],
+      })),
+      inspectStory: vi.fn<StoryClient["inspectStory"]>(async () => ({
+        kind: "completed",
+        value: {
+          story: STORY,
+          sources: [
+            {
+              attachment: {
+                storyId: STORY.id,
+                sourceId: source.id,
+                relevance: "Relevant",
+                attachedBy: source.submittedBy,
+                attachedAt: "attached",
+              },
+              source,
+              extractions: [extraction],
+              preparations: [preparation],
+            },
+          ],
+        },
+      })),
+    };
+    render(<NewsroomShell storyRequests={requests} sourceInboxRequests={inboxRequests()} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Persisted Story/ }));
+    const preparedHeading = await screen.findByRole("heading", { name: "Prepared evidence" });
+    const rawHeading = screen.getByRole("heading", { name: "Raw evidence" });
+    expect(screen.getByText("# Prepared Story evidence")).toBeVisible();
+    expect(screen.getByText("# Raw Story evidence")).toBeVisible();
+    expect(
+      preparedHeading.compareDocumentPosition(rawHeading) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("loads the database-only Source Inbox as a distinct workspace", async () => {
