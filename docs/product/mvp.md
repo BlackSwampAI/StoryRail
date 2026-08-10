@@ -2,7 +2,9 @@
 
 The first vertical slice uses Marvel Cinematic Universe (MCU) coverage to exercise one complete, operator-supervised editorial path. It proves the workflow, not a broad publishing platform.
 
-## Workflow
+## Target workflow
+
+The first four steps are implemented today. The remaining assignment, writing, review, Article, and publishing steps describe the planned completion of this vertical slice.
 
 1. Paste a URL.
 2. Preserve and extract the source.
@@ -47,7 +49,9 @@ A separate server-only Story runtime composes creation, Source attachment, listi
 
 Fixed operator provenance is not authentication, and the routes still must not be exposed publicly. Source intake never creates a Story or invokes a model automatically; manual preparation and triage are required. Story listing has no searching, filtering, pagination, polling, or browser persistence. Migrations remain external. Assignment Editor automation, Writer and Director model behavior, editable prompt/settings UI, Story transitions and assignments, authentication, graceful shutdown, and development hot-reload lifecycle policy remain deferred. StoryRail is therefore not yet an end-to-end operational editorial workflow, deployed system, or production-ready product.
 
-## Acceptance criteria
+## Full-slice acceptance criteria
+
+These criteria describe the complete target slice and are only partially implemented; see the repository README for the current feature boundary.
 
 - An operator can enter a URL and inspect the preserved Source and each attributable extraction outcome, including failed attempts and later retries.
 - The operator can review a pending Source and durably choose new Story, existing Story, or skip.
