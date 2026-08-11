@@ -123,7 +123,13 @@ function clients() {
       value: {
         story,
         sources: [{ attachment, source, extractions: [extraction], preparations: [] }],
+        assignment: null,
+        transitions: [],
       },
+    })),
+    assignStory: vi.fn<StoryClient["assignStory"]>(async () => ({
+      kind: "unavailable",
+      message: "The Story request could not be completed.",
     })),
   };
   return { inbox, stories };

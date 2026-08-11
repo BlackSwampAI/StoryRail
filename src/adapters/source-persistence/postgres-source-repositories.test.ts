@@ -7,12 +7,14 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   agentRunId,
   agentProfileId,
+  assignmentId,
   intakeUrlSource,
   operatorId,
   sourceEvidencePreparationId,
   sourceExtractionId,
   sourceId,
   storyId,
+  transitionId,
   STORY_STATES,
   type AgentActor,
   type AgentProfile,
@@ -43,6 +45,7 @@ import { createPostgresSourceInboxRepository } from "../source-inbox/postgres-so
 import { createPostgresSourceTriageDecisionRepository } from "../source-triage-persistence/postgres-source-triage-decision-repository";
 import { createPostgresSourceEvidencePreparationRepository } from "../source-evidence-preparation-persistence/postgres-source-evidence-preparation-repository";
 import { createPostgresAgentProfileRepository } from "../agent-profile-persistence/postgres-agent-profile-repository";
+import { createPostgresAssignmentPersistence } from "../assignment-persistence/postgres-assignment-persistence";
 
 const databaseUrl = process.env.STORYRAIL_TEST_DATABASE_URL;
 const describePostgres = databaseUrl ? describe : describe.skip;
@@ -66,6 +69,10 @@ const preparationMigrationPath = resolve(
 const agentProfileMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0027-agent-profiles.sql",
+);
+const assignmentMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0028-durable-assignments.sql",
 );
 
 const OPERATOR: OperatorActor = {
@@ -231,6 +238,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let triageMigrationSql: string;
   let preparationMigrationSql: string;
   let agentProfileMigrationSql: string;
+  let assignmentMigrationSql: string;
   let destructiveSetupAllowed = false;
 
   beforeAll(async () => {
@@ -240,6 +248,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     triageMigrationSql = await readFile(triageMigrationPath, "utf8");
     preparationMigrationSql = await readFile(preparationMigrationPath, "utf8");
     agentProfileMigrationSql = await readFile(agentProfileMigrationPath, "utf8");
+    assignmentMigrationSql = await readFile(assignmentMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -262,6 +271,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await client.query(triageMigrationSql);
       await client.query(preparationMigrationSql);
       await client.query(agentProfileMigrationSql);
+      await client.query(assignmentMigrationSql);
     } finally {
       client.release();
     }
@@ -272,10 +282,10 @@ describePostgres("PostgreSQL persistence repositories", () => {
       throw new Error("PostgreSQL test database safety guard did not pass.");
     }
 
-    await pool.query("DELETE FROM storyrail.agent_profiles WHERE built_in = false");
     await pool.query(
-      "TRUNCATE storyrail.source_evidence_preparations, storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.stories RESTART IDENTITY",
+      "TRUNCATE storyrail.story_transition_receipts, storyrail.story_assignments, storyrail.source_evidence_preparations, storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.stories RESTART IDENTITY",
     );
+    await pool.query("DELETE FROM storyrail.agent_profiles WHERE built_in = false");
   });
 
   afterAll(async () => {
@@ -394,6 +404,128 @@ describePostgres("PostgreSQL persistence repositories", () => {
     };
   });
   describeAgentProfileRepositoryContract(() => createPostgresAgentProfileRepository({ pool }));
+
+  describe("atomic Story Assignment persistence", () => {
+    function commandFor(story: Story, suffix: string) {
+      const assignedAt = `opaque-assigned-${suffix}`;
+      const assignedBy = {
+        type: "operator" as const,
+        operatorId: operatorId(`operator-${suffix}`),
+      };
+      const assignedStory: Story = { ...story, state: "assigned", updatedAt: assignedAt };
+      return {
+        expectedStory: story,
+        assignment: {
+          id: assignmentId(`assignment-${suffix}`),
+          storyId: story.id,
+          writerProfileId: agentProfileId("storyrail-general-writer-v1"),
+          sourceIds: [],
+          angle: `Angle ${suffix}`,
+          brief: `Brief ${suffix}`,
+          constraints: null,
+          assignedBy,
+          assignedAt,
+        },
+        story: assignedStory,
+        transitionReceipt: {
+          transitionId: transitionId(`transition-${suffix}`),
+          storyId: story.id,
+          previousState: "intake" as const,
+          nextState: "assigned" as const,
+          actor: assignedBy,
+          reason: `Assignment reason ${suffix}`,
+          occurredAt: assignedAt,
+          revisionCycle: 0,
+        },
+      };
+    }
+
+    async function persistIntake(suffix: string) {
+      const story: Story = {
+        id: storyId(`assignment-story-${suffix}`),
+        title: `Assignment Story ${suffix}`,
+        state: "intake",
+        revisionCycle: 0,
+        createdAt: `created-${suffix}`,
+        updatedAt: `created-${suffix}`,
+      };
+      await createPostgresStoryRepository({ pool }).persist({ story });
+      return story;
+    }
+
+    it("commits the Assignment, transitioned Story, and receipt as one durable result", async () => {
+      const story = await persistIntake("complete");
+      const command = commandFor(story, "complete");
+      await expect(createPostgresAssignmentPersistence({ pool }).persist(command)).resolves.toEqual(
+        {
+          ok: true,
+          assignment: command.assignment,
+          story: command.story,
+          transitionReceipt: command.transitionReceipt,
+        },
+      );
+      const inspection = await createPostgresStoryInspectionRepository({ pool }).inspect(story.id);
+      expect(inspection).toMatchObject({
+        ok: true,
+        inspection: {
+          story: { state: "assigned" },
+          assignment: { assignment: command.assignment, writerProfile: { name: "General Writer" } },
+          transitions: [command.transitionReceipt],
+        },
+      });
+    });
+
+    it("allows exactly one winner for concurrent double assignment", async () => {
+      const story = await persistIntake("race");
+      const repository = createPostgresAssignmentPersistence({ pool });
+      const results = await Promise.all([
+        repository.persist(commandFor(story, "race-a")),
+        repository.persist(commandFor(story, "race-b")),
+      ]);
+      expect(results.filter((result) => result.ok)).toHaveLength(1);
+      expect(results.filter((result) => !result.ok)).toEqual([
+        expect.objectContaining({
+          ok: false,
+          error: expect.objectContaining({ code: "STORY_ASSIGNMENT_CONFLICT" }),
+        }),
+      ]);
+      const counts = await pool.query<{ assignments: string; receipts: string }>(
+        `SELECT
+           (SELECT count(*)::text FROM storyrail.story_assignments WHERE story_id = $1) AS assignments,
+           (SELECT count(*)::text FROM storyrail.story_transition_receipts WHERE story_id = $1) AS receipts`,
+        [story.id],
+      );
+      expect(counts.rows[0]).toEqual({ assignments: "1", receipts: "1" });
+    });
+
+    it("rolls back every second-Story fact when an identity collision occurs", async () => {
+      const first = await persistIntake("rollback-first");
+      const second = await persistIntake("rollback-second");
+      const repository = createPostgresAssignmentPersistence({ pool });
+      const firstCommand = commandFor(first, "shared-id");
+      await repository.persist(firstCommand);
+      const conflicting = {
+        ...commandFor(second, "rollback-second"),
+        assignment: {
+          ...commandFor(second, "rollback-second").assignment,
+          id: firstCommand.assignment.id,
+        },
+      };
+      await expect(repository.persist(conflicting)).resolves.toMatchObject({
+        ok: false,
+        error: { code: "STORY_ASSIGNMENT_CONFLICT" },
+      });
+      const durableStory = await createPostgresStoryRepository({ pool }).findById(second.id);
+      expect(durableStory).toEqual(second);
+      const counts = await pool.query<{ assignments: string; receipts: string }>(
+        `SELECT
+           (SELECT count(*)::text FROM storyrail.story_assignments WHERE story_id = $1) AS assignments,
+           (SELECT count(*)::text FROM storyrail.story_transition_receipts WHERE story_id = $1) AS receipts`,
+        [second.id],
+      );
+      expect(counts.rows[0]).toEqual({ assignments: "0", receipts: "0" });
+    });
+  });
 
   describe("Agent Profiles", () => {
     const BUILT_INS: readonly AgentProfile[] = [
@@ -731,7 +863,9 @@ describePostgres("PostgreSQL persistence repositories", () => {
         "source_extractions",
         "source_triage_decisions",
         "stories",
+        "story_assignments",
         "story_source_attachments",
+        "story_transition_receipts",
         "url_sources",
       ]);
       expect(columns.rows).toEqual(
@@ -763,6 +897,90 @@ describePostgres("PostgreSQL persistence repositories", () => {
             data_type: "jsonb",
             is_nullable: "NO",
             is_identity: "NO",
+          },
+          {
+            table_name: "story_assignments",
+            column_name: "assignment_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "story_assignments",
+            column_name: "story_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "story_assignments",
+            column_name: "writer_profile_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "story_assignments",
+            column_name: "writer_role",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "story_assignments",
+            column_name: "payload",
+            data_type: "jsonb",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "story_transition_receipts",
+            column_name: "transition_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "story_transition_receipts",
+            column_name: "story_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "story_transition_receipts",
+            column_name: "previous_state",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "story_transition_receipts",
+            column_name: "next_state",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "story_transition_receipts",
+            column_name: "revision_cycle",
+            data_type: "integer",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "story_transition_receipts",
+            column_name: "payload",
+            data_type: "jsonb",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "story_transition_receipts",
+            column_name: "append_position",
+            data_type: "bigint",
+            is_nullable: "NO",
+            is_identity: "YES",
           },
           {
             table_name: "source_evidence_preparations",
@@ -941,7 +1159,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           },
         ]),
       );
-      expect(columns.rows).toHaveLength(29);
+      expect(columns.rows).toHaveLength(41);
     });
 
     it("creates the required primary, unique, foreign-key, and check constraints", async () => {
@@ -2138,6 +2356,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
               preparations: [],
             },
           ],
+          assignment: null,
+          transitions: [],
         },
       };
       const countsBefore = await pool.query<{
@@ -2690,6 +2910,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         await pool.query(triageMigrationSql);
         await pool.query(preparationMigrationSql);
         await pool.query(agentProfileMigrationSql);
+        await pool.query(assignmentMigrationSql);
       }
     });
 
@@ -2702,14 +2923,13 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
 
     it("does not translate Story query failures into expected persistence results", async () => {
-      const repository = createPostgresStoryRepository({ pool });
+      const client = await pool.connect();
       const story = makeStory("query-failure");
-      await pool.query("DROP TABLE storyrail.source_triage_decisions");
-      await pool.query("DROP FUNCTION storyrail.reject_attached_source_skip()");
-      await pool.query("DROP TABLE storyrail.story_source_attachments");
-      await pool.query("DROP TABLE storyrail.stories");
 
       try {
+        await client.query("BEGIN");
+        await client.query("DROP TABLE storyrail.stories CASCADE");
+        const repository = createPostgresStoryRepository({ pool: client as unknown as Pool });
         const operation = repository.persist({ story });
         await expect(operation).rejects.toBeTruthy();
         await expect(operation).rejects.not.toMatchObject({
@@ -2717,9 +2937,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
           error: { code: "STORY_ID_CONFLICT" },
         });
       } finally {
-        await pool.query(storyMigrationSql);
-        await pool.query(attachmentMigrationSql);
-        await pool.query(triageMigrationSql);
+        await client.query("ROLLBACK");
+        client.release();
       }
     });
 
@@ -2732,13 +2951,15 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
 
     it("does not translate attachment query failures into expected repository results", async () => {
-      const repository = createPostgresStorySourceAttachmentRepository({ pool });
+      const client = await pool.connect();
       const attachment = makeAttachment("query-failure");
-      await pool.query("DROP TABLE storyrail.source_triage_decisions");
-      await pool.query("DROP FUNCTION storyrail.reject_attached_source_skip()");
-      await pool.query("DROP TABLE storyrail.story_source_attachments");
 
       try {
+        await client.query("BEGIN");
+        await client.query("DROP TABLE storyrail.story_source_attachments CASCADE");
+        const repository = createPostgresStorySourceAttachmentRepository({
+          pool: client as unknown as Pool,
+        });
         const operation = repository.attach({ attachment });
         await expect(operation).rejects.toBeTruthy();
         await expect(operation).rejects.not.toMatchObject({
@@ -2750,8 +2971,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
           },
         });
       } finally {
-        await pool.query(attachmentMigrationSql);
-        await pool.query(triageMigrationSql);
+        await client.query("ROLLBACK");
+        client.release();
       }
     });
 

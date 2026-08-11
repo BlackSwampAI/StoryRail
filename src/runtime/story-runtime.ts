@@ -4,12 +4,14 @@ import { Pool, type PoolConfig } from "pg";
 
 import { createPostgresStoryInspectionRepository } from "@/adapters/story-inspection";
 import { createPostgresAgentProfileRepository } from "@/adapters/agent-profile-persistence";
+import { createPostgresAssignmentPersistence } from "@/adapters/assignment-persistence";
 import { createPostgresStoryListingRepository } from "@/adapters/story-listing";
 import { createPostgresStoryRepository } from "@/adapters/story-persistence";
 import { createPostgresStorySourceAttachmentRepository } from "@/adapters/story-source-persistence";
 import { createPostgresSourceInboxRepository } from "@/adapters/source-inbox";
 import { createPostgresSourceTriageDecisionRepository } from "@/adapters/source-triage-persistence";
 import type { SourceInboxRepository } from "@/application/source-inbox";
+import { createAssignStory, type AssignStoryWorkflow } from "@/application/assignments";
 import {
   createCreateCustomWriterProfile,
   type AgentProfileRepository,
@@ -26,7 +28,7 @@ import {
   createAttachSourceToStory,
   type AttachSourceToStoryWorkflow,
 } from "@/application/story-source-attachment";
-import { agentProfileId, storyId } from "@/domain/editorial";
+import { agentProfileId, assignmentId, storyId, transitionId } from "@/domain/editorial";
 
 export interface StoryRuntime {
   readonly createStory: CreateStoryWorkflow;
@@ -37,6 +39,7 @@ export interface StoryRuntime {
   readonly recordSourceTriageDecision: RecordSourceTriageDecisionWorkflow;
   readonly createCustomWriterProfile: CreateCustomWriterProfileWorkflow;
   readonly listAgentProfiles: AgentProfileRepository["list"];
+  readonly assignStory: AssignStoryWorkflow;
   close(): Promise<void>;
 }
 
@@ -75,6 +78,7 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
   const sourceInboxRepository = createPostgresSourceInboxRepository({ pool });
   const sourceTriageRepository = createPostgresSourceTriageDecisionRepository({ pool });
   const agentProfileRepository = createPostgresAgentProfileRepository({ pool });
+  const assignmentPersistence = createPostgresAssignmentPersistence({ pool });
   const createStory = createCreateStory({
     storyRepository,
     createStoryId: () => storyId(createUuid()),
@@ -95,6 +99,15 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
     createAgentProfileId: () => agentProfileId(createUuid()),
   });
   const listAgentProfiles: AgentProfileRepository["list"] = () => agentProfileRepository.list();
+  const assignStory = createAssignStory({
+    storyRepository,
+    agentProfileRepository,
+    inspectionRepository,
+    assignmentPersistence,
+    createAssignmentId: () => assignmentId(createUuid()),
+    createTransitionId: () => transitionId(createUuid()),
+    now,
+  });
   let closePromise: Promise<void> | undefined;
 
   return Object.freeze({
@@ -106,6 +119,7 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
     recordSourceTriageDecision,
     createCustomWriterProfile,
     listAgentProfiles,
+    assignStory,
     close() {
       closePromise ??= Promise.resolve().then(() => pool.end());
       return closePromise;

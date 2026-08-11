@@ -1,21 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 
 import type { StoryInspection } from "@/application/story-inspection";
 import type { StoryListItem } from "@/application/story-listing";
 import {
   STORY_STATES,
+  type AgentProfile,
+  type Assignment,
   type EditorialActor,
   type SourceEvidencePreparation,
   type SourceExtraction,
   type StoryId,
   type StoryState,
+  type StoryTransitionReceipt,
 } from "@/domain/editorial";
 
 import styles from "./newsroom-shell.module.css";
 import { AgentProfilesWorkspace } from "./agent-profiles-workspace";
-import type { AgentProfileClient } from "./agent-profile-client";
+import { agentProfileClient, type AgentProfileClient } from "./agent-profile-client";
 import { STORY_STATE_LABELS } from "./newsroom-state";
 import { SourceEvidenceWorkspace } from "./source-evidence-workspace";
 import type { RequestSourceEvidenceUrl } from "./source-evidence-url-client";
@@ -236,8 +239,89 @@ function PersistedPreparationAttempt({
   );
 }
 
-function PersistedStoryWorkspace({ inspection }: Readonly<{ inspection: StoryInspection }>) {
-  const { story, sources } = inspection;
+function PersistedStoryWorkspace({
+  inspection,
+  notice,
+  requests,
+  profileRequests,
+  onAssigned,
+}: Readonly<{
+  inspection: StoryInspection;
+  notice?: string;
+  requests: StoryClient;
+  profileRequests: AgentProfileClient;
+  onAssigned: (
+    facts: {
+      readonly assignment: Assignment;
+      readonly story: StoryInspection["story"];
+      readonly transitionReceipt: StoryTransitionReceipt;
+    },
+    writerProfile: AgentProfile,
+  ) => Promise<void>;
+}>) {
+  const { story, sources, assignment, transitions } = inspection;
+  const [profiles, setProfiles] = useState<readonly AgentProfile[]>([]);
+  const [profilesUnavailable, setProfilesUnavailable] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const [writerProfileId, setWriterProfileId] = useState("");
+  const [angle, setAngle] = useState("");
+  const [brief, setBrief] = useState("");
+  const [constraints, setConstraints] = useState("");
+  const [reason, setReason] = useState("");
+
+  useEffect(() => {
+    if (story.state !== "intake" || assignment !== null) return;
+    let active = true;
+    void profileRequests
+      .listProfiles()
+      .then((result) => {
+        if (!active) return;
+        if (result.kind !== "completed") {
+          setProfilesUnavailable(true);
+          return;
+        }
+        const writers = result.value.filter((profile) => profile.role === "writer");
+        setProfiles(writers);
+        setWriterProfileId((current) => current || writers[0]?.id || "");
+      })
+      .catch(() => {
+        if (active) setProfilesUnavailable(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [assignment, profileRequests, story.id, story.state]);
+
+  async function submitAssignment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (pending) return;
+    setPending(true);
+    setSubmissionError(null);
+    try {
+      const result = await requests.assignStory(story.id, {
+        writerProfileId,
+        angle,
+        brief,
+        constraints: constraints.trim().length === 0 ? null : constraints,
+        reason,
+      });
+      if (result.kind !== "completed") {
+        setSubmissionError(
+          result.kind === "application-failure" ? result.error.message : result.message,
+        );
+        return;
+      }
+      const writer = profiles.find((profile) => profile.id === writerProfileId);
+      if (!writer) {
+        setSubmissionError("The selected Writer Profile is no longer available.");
+        return;
+      }
+      await onAssigned(result.value, writer);
+    } finally {
+      setPending(false);
+    }
+  }
   return (
     <article className={styles.storyWorkspace} aria-labelledby="workspace-story-title">
       <header className={styles.workspaceHeader}>
@@ -267,6 +351,11 @@ function PersistedStoryWorkspace({ inspection }: Readonly<{ inspection: StoryIns
         </p>
       </div>
       <p className={styles.auditFact}>Story ID: {story.id}</p>
+      {notice ? (
+        <p role="status" className={styles.auditFact}>
+          {notice}
+        </p>
+      ) : null}
 
       <div className={styles.persistedSources}>
         <p className={styles.sectionNumber}>01</p>
@@ -355,12 +444,166 @@ function PersistedStoryWorkspace({ inspection }: Readonly<{ inspection: StoryIns
         <section aria-labelledby="assignment-heading">
           <p className={styles.sectionNumber}>02</p>
           <h3 id="assignment-heading">Assignment</h3>
-          <p>Assignments are not connected to persisted Story views yet.</p>
+          {assignment === null && story.state === "intake" ? (
+            <form
+              className={styles.storyCreationForm}
+              onSubmit={(event) => void submitAssignment(event)}
+            >
+              <p>Assignment will snapshot all currently attached Sources: {sources.length}</p>
+              <label>
+                Writer
+                <select
+                  value={writerProfileId}
+                  onChange={(event) => setWriterProfileId(event.target.value)}
+                  disabled={pending || profilesUnavailable}
+                  required
+                >
+                  {profiles.length === 0 ? <option value="">No Writers available</option> : null}
+                  {profiles.map((profile) => (
+                    <option value={profile.id} key={profile.id}>
+                      {profile.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Angle
+                <input
+                  value={angle}
+                  onChange={(event) => setAngle(event.target.value)}
+                  disabled={pending}
+                  required
+                />
+              </label>
+              <label>
+                Brief
+                <textarea
+                  value={brief}
+                  onChange={(event) => setBrief(event.target.value)}
+                  disabled={pending}
+                  required
+                />
+              </label>
+              <label>
+                Constraints (optional)
+                <textarea
+                  value={constraints}
+                  onChange={(event) => setConstraints(event.target.value)}
+                  disabled={pending}
+                />
+              </label>
+              <label>
+                Assignment reason
+                <input
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                  disabled={pending}
+                  required
+                />
+              </label>
+              <button type="submit" disabled={pending || writerProfileId.length === 0}>
+                {pending ? "Assigning…" : "Create Assignment"}
+              </button>
+              {profilesUnavailable ? <p role="alert">Writer Profiles are unavailable.</p> : null}
+              {submissionError ? <p role="alert">{submissionError}</p> : null}
+            </form>
+          ) : assignment !== null ? (
+            <div>
+              <dl className={styles.receiptFacts}>
+                <div>
+                  <dt>Writer</dt>
+                  <dd>{assignment.writerProfile.name}</dd>
+                </div>
+                <div>
+                  <dt>Profile</dt>
+                  <dd>{assignment.writerProfile.builtIn ? "Built in" : "Custom"}</dd>
+                </div>
+                <div>
+                  <dt>Provider / model</dt>
+                  <dd>
+                    {assignment.writerProfile.model === null
+                      ? "Not configured"
+                      : `${assignment.writerProfile.model.provider} / ${assignment.writerProfile.model.model}`}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Angle</dt>
+                  <dd>{assignment.assignment.angle}</dd>
+                </div>
+                <div>
+                  <dt>Brief</dt>
+                  <dd>{assignment.assignment.brief}</dd>
+                </div>
+                <div>
+                  <dt>Constraints</dt>
+                  <dd>{assignment.assignment.constraints ?? "None"}</dd>
+                </div>
+                <div>
+                  <dt>Evidence Sources</dt>
+                  <dd>{assignment.assignment.sourceIds.length}</dd>
+                </div>
+                <div>
+                  <dt>Assigned by</dt>
+                  <dd>{actorLabel(assignment.assignment.assignedBy)}</dd>
+                </div>
+                <div>
+                  <dt>Assigned at</dt>
+                  <dd>{assignment.assignment.assignedAt}</dd>
+                </div>
+              </dl>
+              <details>
+                <summary>Technical Assignment record</summary>
+                <p>Assignment ID: {assignment.assignment.id}</p>
+                <p>Writer Profile ID: {assignment.assignment.writerProfileId}</p>
+                <p>
+                  Source IDs:{" "}
+                  {assignment.assignment.sourceIds.length === 0
+                    ? "None"
+                    : assignment.assignment.sourceIds.join(", ")}
+                </p>
+              </details>
+            </div>
+          ) : (
+            <p>No durable Assignment is recorded for this Story.</p>
+          )}
         </section>
         <section aria-labelledby="activity-heading">
           <p className={styles.sectionNumber}>03</p>
           <h3 id="activity-heading">Activity</h3>
-          <p>Durable Story activity is not connected to this workspace yet.</p>
+          {transitions.length === 0 ? (
+            <p>No durable Story transitions are recorded.</p>
+          ) : (
+            transitions.map((transition) => (
+              <article key={transition.transitionId}>
+                <h4>
+                  {STORY_STATE_LABELS[transition.previousState]} →{" "}
+                  {STORY_STATE_LABELS[transition.nextState]}
+                </h4>
+                <dl className={styles.receiptFacts}>
+                  <div>
+                    <dt>Actor</dt>
+                    <dd>{actorLabel(transition.actor)}</dd>
+                  </div>
+                  <div>
+                    <dt>Reason</dt>
+                    <dd>{transition.reason}</dd>
+                  </div>
+                  <div>
+                    <dt>Occurred</dt>
+                    <dd>{transition.occurredAt}</dd>
+                  </div>
+                  <div>
+                    <dt>Revision cycle</dt>
+                    <dd>{transition.revisionCycle}</dd>
+                  </div>
+                </dl>
+                <details>
+                  <summary>Technical transition record</summary>
+                  <p>Transition ID: {transition.transitionId}</p>
+                </details>
+              </article>
+            ))
+          )}
         </section>
       </div>
     </article>
@@ -375,7 +618,7 @@ type StoryListingState =
 type StorySelection =
   | { readonly kind: "none" }
   | { readonly kind: "loading"; readonly storyId: StoryId }
-  | { readonly kind: "loaded"; readonly inspection: StoryInspection }
+  | { readonly kind: "loaded"; readonly inspection: StoryInspection; readonly notice?: string }
   | { readonly kind: "unavailable"; readonly storyId: StoryId };
 
 export function NewsroomShell({
@@ -593,7 +836,46 @@ export function NewsroomShell({
 
         <div hidden={workspaceMode !== "story"}>
           {storySelection.kind === "loaded" ? (
-            <PersistedStoryWorkspace inspection={storySelection.inspection} />
+            <PersistedStoryWorkspace
+              key={storySelection.inspection.story.id}
+              inspection={storySelection.inspection}
+              notice={storySelection.notice}
+              requests={requests}
+              profileRequests={agentProfileRequests ?? agentProfileClient}
+              onAssigned={async (facts, writerProfile) => {
+                const returnedInspection: StoryInspection = {
+                  ...storySelection.inspection,
+                  story: facts.story,
+                  assignment: { assignment: facts.assignment, writerProfile },
+                  transitions: [...storySelection.inspection.transitions, facts.transitionReceipt],
+                };
+                upsertStoryListItem({
+                  story: facts.story,
+                  sourceCount: storySelection.inspection.sources.length,
+                });
+                setSelectedQueue("assigned");
+                setStorySelection({ kind: "loaded", inspection: returnedInspection });
+                try {
+                  const refreshed = await requests.inspectStory(facts.story.id);
+                  if (refreshed.kind === "completed")
+                    setStorySelection({ kind: "loaded", inspection: refreshed.value });
+                  else
+                    setStorySelection({
+                      kind: "loaded",
+                      inspection: returnedInspection,
+                      notice:
+                        "Assignment saved. Authoritative inspection refresh is unavailable; retry by reopening this Story.",
+                    });
+                } catch {
+                  setStorySelection({
+                    kind: "loaded",
+                    inspection: returnedInspection,
+                    notice:
+                      "Assignment saved. Authoritative inspection refresh is unavailable; retry by reopening this Story.",
+                  });
+                }
+              }}
+            />
           ) : storySelection.kind === "loading" ? (
             <section className={styles.emptyWorkspace} role="status">
               <p className={styles.sectionKicker}>Story workspace</p>

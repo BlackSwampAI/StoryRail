@@ -2,11 +2,14 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  agentProfileId,
+  assignmentId,
   operatorId,
   sourceEvidencePreparationId,
   sourceExtractionId,
   sourceId,
   storyId,
+  transitionId,
   type Story,
 } from "@/domain/editorial";
 
@@ -46,7 +49,11 @@ function storyRequests(): StoryClient {
     })),
     inspectStory: vi.fn<StoryClient["inspectStory"]>(async () => ({
       kind: "completed",
-      value: { story: STORY, sources: [] },
+      value: { story: STORY, sources: [], assignment: null, transitions: [] },
+    })),
+    assignStory: vi.fn<StoryClient["assignStory"]>(async () => ({
+      kind: "unavailable",
+      message: "The Story request could not be completed.",
     })),
   };
 }
@@ -82,6 +89,103 @@ function agentRequests(): AgentProfileClient {
 }
 
 describe("NewsroomShell", () => {
+  it("shows only Writer Profiles and moves a successfully assigned Story to Assigned with activity", async () => {
+    const writer = {
+      id: agentProfileId("writer-0028"),
+      role: "writer" as const,
+      name: "General Writer",
+      instructions: "Write.",
+      model: null,
+      builtIn: true,
+    };
+    const editor = {
+      id: agentProfileId("editor-0028"),
+      role: "assignment_editor" as const,
+      name: "Assignment Editor",
+      instructions: "Assign.",
+      model: null,
+      builtIn: true,
+    };
+    const profiles: AgentProfileClient = {
+      listProfiles: vi.fn<AgentProfileClient["listProfiles"]>(async () => ({
+        kind: "completed",
+        value: [editor, writer],
+      })),
+      createWriterProfile: vi.fn<AgentProfileClient["createWriterProfile"]>(async () => ({
+        kind: "unavailable",
+        message: "The Agent Profile request could not be completed.",
+      })),
+    };
+    const assigned = { ...STORY, state: "assigned" as const, updatedAt: "assigned-at" };
+    const assignment = {
+      id: assignmentId("assignment-0028"),
+      storyId: STORY.id,
+      writerProfileId: writer.id,
+      sourceIds: [],
+      angle: "Angle",
+      brief: "Brief",
+      constraints: null,
+      assignedBy: { type: "operator" as const, operatorId: operatorId("operator-0028") },
+      assignedAt: "assigned-at",
+    };
+    const receipt = {
+      transitionId: transitionId("transition-0028"),
+      storyId: STORY.id,
+      previousState: "intake" as const,
+      nextState: "assigned" as const,
+      actor: assignment.assignedBy,
+      reason: "Ready",
+      occurredAt: "assigned-at",
+      revisionCycle: 0,
+    };
+    const stories: StoryClient = {
+      ...storyRequests(),
+      assignStory: vi.fn<StoryClient["assignStory"]>(async () => ({
+        kind: "completed",
+        value: { assignment, story: assigned, transitionReceipt: receipt },
+      })),
+      inspectStory: vi
+        .fn<StoryClient["inspectStory"]>()
+        .mockResolvedValueOnce({
+          kind: "completed",
+          value: { story: STORY, sources: [], assignment: null, transitions: [] },
+        })
+        .mockResolvedValueOnce({
+          kind: "completed",
+          value: {
+            story: assigned,
+            sources: [],
+            assignment: { assignment, writerProfile: writer },
+            transitions: [receipt],
+          },
+        }),
+    };
+    render(
+      <NewsroomShell
+        storyRequests={stories}
+        agentProfileRequests={profiles}
+        sourceInboxRequests={inboxRequests()}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /Persisted Story/ }));
+    expect(await screen.findByRole("option", { name: "General Writer" })).toBeVisible();
+    expect(screen.queryByRole("option", { name: "Assignment Editor" })).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Assignment will snapshot all currently attached Sources: 0"),
+    ).toBeVisible();
+    fireEvent.change(screen.getByLabelText("Angle"), { target: { value: "Angle" } });
+    fireEvent.change(screen.getByLabelText("Brief"), { target: { value: "Brief" } });
+    fireEvent.change(screen.getByLabelText("Assignment reason"), { target: { value: "Ready" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create Assignment" }));
+    expect(await screen.findByText("Intake → Assigned")).toBeVisible();
+    expect(screen.getByText("General Writer")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Assigned, 1 story" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.queryByRole("button", { name: "Create Assignment" })).not.toBeInTheDocument();
+  });
+
   it("shows real Story queue counts and the four distinct workspace modes", async () => {
     render(
       <NewsroomShell
@@ -173,6 +277,8 @@ describe("NewsroomShell", () => {
               preparations: [preparation],
             },
           ],
+          assignment: null,
+          transitions: [],
         },
       })),
     };

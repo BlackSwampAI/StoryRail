@@ -87,6 +87,8 @@ const INSPECTION = {
       preparations: [PREPARATION],
     },
   ],
+  assignment: null,
+  transitions: [],
 };
 
 function response(status: number, body: unknown): Response {
@@ -202,6 +204,8 @@ describe("story-client", () => {
           preparations: [],
         },
       ],
+      assignment: null,
+      transitions: [],
     };
     const timestamps = [
       opaqueInspection.story.createdAt,
@@ -229,6 +233,8 @@ describe("story-client", () => {
       {
         story: STORY,
         sources: [{ attachment: ATTACHMENT, source: SOURCE, extractions: [], preparations: [] }],
+        assignment: null,
+        transitions: [],
       },
       INSPECTION,
     ];
@@ -277,7 +283,15 @@ describe("story-client", () => {
     },
   ])("rejects malformed extraction entry %# without retry", async (sourceEntry) => {
     const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
-      response(200, { ok: true, inspection: { story: STORY, sources: [sourceEntry] } }),
+      response(200, {
+        ok: true,
+        inspection: {
+          story: STORY,
+          sources: [sourceEntry],
+          assignment: null,
+          transitions: [],
+        },
+      }),
     );
 
     await expect(createStoryClient({ fetch }).inspectStory(STORY.id)).resolves.toEqual({
@@ -340,6 +354,67 @@ describe("story-client", () => {
     });
     expect(JSON.stringify(result)).not.toContain("secret");
     expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("posts the exact bounded Assignment body and strictly accepts all three durable facts", async () => {
+    const command = {
+      writerProfileId: "storyrail-general-writer-v1",
+      angle: "Angle",
+      brief: "Brief",
+      constraints: null,
+      reason: "Ready",
+    };
+    const assignment = {
+      id: "assignment-0028",
+      storyId: STORY.id,
+      writerProfileId: command.writerProfileId,
+      sourceIds: [SOURCE.id],
+      angle: command.angle,
+      brief: command.brief,
+      constraints: null,
+      assignedBy: { type: "operator", operatorId: "operator-0028" },
+      assignedAt: "opaque-assigned",
+    };
+    const assignedStory = { ...STORY, state: "assigned", updatedAt: "opaque-assigned" };
+    const transitionReceipt = {
+      transitionId: "transition-0028",
+      storyId: STORY.id,
+      previousState: "intake",
+      nextState: "assigned",
+      actor: assignment.assignedBy,
+      reason: command.reason,
+      occurredAt: "opaque-assigned",
+      revisionCycle: 0,
+    };
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(201, { ok: true, assignment, story: assignedStory, transitionReceipt }),
+    );
+    await expect(createStoryClient({ fetch }).assignStory(STORY.id, command)).resolves.toEqual({
+      kind: "completed",
+      value: { assignment, story: assignedStory, transitionReceipt },
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      `/api/stories/${STORY.id}/assignments`,
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify(command),
+      }),
+    );
+  });
+
+  it("fails closed for a malformed Assignment success without inventing completion", async () => {
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(201, { ok: true, assignment: { id: "partial" }, story: STORY }),
+    );
+    await expect(
+      createStoryClient({ fetch }).assignStory(STORY.id, {
+        writerProfileId: "writer",
+        angle: "Angle",
+        brief: "Brief",
+        constraints: null,
+        reason: "Reason",
+      }),
+    ).resolves.toEqual({ kind: "unavailable", message: STORY_REQUEST_UNAVAILABLE_MESSAGE });
   });
 
   it("exports only the focused browser client surface", async () => {

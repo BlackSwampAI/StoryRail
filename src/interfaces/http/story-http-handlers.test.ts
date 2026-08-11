@@ -84,6 +84,7 @@ function makeRuntime(overrides: Partial<StoryRuntime> = {}): StoryRuntime {
     recordSourceTriageDecision: vi.fn<StoryRuntime["recordSourceTriageDecision"]>(),
     createCustomWriterProfile: vi.fn<StoryRuntime["createCustomWriterProfile"]>(),
     listAgentProfiles: vi.fn<StoryRuntime["listAgentProfiles"]>(),
+    assignStory: vi.fn<StoryRuntime["assignStory"]>(),
     close: vi.fn<StoryRuntime["close"]>(async () => undefined),
     ...overrides,
   };
@@ -433,6 +434,8 @@ describe("createInspectStoryHttpHandler", () => {
       sources: [
         { attachment: ATTACHMENT, source: SOURCE, extractions: [EXTRACTION], preparations: [] },
       ],
+      assignment: null,
+      transitions: [],
     };
     const inspectStory = vi.fn<StoryRuntime["inspectStory"]>(async () => ({
       ok: true,
@@ -452,7 +455,7 @@ describe("createInspectStoryHttpHandler", () => {
   it("preserves an unattached Story's empty sources as a successful 200", async () => {
     const inspectStory = vi.fn<StoryRuntime["inspectStory"]>(async () => ({
       ok: true,
-      inspection: { story: STORY, sources: [] },
+      inspection: { story: STORY, sources: [], assignment: null, transitions: [] },
     }));
     const handler = createInspectStoryHttpHandler({
       getRuntime: () => makeRuntime({ inspectStory }),
@@ -465,7 +468,7 @@ describe("createInspectStoryHttpHandler", () => {
     expect(response.status).toBe(200);
     expect(await responseBody(response)).toEqual({
       ok: true,
-      inspection: { story: STORY, sources: [] },
+      inspection: { story: STORY, sources: [], assignment: null, transitions: [] },
     });
   });
 
@@ -474,6 +477,8 @@ describe("createInspectStoryHttpHandler", () => {
       {
         story: STORY,
         sources: [{ attachment: ATTACHMENT, source: SOURCE, extractions: [], preparations: [] }],
+        assignment: null,
+        transitions: [],
       },
       {
         story: STORY,
@@ -485,6 +490,8 @@ describe("createInspectStoryHttpHandler", () => {
             preparations: [],
           },
         ],
+        assignment: null,
+        transitions: [],
       },
     ] as const;
     const inspectStory = vi

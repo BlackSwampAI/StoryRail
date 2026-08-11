@@ -13,7 +13,7 @@ These terms form StoryRail's shared editorial language.
 - **Actor:** The operator or bounded agent role responsible for an attributable editorial act, including a Story state transition, Source extraction, or Source-to-Story attachment; durable facts identify a specific operator or tie an agent actor to a specific agent run.
 - **Revision cycle:** One bounded return from `in_review` to `changes_requested`; a Story may enter no more than two revision cycles.
 - **Story source:** The immutable, durable relationship between an existing Story and an existing Source, identified by that pair and recording required relevance, attributable actor provenance, and one attachment time.
-- **Assignment:** A bounded brief describing the angle, audience, requirements, constraints, and expected deliverable for a story.
+- **Assignment:** One immutable, durable brief for a Story in the current Alpha workflow. It selects an immutable Writer Profile, snapshots all attached Source identities in deterministic order, records a required angle and brief, optional constraints, the assigning operator or Assignment Editor agent, and one application-owned assignment time. Creating it atomically persists the Assignment, the Story's `intake` to `assigned` transition, and its transition receipt; it does not execute the Writer.
 - **Article:** A versioned editorial work product created for a story; it is not the story itself.
 - **Article revision:** An immutable or durably preserved version of an article produced by drafting or revision.
 - **Agent run:** One recorded execution of a bounded role, including inputs, configuration, outputs, timing, and outcome.
@@ -41,4 +41,6 @@ These terms form StoryRail's shared editorial language.
 - A story may be rejected or merged without producing an article.
 - Article revisions are preserved rather than silently overwritten.
 - Agent decisions require durable receipts.
+- A Story has at most one Assignment in the current Alpha workflow.
+- Assignment evidence is a server-derived snapshot of Source identities, not copied evidence content or a browser-selected subset.
 - Publication is a separate, explicit action.

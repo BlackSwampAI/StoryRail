@@ -2,9 +2,12 @@ import {
   SOURCE_EXTRACTION_FAILURE_CODES,
   PREPARATION_FAILURE_CODES,
   type EditorialActor,
+  type AgentProfile,
+  type Assignment,
   type SourceExtraction,
   type SourceEvidencePreparation,
   type Story,
+  type StoryTransitionReceipt,
   type StorySourceAttachment,
   type UrlSource,
 } from "@/domain/editorial";
@@ -36,6 +39,22 @@ export interface StoryClient {
     relevance: string,
   ) => Promise<StoryClientResult<StorySourceAttachment>>;
   readonly inspectStory: (storyId: string) => Promise<StoryClientResult<StoryInspection>>;
+  readonly assignStory: (
+    storyId: string,
+    command: {
+      readonly writerProfileId: string;
+      readonly angle: string;
+      readonly brief: string;
+      readonly constraints: string | null;
+      readonly reason: string;
+    },
+  ) => Promise<
+    StoryClientResult<{
+      readonly assignment: Assignment;
+      readonly story: Story;
+      readonly transitionReceipt: StoryTransitionReceipt;
+    }>
+  >;
 }
 
 const STORY_STATES = new Set([
@@ -203,15 +222,111 @@ function isPreparation(value: unknown): value is SourceEvidencePreparation {
 function isStory(value: unknown): value is Story {
   return (
     isRecord(value) &&
+    hasExactKeys(value, ["id", "title", "state", "revisionCycle", "createdAt", "updatedAt"]) &&
     isString(value.id) &&
     isString(value.title) &&
+    value.title.trim().length > 0 &&
+    value.title === value.title.trim() &&
     isString(value.state) &&
     STORY_STATES.has(value.state) &&
     typeof value.revisionCycle === "number" &&
     Number.isInteger(value.revisionCycle) &&
     value.revisionCycle >= 0 &&
+    value.revisionCycle <= 2 &&
     isString(value.createdAt) &&
     isString(value.updatedAt)
+  );
+}
+
+function isProfile(value: unknown): value is AgentProfile {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ["id", "role", "name", "instructions", "model", "builtIn"]) &&
+    isString(value.id) &&
+    isString(value.role) &&
+    ["assignment_editor", "writer", "editor_in_chief"].includes(value.role) &&
+    isString(value.name) &&
+    value.name.trim().length > 0 &&
+    value.name === value.name.trim() &&
+    isString(value.instructions) &&
+    value.instructions.trim().length > 0 &&
+    value.instructions === value.instructions.trim() &&
+    (value.model === null ||
+      (isRecord(value.model) &&
+        hasExactKeys(value.model, ["provider", "model"]) &&
+        isString(value.model.provider) &&
+        value.model.provider.trim().length > 0 &&
+        value.model.provider === value.model.provider.trim() &&
+        isString(value.model.model) &&
+        value.model.model.trim().length > 0 &&
+        value.model.model === value.model.model.trim())) &&
+    typeof value.builtIn === "boolean" &&
+    (value.builtIn || value.role === "writer")
+  );
+}
+
+function isAssignment(value: unknown): value is Assignment {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, [
+      "id",
+      "storyId",
+      "writerProfileId",
+      "sourceIds",
+      "angle",
+      "brief",
+      "constraints",
+      "assignedBy",
+      "assignedAt",
+    ]) &&
+    isString(value.id) &&
+    isString(value.storyId) &&
+    isString(value.writerProfileId) &&
+    Array.isArray(value.sourceIds) &&
+    value.sourceIds.every(isString) &&
+    new Set(value.sourceIds).size === value.sourceIds.length &&
+    isString(value.angle) &&
+    value.angle.trim().length > 0 &&
+    value.angle === value.angle.trim() &&
+    isString(value.brief) &&
+    value.brief.trim().length > 0 &&
+    value.brief === value.brief.trim() &&
+    (value.constraints === null ||
+      (isString(value.constraints) &&
+        value.constraints.trim().length > 0 &&
+        value.constraints === value.constraints.trim())) &&
+    isActor(value.assignedBy) &&
+    (value.assignedBy.type === "operator" || value.assignedBy.role === "assignment_editor") &&
+    isString(value.assignedAt)
+  );
+}
+
+function isTransition(value: unknown): value is StoryTransitionReceipt {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, [
+      "transitionId",
+      "storyId",
+      "previousState",
+      "nextState",
+      "actor",
+      "reason",
+      "occurredAt",
+      "revisionCycle",
+    ]) &&
+    isString(value.transitionId) &&
+    isString(value.storyId) &&
+    isString(value.previousState) &&
+    STORY_STATES.has(value.previousState) &&
+    isString(value.nextState) &&
+    STORY_STATES.has(value.nextState) &&
+    isActor(value.actor) &&
+    isString(value.reason) &&
+    value.reason.trim().length > 0 &&
+    value.reason === value.reason.trim() &&
+    isString(value.occurredAt) &&
+    Number.isInteger(value.revisionCycle) &&
+    (value.revisionCycle as number) >= 0
   );
 }
 
@@ -241,38 +356,53 @@ function isAttachment(value: unknown): value is StorySourceAttachment {
 function isInspection(value: unknown): value is StoryInspection {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ["story", "sources"]) ||
+    !hasExactKeys(value, ["story", "sources", "assignment", "transitions"]) ||
     !isStory(value.story) ||
-    !Array.isArray(value.sources)
+    !Array.isArray(value.sources) ||
+    !Array.isArray(value.transitions) ||
+    !value.transitions.every(isTransition)
   ) {
     return false;
   }
   const story = value.story;
-  return value.sources.every((item) => {
-    if (
-      !isRecord(item) ||
-      !hasExactKeys(item, ["attachment", "source", "extractions", "preparations"]) ||
-      !isAttachment(item.attachment) ||
-      !isSource(item.source) ||
-      !Array.isArray(item.extractions) ||
-      !item.extractions.every(isExtraction) ||
-      !Array.isArray(item.preparations) ||
-      !item.preparations.every(isPreparation)
-    ) {
-      return false;
-    }
-    const sourceId = item.source.id;
-    const extractionIds = new Set(item.extractions.map((extraction) => extraction.id));
-    return (
-      item.attachment.storyId === story.id &&
-      item.attachment.sourceId === sourceId &&
-      item.extractions.every((extraction) => extraction.sourceId === sourceId) &&
-      item.preparations.every(
-        (preparation) =>
-          preparation.sourceId === sourceId && extractionIds.has(preparation.extractionId),
-      )
-    );
-  });
+  const assignmentValid =
+    value.assignment === null ||
+    (isRecord(value.assignment) &&
+      hasExactKeys(value.assignment, ["assignment", "writerProfile"]) &&
+      isAssignment(value.assignment.assignment) &&
+      isProfile(value.assignment.writerProfile) &&
+      value.assignment.assignment.storyId === story.id &&
+      value.assignment.assignment.writerProfileId === value.assignment.writerProfile.id &&
+      value.assignment.writerProfile.role === "writer");
+  return (
+    assignmentValid &&
+    value.transitions.every((receipt) => receipt.storyId === story.id) &&
+    value.sources.every((item) => {
+      if (
+        !isRecord(item) ||
+        !hasExactKeys(item, ["attachment", "source", "extractions", "preparations"]) ||
+        !isAttachment(item.attachment) ||
+        !isSource(item.source) ||
+        !Array.isArray(item.extractions) ||
+        !item.extractions.every(isExtraction) ||
+        !Array.isArray(item.preparations) ||
+        !item.preparations.every(isPreparation)
+      ) {
+        return false;
+      }
+      const sourceId = item.source.id;
+      const extractionIds = new Set(item.extractions.map((extraction) => extraction.id));
+      return (
+        item.attachment.storyId === story.id &&
+        item.attachment.sourceId === sourceId &&
+        item.extractions.every((extraction) => extraction.sourceId === sourceId) &&
+        item.preparations.every(
+          (preparation) =>
+            preparation.sourceId === sourceId && extractionIds.has(preparation.extractionId),
+        )
+      );
+    })
+  );
 }
 
 function isStoryListItem(value: unknown): value is StoryListItem {
@@ -397,6 +527,63 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
         isInspection,
         { 404: new Set(["STORY_NOT_FOUND"]) },
       ),
+    async assignStory(storyId, command) {
+      try {
+        const response = await dependencies.fetch(
+          `/api/stories/${encodeURIComponent(storyId)}/assignments`,
+          { method: "POST", headers: jsonHeaders, body: JSON.stringify(command) },
+        );
+        const body: unknown = await response.json();
+        if (!isRecord(body)) return unavailable();
+        if (
+          response.status === 201 &&
+          body.ok === true &&
+          hasExactKeys(body, ["ok", "assignment", "story", "transitionReceipt"]) &&
+          isAssignment(body.assignment) &&
+          isStory(body.story) &&
+          isTransition(body.transitionReceipt) &&
+          body.assignment.storyId === body.story.id &&
+          body.transitionReceipt.storyId === body.story.id &&
+          body.story.state === "assigned"
+        ) {
+          return {
+            kind: "completed",
+            value: {
+              assignment: body.assignment,
+              story: body.story,
+              transitionReceipt: body.transitionReceipt,
+            },
+          };
+        }
+        if (
+          response.status >= 400 &&
+          response.status < 500 &&
+          body.ok === false &&
+          isApplicationError(body.error) &&
+          new Set([
+            "INVALID_JSON",
+            "INVALID_REQUEST",
+            "UNSUPPORTED_MEDIA_TYPE",
+            "STORY_NOT_FOUND",
+            "AGENT_PROFILE_NOT_FOUND",
+            "AGENT_PROFILE_NOT_WRITER",
+            "INVALID_TRANSITION",
+            "STORY_ASSIGNMENT_CONFLICT",
+            "REASON_REQUIRED",
+            "ASSIGNMENT_ANGLE_REQUIRED",
+            "ASSIGNMENT_BRIEF_REQUIRED",
+            "ASSIGNMENT_CONSTRAINTS_INVALID",
+            "ASSIGNMENT_WRITER_PROFILE_REQUIRED",
+            "ASSIGNMENT_ACTOR_NOT_ALLOWED",
+            "ASSIGNMENT_SOURCE_DUPLICATE",
+          ]).has(body.error.code)
+        )
+          return { kind: "application-failure", error: body.error };
+        return unavailable();
+      } catch {
+        return unavailable();
+      }
+    },
   };
 }
 
