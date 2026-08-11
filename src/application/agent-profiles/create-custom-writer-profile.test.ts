@@ -13,7 +13,7 @@ describe("createCreateCustomWriterProfile", () => {
     }));
     const createAgentProfileId = vi.fn(() => agentProfileId("profile-workflow-0027"));
     const workflow = createCreateCustomWriterProfile({
-      repository: { append, list: vi.fn(async () => []) },
+      repository: { append, findById: vi.fn(async () => null), list: vi.fn(async () => []) },
       createAgentProfileId,
     });
 
@@ -43,7 +43,7 @@ describe("createCreateCustomWriterProfile", () => {
   it("does not persist invalid profile configuration", async () => {
     const append = vi.fn<AgentProfileRepository["append"]>();
     const workflow = createCreateCustomWriterProfile({
-      repository: { append, list: vi.fn(async () => []) },
+      repository: { append, findById: vi.fn(async () => null), list: vi.fn(async () => []) },
       createAgentProfileId: () => agentProfileId("invalid-profile"),
     });
 
@@ -68,6 +68,7 @@ describe("createCreateCustomWriterProfile", () => {
           ok: true,
           profile: authoritative,
         })),
+        findById: vi.fn(async () => null),
         list: vi.fn(async () => []),
       },
       createAgentProfileId: () => authoritative.id,

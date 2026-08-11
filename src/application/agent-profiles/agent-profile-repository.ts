@@ -12,5 +12,6 @@ export type AppendAgentProfileResult =
 
 export interface AgentProfileRepository {
   append(profile: AgentProfile): Promise<AppendAgentProfileResult>;
+  findById(profileId: AgentProfileId): Promise<AgentProfile | null>;
   list(): Promise<readonly AgentProfile[]>;
 }

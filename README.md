@@ -43,11 +43,13 @@ flowchart LR
     DECIDE -->|New Story| NEW[Persisted Story + Source]
     DECIDE -->|Existing Story| EXISTING[Attach Source to Story]
     DECIDE -->|Skip| SKIP[Durable skip decision]
+    NEW --> ASSIGN[Durable Assignment + intake-to-assigned transition]
+    EXISTING --> ASSIGN
 ```
 
 Prepared Evidence is model-derived, cleaned evidence. It never replaces the immutable raw extraction; both histories remain available for audit and survive triage and reload.
 
-Durable configuration profiles now exist for the Assignment Editor, Writer, and Director/editor-in-chief roles, but those agents do not execute. Assignments, Article generation, revision, approval, and publishing automation remain planned.
+Durable configuration profiles exist for the Assignment Editor, Writer, and Director/editor-in-chief roles, but those agents do not execute. An operator can select a Writer Profile and create one durable Assignment that snapshots the Story's attached Source identities and atomically moves the Story from Intake to Assigned. Article generation, revision, approval, and publishing automation remain planned.
 
 ## What works today
 
@@ -61,6 +63,8 @@ Durable configuration profiles now exist for the Assignment Editor, Writer, and 
 - Immutable successful and failed preparation history alongside the original raw evidence.
 - Reconstruction of raw and prepared evidence from PostgreSQL after triage or browser reload.
 - Immutable, PostgreSQL-backed Agent Profiles with built-in Assignment Editor, General Writer, and Director configurations plus custom Writer creation and optional provider-neutral model selection.
+- Durable manual Assignments with Writer selection from immutable Agent Profiles and a server-derived snapshot of every attached Source identity.
+- The first persisted Story transition, `intake` to `assigned`, committed atomically with its Assignment and durable transition receipt/activity.
 
 ## Where StoryRail is going
 
@@ -77,13 +81,14 @@ Those agents and Article workflows are not operational today. Agent Profiles con
 - **Triage Decision** — an attributable, durable choice to create a Story, attach to an existing Story, or skip coverage.
 - **Story** — the central editorial object that groups evidence and will carry work through the editorial lifecycle.
 - **Agent Profile** — an immutable configuration snapshot for a bounded editorial persona and optional provider-neutral model selection; profiles do not execute agents.
-- **Assignment, Writer, Director, and Article** — planned concepts for later stages of the alpha workflow.
+- **Assignment** — an immutable operator-created brief that selects a Writer Profile, records angle/brief/optional constraints and provenance, and snapshots attached Source identities.
+- **Writer, Director, and Article** — later execution and work-product concepts; no editorial agents execute yet.
 
 ## Architecture
 
 StoryRail is a Next.js 16 / React 19 application backed by PostgreSQL. Its domain and application layers define provider-neutral editorial rules and ports; external systems are attached through replaceable adapters. Firecrawl is the current extraction adapter, while LangChain and OpenRouter provide the current structured-model path for Prepared Evidence.
 
-PostgreSQL is authoritative for editorial state. Source extractions, evidence preparations, attachments, and triage decisions preserve auditable facts rather than relying on agent memory or overwriting history.
+PostgreSQL is authoritative for editorial state. Source extractions, evidence preparations, attachments, triage decisions, Assignments, and Story transition receipts preserve auditable facts rather than relying on agent memory or overwriting history.
 
 See the [OpenWiki architecture overview](openwiki/architecture/overview.md) for deeper code-grounded documentation, or browse the [technical documentation index](openwiki/index.md).
 
@@ -141,7 +146,7 @@ pnpm build
 
 ## Project status and limitations
 
-StoryRail is a development-oriented pre-alpha. It currently has no authentication, migrations are external/manual, and some anti-bot publishers remain inaccessible through Firecrawl. Assignment, writing, review, Article, and publishing workflows are not yet implemented, and the newsroom UI is still designed for development rather than production operations.
+StoryRail is a development-oriented pre-alpha. It currently has no authentication, migrations are external/manual, and some anti-bot publishers remain inaccessible through Firecrawl. Manual Assignment is implemented; writing, review, Article, and publishing workflows are not, and the newsroom UI is still designed for development rather than production operations.
 
 ## Technical documentation
 

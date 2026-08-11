@@ -96,6 +96,7 @@ export function createPostgresStoryRepository(
   const { pool } = options;
 
   return {
+    findById: (storyIdentity) => findStoryById(pool, storyIdentity),
     async persist({ story }): Promise<PersistStoryResult> {
       const payload = serializeStory(story);
       const inserted = await pool.query<StoryPayloadRow>(

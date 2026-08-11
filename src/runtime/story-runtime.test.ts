@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createPostgresStoryInspectionRepository } from "@/adapters/story-inspection";
 import { createPostgresAgentProfileRepository } from "@/adapters/agent-profile-persistence";
+import { createPostgresAssignmentPersistence } from "@/adapters/assignment-persistence";
 import { createPostgresStoryListingRepository } from "@/adapters/story-listing";
 import { createPostgresStoryRepository } from "@/adapters/story-persistence";
 import { createPostgresStorySourceAttachmentRepository } from "@/adapters/story-source-persistence";
@@ -12,6 +13,7 @@ import { createPostgresSourceInboxRepository } from "@/adapters/source-inbox";
 import { createPostgresSourceTriageDecisionRepository } from "@/adapters/source-triage-persistence";
 import type { SourceInboxRepository } from "@/application/source-inbox";
 import type { AgentProfileRepository } from "@/application/agent-profiles";
+import type { AssignmentPersistence } from "@/application/assignments";
 import type { SourceTriageDecisionRepository } from "@/application/source-triage";
 import type { StoryInspectionRepository } from "@/application/story-inspection";
 import type { StoryListingRepository } from "@/application/story-listing";
@@ -33,6 +35,7 @@ const factoryMocks = vi.hoisted(() => ({
   createSourceInboxRepository: vi.fn(),
   createSourceTriageRepository: vi.fn(),
   createAgentProfileRepository: vi.fn(),
+  createAssignmentPersistence: vi.fn(),
 }));
 
 vi.mock("@/adapters/story-persistence", () => ({
@@ -63,6 +66,10 @@ vi.mock("@/adapters/agent-profile-persistence", () => ({
   createPostgresAgentProfileRepository: factoryMocks.createAgentProfileRepository,
 }));
 
+vi.mock("@/adapters/assignment-persistence", () => ({
+  createPostgresAssignmentPersistence: factoryMocks.createAssignmentPersistence,
+}));
+
 const DATABASE_URL = "opaque-story-runtime-database-configuration";
 const STORY_UUID = "40000000-0000-4000-8000-000000000020";
 const SOURCE_ID = sourceId("source-runtime-0020");
@@ -91,6 +98,7 @@ function makePool(end: () => Promise<void> = async () => undefined): ControlledP
 
 function makeRepositories() {
   const storyRepository: StoryRepository = {
+    findById: vi.fn<StoryRepository["findById"]>(async () => null),
     persist: vi.fn<StoryRepository["persist"]>(async ({ story }) => ({ ok: true, story })),
   };
   const attachmentRepository: StorySourceAttachmentRepository = {
@@ -123,8 +131,12 @@ function makeRepositories() {
     })),
   };
   const agentProfileRepository: AgentProfileRepository = {
+    findById: vi.fn<AgentProfileRepository["findById"]>(async () => null),
     append: vi.fn<AgentProfileRepository["append"]>(async (profile) => ({ ok: true, profile })),
     list: vi.fn<AgentProfileRepository["list"]>(async () => []),
+  };
+  const assignmentPersistence: AssignmentPersistence = {
+    persist: vi.fn<AssignmentPersistence["persist"]>(),
   };
 
   return {
@@ -135,6 +147,7 @@ function makeRepositories() {
     sourceInboxRepository,
     sourceTriageRepository,
     agentProfileRepository,
+    assignmentPersistence,
   };
 }
 
@@ -150,6 +163,7 @@ beforeEach(() => {
   factoryMocks.createSourceInboxRepository.mockReturnValue(repositories.sourceInboxRepository);
   factoryMocks.createSourceTriageRepository.mockReturnValue(repositories.sourceTriageRepository);
   factoryMocks.createAgentProfileRepository.mockReturnValue(repositories.agentProfileRepository);
+  factoryMocks.createAssignmentPersistence.mockReturnValue(repositories.assignmentPersistence);
 });
 
 describe("createStoryRuntime", () => {
@@ -184,6 +198,7 @@ describe("createStoryRuntime", () => {
     expect(createPostgresAgentProfileRepository).toHaveBeenCalledWith({
       pool: controlledPool.pool,
     });
+    expect(createPostgresAssignmentPersistence).toHaveBeenCalledWith({ pool: controlledPool.pool });
     expect(controlledPool.query).not.toHaveBeenCalled();
     expect(createUuid).not.toHaveBeenCalled();
     expect(now).not.toHaveBeenCalled();
@@ -197,6 +212,7 @@ describe("createStoryRuntime", () => {
       "recordSourceTriageDecision",
       "createCustomWriterProfile",
       "listAgentProfiles",
+      "assignStory",
       "close",
     ]);
     expect(JSON.stringify(runtime)).not.toContain(DATABASE_URL);
@@ -210,6 +226,7 @@ describe("createStoryRuntime", () => {
     factoryMocks.createInspectionRepository.mockReturnValue(repositories.inspectionRepository);
     factoryMocks.createListingRepository.mockReturnValue(repositories.listingRepository);
     factoryMocks.createAgentProfileRepository.mockReturnValue(repositories.agentProfileRepository);
+    factoryMocks.createAssignmentPersistence.mockReturnValue(repositories.assignmentPersistence);
     const createUuid = vi
       .fn<() => string>()
       .mockReturnValueOnce(STORY_UUID)

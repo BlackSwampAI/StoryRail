@@ -33,6 +33,11 @@ export function describeStoryRepositoryContract(
       const story = makeStory("first");
 
       await expect(repository.persist({ story })).resolves.toEqual({ ok: true, story });
+      await expect(repository.findById(story.id)).resolves.toEqual(story);
+    });
+
+    it("returns null for an unknown Story identity", async () => {
+      await expect(repository.findById(storyId("missing-story"))).resolves.toBeNull();
     });
 
     it("treats a structurally exact replay as idempotent success", async () => {
@@ -136,6 +141,10 @@ export function createReferenceStoryRepository(): StoryRepository {
   const stories = new Map<StoryId, Story>();
 
   return {
+    async findById(identity) {
+      const found = stories.get(identity);
+      return found ? structuredClone(found) : null;
+    },
     async persist(command: PersistStoryCommand): Promise<PersistStoryResult> {
       const existing = stories.get(command.story.id);
 

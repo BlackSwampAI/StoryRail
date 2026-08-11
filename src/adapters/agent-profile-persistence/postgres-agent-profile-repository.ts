@@ -34,6 +34,7 @@ export function createPostgresAgentProfileRepository(options: {
   readonly pool: Pool;
 }): AgentProfileRepository {
   return {
+    findById: (profileId) => findById(options.pool, profileId),
     async append(profile): Promise<AppendAgentProfileResult> {
       const inserted = await options.pool.query<AgentProfileRow>(
         `INSERT INTO storyrail.agent_profiles (profile_id, role, built_in, payload)

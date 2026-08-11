@@ -1,9 +1,12 @@
 import type {
+  AgentProfile,
+  Assignment,
   SourceExtraction,
   SourceEvidencePreparation,
   Story,
   StoryId,
   StorySourceAttachment,
+  StoryTransitionReceipt,
   UrlSource,
 } from "@/domain/editorial";
 
@@ -17,6 +20,11 @@ export interface StoryInspectionSource {
 export interface StoryInspection {
   readonly story: Story;
   readonly sources: readonly StoryInspectionSource[];
+  readonly assignment: {
+    readonly assignment: Assignment;
+    readonly writerProfile: AgentProfile;
+  } | null;
+  readonly transitions: readonly StoryTransitionReceipt[];
 }
 
 export interface StoryInspectionNotFoundError {

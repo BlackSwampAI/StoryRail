@@ -39,6 +39,11 @@ export function describeAgentProfileRepositoryContract(
       await repository.append(alpha);
 
       await expect(repository.list()).resolves.toEqual([...baseline, alpha, zeta]);
+      await expect(repository.findById(alpha.id)).resolves.toEqual(alpha);
+    });
+
+    it("returns null for an unknown Profile identity", async () => {
+      await expect(repository.findById(agentProfileId("missing-profile"))).resolves.toBeNull();
     });
 
     it("treats an exact replay as idempotent and returns a fresh result", async () => {
@@ -76,6 +81,10 @@ export function createReferenceAgentProfileRepository(
     initial.map((item) => [item.id, structuredClone(item)]),
   );
   return {
+    async findById(profileId) {
+      const found = profiles.get(profileId);
+      return found ? structuredClone(found) : null;
+    },
     async append(candidate) {
       const existing = profiles.get(candidate.id);
       if (existing) {

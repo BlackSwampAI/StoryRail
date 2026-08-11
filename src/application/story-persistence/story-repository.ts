@@ -22,4 +22,5 @@ export type PersistStoryResult =
 
 export interface StoryRepository {
   persist(command: PersistStoryCommand): Promise<PersistStoryResult>;
+  findById(storyId: StoryId): Promise<Story | null>;
 }

@@ -33,7 +33,7 @@ function createDependencies(result?: PersistStoryResult) {
       result ?? { ok: true, story: structuredClone(command.story) },
   );
   const dependencies: CreateStoryWorkflowDependencies = {
-    storyRepository: { persist },
+    storyRepository: { persist, findById: vi.fn(async () => null) },
     createStoryId: vi.fn(() => ID),
     now: vi.fn(() => NOW),
   };
@@ -133,7 +133,7 @@ describe("createCreateStory", () => {
     },
   );
 
-  it("does not mutate the command or dependency object and has no repository pre-read surface", async () => {
+  it("does not mutate the command or dependencies and does not pre-read the repository", async () => {
     const { dependencies } = createDependencies();
     const command: CreateStoryWorkflowCommand = { title: "  Workflow Story  " };
     const dependencyMembers = {
@@ -146,6 +146,6 @@ describe("createCreateStory", () => {
 
     expect(command).toEqual({ title: "  Workflow Story  " });
     expect(dependencies).toEqual(dependencyMembers);
-    expect(Object.keys(dependencies.storyRepository)).toEqual(["persist"]);
+    expect(dependencies.storyRepository.findById).not.toHaveBeenCalled();
   });
 });

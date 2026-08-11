@@ -16,6 +16,7 @@ function makeRuntime(): StoryRuntime {
     recordSourceTriageDecision: vi.fn<StoryRuntime["recordSourceTriageDecision"]>(),
     createCustomWriterProfile: vi.fn<StoryRuntime["createCustomWriterProfile"]>(),
     listAgentProfiles: vi.fn<StoryRuntime["listAgentProfiles"]>(),
+    assignStory: vi.fn<StoryRuntime["assignStory"]>(),
     close: vi.fn<StoryRuntime["close"]>(async () => undefined),
   });
 }

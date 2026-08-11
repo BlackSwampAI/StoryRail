@@ -3,6 +3,8 @@ import { isDeepStrictEqual } from "node:util";
 import type { Pool, QueryResultRow } from "pg";
 
 import type {
+  AgentProfile,
+  Assignment,
   AgentRole,
   AgentRunId,
   CanonicalSourceUrl,
@@ -15,6 +17,7 @@ import type {
   StoryId,
   StorySourceAttachment,
   StoryState,
+  StoryTransitionReceipt,
   UrlSource,
 } from "@/domain/editorial";
 import { AGENT_ROLES, STORY_STATES } from "@/domain/editorial";
@@ -22,6 +25,11 @@ import type { InspectStoryResult, StoryInspectionRepository } from "@/applicatio
 
 import { decodePostgresSourceExtraction } from "../source-persistence/postgres-source-extraction-decoder";
 import { decodePostgresSourceEvidencePreparation } from "../source-evidence-preparation-persistence/postgres-source-evidence-preparation-decoder";
+import { decodePostgresAgentProfile } from "../agent-profile-persistence/postgres-agent-profile-decoder";
+import {
+  decodePostgresAssignment,
+  decodePostgresTransitionReceipt,
+} from "../assignment-persistence/postgres-assignment-decoder";
 
 export interface CreatePostgresStoryInspectionRepositoryOptions {
   readonly pool: Pool;
@@ -40,6 +48,16 @@ interface StoryInspectionRow extends QueryResultRow {
   readonly source_payload: unknown;
   readonly extraction_payloads: unknown;
   readonly preparation_payloads: unknown;
+  readonly assignment_id: unknown;
+  readonly assignment_story_id: unknown;
+  readonly writer_profile_id: unknown;
+  readonly writer_role: unknown;
+  readonly assignment_payload: unknown;
+  readonly profile_id: unknown;
+  readonly profile_role: unknown;
+  readonly profile_built_in: unknown;
+  readonly profile_payload: unknown;
+  readonly transition_rows: unknown;
 }
 
 interface AssembledStoryInspectionSource {
@@ -231,6 +249,74 @@ function decodePreparations(
   });
 }
 
+function decodeAssignment(
+  row: StoryInspectionRow,
+): { readonly assignment: Assignment; readonly writerProfile: AgentProfile } | null {
+  const values = [
+    row.assignment_id,
+    row.assignment_story_id,
+    row.writer_profile_id,
+    row.writer_role,
+    row.assignment_payload,
+    row.profile_id,
+    row.profile_role,
+    row.profile_built_in,
+    row.profile_payload,
+  ];
+  if (values.every((value) => value === null)) return null;
+  if (values.some((value) => value === null)) throw invariantError();
+  const assignment = decodePostgresAssignment({
+    assignment_id: row.assignment_id,
+    story_id: row.assignment_story_id,
+    writer_profile_id: row.writer_profile_id,
+    writer_role: row.writer_role,
+    payload: row.assignment_payload,
+  });
+  const writerProfile = decodePostgresAgentProfile({
+    profile_id: row.profile_id,
+    role: row.profile_role,
+    built_in: row.profile_built_in,
+    payload: row.profile_payload,
+  });
+  if (
+    assignment.storyId !== row.story_id ||
+    assignment.writerProfileId !== writerProfile.id ||
+    writerProfile.role !== "writer"
+  )
+    throw invariantError();
+  return { assignment, writerProfile };
+}
+
+function decodeTransitions(row: StoryInspectionRow): StoryTransitionReceipt[] {
+  if (!Array.isArray(row.transition_rows)) throw invariantError();
+  return row.transition_rows.map((value) => {
+    if (
+      !isRecord(value) ||
+      !hasExactKeys(value, [
+        "transition_id",
+        "story_id",
+        "previous_state",
+        "next_state",
+        "revision_cycle",
+        "payload",
+      ])
+    )
+      throw invariantError();
+    const receipt = decodePostgresTransitionReceipt(
+      value as {
+        transition_id: unknown;
+        story_id: unknown;
+        previous_state: unknown;
+        next_state: unknown;
+        revision_cycle: unknown;
+        payload: unknown;
+      },
+    );
+    if (receipt.storyId !== row.story_id) throw invariantError();
+    return receipt;
+  });
+}
+
 export function createPostgresStoryInspectionRepository(
   options: CreatePostgresStoryInspectionRepositoryOptions,
 ): StoryInspectionRepository {
@@ -258,12 +344,37 @@ export function createPostgresStoryInspectionRepository(
                   SELECT jsonb_agg(preparation.payload ORDER BY preparation.append_position ASC)
                   FROM storyrail.source_evidence_preparations AS preparation
                   WHERE preparation.source_id = source.source_id
-                ), '[]'::jsonb) END AS preparation_payloads
+                ), '[]'::jsonb) END AS preparation_payloads,
+                assignment.assignment_id,
+                assignment.story_id AS assignment_story_id,
+                assignment.writer_profile_id,
+                assignment.writer_role,
+                assignment.payload AS assignment_payload,
+                profile.profile_id,
+                profile.role AS profile_role,
+                profile.built_in AS profile_built_in,
+                profile.payload AS profile_payload,
+                COALESCE((
+                  SELECT jsonb_agg(jsonb_build_object(
+                    'transition_id', transition.transition_id,
+                    'story_id', transition.story_id,
+                    'previous_state', transition.previous_state,
+                    'next_state', transition.next_state,
+                    'revision_cycle', transition.revision_cycle,
+                    'payload', transition.payload
+                  ) ORDER BY transition.append_position ASC)
+                  FROM storyrail.story_transition_receipts AS transition
+                  WHERE transition.story_id = story.story_id
+                ), '[]'::jsonb) AS transition_rows
          FROM storyrail.stories AS story
          LEFT JOIN storyrail.story_source_attachments AS attachment
            ON attachment.story_id = story.story_id
          LEFT JOIN storyrail.url_sources AS source
            ON source.source_id = attachment.source_id
+         LEFT JOIN storyrail.story_assignments AS assignment
+           ON assignment.story_id = story.story_id
+         LEFT JOIN storyrail.agent_profiles AS profile
+           ON profile.profile_id = assignment.writer_profile_id
          WHERE story.story_id = $1
          ORDER BY attachment.source_id COLLATE "C" ASC`,
         [storyIdentity],
@@ -289,6 +400,8 @@ export function createPostgresStoryInspectionRepository(
         throw invariantError();
       }
       const sources: AssembledStoryInspectionSource[] = [];
+      const assignment = decodeAssignment(firstRow);
+      const transitions = decodeTransitions(firstRow);
       const seenSourceIds = new Set<SourceId>();
 
       for (const row of result.rows) {
@@ -296,6 +409,11 @@ export function createPostgresStoryInspectionRepository(
         if (!isDeepStrictEqual(rowStory, story)) {
           throw invariantError();
         }
+        if (
+          !isDeepStrictEqual(decodeAssignment(row), assignment) ||
+          !isDeepStrictEqual(decodeTransitions(row), transitions)
+        )
+          throw invariantError();
 
         if (hasNoAttachedSource(row)) {
           if (result.rows.length !== 1) {
@@ -318,7 +436,7 @@ export function createPostgresStoryInspectionRepository(
         });
       }
 
-      return { ok: true, inspection: { story, sources } };
+      return { ok: true, inspection: { story, sources, assignment, transitions } };
     },
   };
 }

@@ -185,7 +185,7 @@ export function describeStoryInspectionRepositoryContract(
 
       await expect(repository.inspect(story.id)).resolves.toEqual({
         ok: true,
-        inspection: { story, sources: [] },
+        inspection: { story, sources: [], assignment: null, transitions: [] },
       });
     });
 
@@ -197,7 +197,12 @@ export function describeStoryInspectionRepositoryContract(
 
       await expect(repository.inspect(story.id)).resolves.toEqual({
         ok: true,
-        inspection: { story, sources: [{ attachment, source, extractions: [], preparations: [] }] },
+        inspection: {
+          story,
+          sources: [{ attachment, source, extractions: [], preparations: [] }],
+          assignment: null,
+          transitions: [],
+        },
       });
     });
 
@@ -307,6 +312,8 @@ export function describeStoryInspectionRepositoryContract(
         inspection: {
           story,
           sources: [{ attachment, source, extractions: [successful, failed], preparations: [] }],
+          assignment: null,
+          transitions: [],
         },
       });
     });
@@ -340,6 +347,8 @@ export function describeStoryInspectionRepositoryContract(
           sources: [
             { attachment, source, extractions: [extraction], preparations: [first, second] },
           ],
+          assignment: null,
+          transitions: [],
         },
       });
     });
@@ -373,6 +382,8 @@ export function describeStoryInspectionRepositoryContract(
         inspection: {
           story,
           sources: [{ attachment, source, extractions: [extraction], preparations: [] }],
+          assignment: null,
+          transitions: [],
         },
       });
     });
@@ -467,6 +478,8 @@ export function describeStoryInspectionRepositoryContract(
             preparations: [],
           },
         ],
+        assignment: null,
+        transitions: [],
       });
       expect(second.inspection).not.toBe(first.inspection);
       expect(second.inspection.story).not.toBe(first.inspection.story);
@@ -545,7 +558,12 @@ export function createReferenceStoryInspectionRepositoryHarness(): StoryInspecti
 
           return {
             ok: true,
-            inspection: structuredClone({ story, sources: inspectionSources }),
+            inspection: structuredClone({
+              story,
+              sources: inspectionSources,
+              assignment: null,
+              transitions: [],
+            }),
           };
         },
       };

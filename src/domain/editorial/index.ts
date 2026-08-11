@@ -15,3 +15,5 @@ export * from "./state-machine";
 export * from "./types";
 export * from "./agent-profile";
 export * from "./agent-profile-types";
+export * from "./assignment";
+export * from "./assignment-types";

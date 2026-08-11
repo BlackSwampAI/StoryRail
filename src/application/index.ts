@@ -12,3 +12,4 @@ export * from "./story-source-attachment";
 export * from "./story-source-persistence";
 export * from "./model";
 export * from "./agent-profiles";
+export * from "./assignments";
