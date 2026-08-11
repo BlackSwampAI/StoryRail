@@ -125,9 +125,14 @@ function clients() {
         sources: [{ attachment, source, extractions: [extraction], preparations: [] }],
         assignment: null,
         transitions: [],
+        agentRuns: [],
       },
     })),
     assignStory: vi.fn<StoryClient["assignStory"]>(async () => ({
+      kind: "unavailable",
+      message: "The Story request could not be completed.",
+    })),
+    generateAssignmentProposal: vi.fn<StoryClient["generateAssignmentProposal"]>(async () => ({
       kind: "unavailable",
       message: "The Story request could not be completed.",
     })),

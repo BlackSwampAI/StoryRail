@@ -17,3 +17,7 @@ export * from "./agent-profile";
 export * from "./agent-profile-types";
 export * from "./assignment";
 export * from "./assignment-types";
+export * from "./assignment-proposal";
+export * from "./assignment-proposal-types";
+export * from "./agent-run";
+export * from "./agent-run-types";

@@ -43,13 +43,15 @@ flowchart LR
     DECIDE -->|New Story| NEW[Persisted Story + Source]
     DECIDE -->|Existing Story| EXISTING[Attach Source to Story]
     DECIDE -->|Skip| SKIP[Durable skip decision]
-    NEW --> ASSIGN[Durable Assignment + intake-to-assigned transition]
-    EXISTING --> ASSIGN
+    NEW --> PROPOSE[Optional supervised Assignment Editor suggestion]
+    EXISTING --> PROPOSE
+    PROPOSE --> REVIEW[Operator review and editing]
+    REVIEW --> ASSIGN[Durable Assignment + intake-to-assigned transition]
 ```
 
 Prepared Evidence is model-derived, cleaned evidence. It never replaces the immutable raw extraction; both histories remain available for audit and survive triage and reload.
 
-Durable configuration profiles exist for the Assignment Editor, Writer, and Director/editor-in-chief roles, but those agents do not execute. An operator can select a Writer Profile and create one durable Assignment that snapshots the Story's attached Source identities and atomically moves the Story from Intake to Assigned. Article generation, revision, approval, and publishing automation remain planned.
+Durable configuration profiles exist for the Assignment Editor, Writer, and Director/editor-in-chief roles. The built-in Assignment Editor is the first executing editorial agent: for an unassigned Intake Story it can produce a supervised, structured Assignment suggestion from authoritative evidence and available Writer Profiles. The suggestion is recorded as a durable AgentRun, but it does not create an Assignment or change Story state. The operator reviews or edits it in the existing manual form, then may create one durable Assignment that snapshots the Story's attached Source identities and atomically moves the Story from Intake to Assigned. Writer and Director execution, Article generation, revision, approval, and publishing automation remain planned.
 
 ## What works today
 
@@ -65,12 +67,15 @@ Durable configuration profiles exist for the Assignment Editor, Writer, and Dire
 - Immutable, PostgreSQL-backed Agent Profiles with built-in Assignment Editor, General Writer, and Director configurations plus custom Writer creation and optional provider-neutral model selection.
 - Durable manual Assignments with Writer selection from immutable Agent Profiles and a server-derived snapshot of every attached Source identity.
 - The first persisted Story transition, `intake` to `assigned`, committed atomically with its Assignment and durable transition receipt/activity.
+- Supervised Assignment Editor proposal generation through the provider-neutral structured-model boundary, with no browsing or tools.
+- Durable, append-ordered AgentRun history that records the exact Story, evidence references, Writer candidates, model, prompt version, requester, outcome, and proposal or safe failure.
+- Operator review and editing of suggestions in the existing Assignment form; the manual Assignment remains the authoritative state-mutation boundary and remains attributed to the operator.
 
 ## Where StoryRail is going
 
 The planned alpha path continues from a Story through an Assignment Editor, a structured Assignment, a configurable Writer, a persisted Article, and independent Director/editor-in-chief review. The intended bounded revision loop ends in an operator-controlled approval or rejection, followed by a separate, explicit publish/export transition.
 
-Those agents and Article workflows are not operational today. Agent Profiles configure future work but do not contact a model. Future work also includes Assignment-linked profile use, mutable profile/version management, resolved triage history as editorial memory, and improved self-hosting packaging.
+Automatic Assignment Editor decisions, Writer and Director execution, and Article workflows are not operational today. Future work also includes Assignment-linked proposal provenance, mutable profile/version management, resolved triage history as editorial memory, and improved self-hosting packaging.
 
 ## Core concepts
 
@@ -82,7 +87,9 @@ Those agents and Article workflows are not operational today. Agent Profiles con
 - **Story** — the central editorial object that groups evidence and will carry work through the editorial lifecycle.
 - **Agent Profile** — an immutable configuration snapshot for a bounded editorial persona and optional provider-neutral model selection; profiles do not execute agents.
 - **Assignment** — an immutable operator-created brief that selects a Writer Profile, records angle/brief/optional constraints and provenance, and snapshots attached Source identities.
-- **Writer, Director, and Article** — later execution and work-product concepts; no editorial agents execute yet.
+- **Assignment Proposal** — a supervised Assignment Editor suggestion that prefills the manual Assignment form but cannot create an Assignment or transition a Story.
+- **AgentRun** — one immutable execution record containing bounded input references, configuration, timing, and a structured success or failure outcome.
+- **Writer, Director, and Article** — later execution and work-product concepts; the Assignment Editor cannot invoke them.
 
 ## Architecture
 
@@ -122,11 +129,12 @@ Open [http://localhost:3000](http://localhost:3000) to use the development newsr
 | `STORYRAIL_DATABASE_URL`               | All persisted workflows           | PostgreSQL connection string for editorial state.                              |
 | `STORYRAIL_OPERATOR_ID`                | Operator-attributed HTTP actions  | Identifies the current fixed development operator; this is not authentication. |
 | `FIRECRAWL_API_KEY`                    | URL intake/extraction             | Authenticates Firecrawl v2 requests.                                           |
-| `OPENROUTER_API_KEY`                   | Prepared Evidence only            | Authenticates the current OpenRouter model adapter.                            |
+| `OPENROUTER_API_KEY`                   | Model-backed workflows            | Authenticates the current OpenRouter model adapter.                            |
 | `STORYRAIL_EVIDENCE_PREPARATION_MODEL` | Prepared Evidence only            | Selects the OpenRouter model used for evidence preparation.                    |
+| `STORYRAIL_ASSIGNMENT_EDITOR_MODEL`    | Assignment Editor only            | Explicitly selects the OpenRouter model used for supervised proposals.         |
 | `STORYRAIL_TEST_DATABASE_URL`          | PostgreSQL integration tests only | Points to a disposable database named exactly `storyrail_test`.                |
 
-Normal Story, Inbox, triage, inspection, and Agent Profile workflows do not require Firecrawl or OpenRouter. Raw URL intake requires Firecrawl but not OpenRouter.
+Normal Story, Inbox, triage, inspection, Agent Profile, and manual Assignment workflows do not require Firecrawl or OpenRouter. Raw URL intake requires Firecrawl but not OpenRouter. Assignment Editor execution is unavailable when its explicit model or OpenRouter key is absent, without affecting those normal workflows.
 
 ## Development and validation
 
@@ -146,7 +154,7 @@ pnpm build
 
 ## Project status and limitations
 
-StoryRail is a development-oriented pre-alpha. It currently has no authentication, migrations are external/manual, and some anti-bot publishers remain inaccessible through Firecrawl. Manual Assignment is implemented; writing, review, Article, and publishing workflows are not, and the newsroom UI is still designed for development rather than production operations.
+StoryRail is a development-oriented pre-alpha. It currently has no authentication, migrations are external/manual, and some anti-bot publishers remain inaccessible through Firecrawl. Supervised Assignment proposals and manual Assignment are implemented; automatic Assignment decisions, Writer execution, review, Article, and publishing workflows are not, and the newsroom UI is still designed for development rather than production operations.
 
 ## Technical documentation
 

@@ -89,7 +89,41 @@ const INSPECTION = {
   ],
   assignment: null,
   transitions: [],
+  agentRuns: [],
 };
+const AGENT_RUN = {
+  id: "run-0030",
+  storyId: STORY.id,
+  profileId: "storyrail-assignment-editor-v1",
+  role: "assignment_editor",
+  operation: "assignment_proposal",
+  model: { provider: "openrouter", model: "provider/model" },
+  prompt: { key: "storyrail_assignment_editor", version: "1" },
+  requestedBy: { type: "operator", operatorId: "operator-0030" },
+  startedAt: "opaque-started",
+  completedAt: "opaque-completed",
+  input: {
+    story: { id: STORY.id, title: STORY.title, state: "intake", revisionCycle: 0 },
+    evidence: [
+      {
+        sourceId: SOURCE.id,
+        relevance: ATTACHMENT.relevance,
+        evidenceKind: "prepared",
+        evidenceId: PREPARATION.id,
+      },
+    ],
+    unavailableSourceIds: [],
+    writerProfileIds: ["storyrail-general-writer-v1"],
+  },
+  outcome: "succeeded",
+  proposal: {
+    writerProfileId: "storyrail-general-writer-v1",
+    angle: "Focused angle",
+    brief: "Bounded brief",
+    constraints: null,
+    reason: "Best fit",
+  },
+} as const;
 
 function response(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status });
@@ -206,6 +240,7 @@ describe("story-client", () => {
       ],
       assignment: null,
       transitions: [],
+      agentRuns: [],
     };
     const timestamps = [
       opaqueInspection.story.createdAt,
@@ -235,6 +270,7 @@ describe("story-client", () => {
         sources: [{ attachment: ATTACHMENT, source: SOURCE, extractions: [], preparations: [] }],
         assignment: null,
         transitions: [],
+        agentRuns: [],
       },
       INSPECTION,
     ];
@@ -290,6 +326,7 @@ describe("story-client", () => {
           sources: [sourceEntry],
           assignment: null,
           transitions: [],
+          agentRuns: [],
         },
       }),
     );
@@ -415,6 +452,59 @@ describe("story-client", () => {
         reason: "Reason",
       }),
     ).resolves.toEqual({ kind: "unavailable", message: STORY_REQUEST_UNAVAILABLE_MESSAGE });
+  });
+
+  it("posts exactly {} and strictly decodes successful and failed durable AgentRuns", async () => {
+    const failed = {
+      ...AGENT_RUN,
+      outcome: "failed" as const,
+      failure: { code: "MODEL_REQUEST_TIMED_OUT" as const, retryable: true },
+      proposal: undefined,
+    };
+    const { proposal: _proposal, ...strictFailed } = failed;
+    void _proposal;
+    const fetch = vi
+      .fn<StoryClientDependencies["fetch"]>()
+      .mockResolvedValueOnce(response(201, { ok: true, run: AGENT_RUN }))
+      .mockResolvedValueOnce(response(201, { ok: true, run: strictFailed }));
+    const client = createStoryClient({ fetch });
+    await expect(client.generateAssignmentProposal(STORY.id)).resolves.toEqual({
+      kind: "completed",
+      value: AGENT_RUN,
+    });
+    await expect(client.generateAssignmentProposal(STORY.id)).resolves.toEqual({
+      kind: "completed",
+      value: strictFailed,
+    });
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      `/api/stories/${STORY.id}/assignment-proposals`,
+      expect.objectContaining({ method: "POST", body: "{}" }),
+    );
+  });
+
+  it("fails closed on a malformed AgentRun but returns expected proposal preconditions", async () => {
+    const fetch = vi
+      .fn<StoryClientDependencies["fetch"]>()
+      .mockResolvedValueOnce(response(201, { ok: true, run: { ...AGENT_RUN, extra: true } }))
+      .mockResolvedValueOnce(
+        response(422, {
+          ok: false,
+          error: {
+            code: "ASSIGNMENT_EDITOR_EVIDENCE_REQUIRED",
+            message: "Evidence required.",
+          },
+        }),
+      );
+    const client = createStoryClient({ fetch });
+    await expect(client.generateAssignmentProposal(STORY.id)).resolves.toEqual({
+      kind: "unavailable",
+      message: STORY_REQUEST_UNAVAILABLE_MESSAGE,
+    });
+    await expect(client.generateAssignmentProposal(STORY.id)).resolves.toMatchObject({
+      kind: "application-failure",
+      error: { code: "ASSIGNMENT_EDITOR_EVIDENCE_REQUIRED" },
+    });
   });
 
   it("exports only the focused browser client surface", async () => {

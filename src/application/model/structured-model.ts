@@ -1,6 +1,6 @@
 import type { ZodType } from "zod";
 
-import type { ModelDescriptor, PreparationFailureCode } from "@/domain/editorial";
+import type { ModelDescriptor, ModelFailureCode } from "@/domain/editorial";
 
 export interface StructuredModelRequest<Output> {
   readonly systemPrompt: string;
@@ -13,7 +13,7 @@ export type StructuredModelResult<Output> =
   | {
       readonly ok: false;
       readonly failure: {
-        readonly code: PreparationFailureCode;
+        readonly code: ModelFailureCode;
         readonly retryable: boolean;
       };
     };

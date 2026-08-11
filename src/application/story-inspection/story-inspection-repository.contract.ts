@@ -2,12 +2,14 @@ import { beforeEach, describe, expect, expectTypeOf, it } from "vitest";
 
 import {
   agentRunId,
+  agentProfileId,
   operatorId,
   sourceEvidencePreparationId,
   sourceExtractionId,
   sourceId,
   storyId,
   type FailedSourceExtraction,
+  type AgentRun,
   type SourceId,
   type SourceEvidencePreparation,
   type SourceExtraction,
@@ -32,6 +34,7 @@ export interface StoryInspectionRepositoryContractHarness {
   readonly addAttachment: (attachment: StorySourceAttachment) => void | Promise<void>;
   readonly addExtraction: (extraction: SourceExtraction) => void | Promise<void>;
   readonly addPreparation: (preparation: SourceEvidencePreparation) => void | Promise<void>;
+  readonly addAgentRun: (run: AgentRun) => void | Promise<void>;
 }
 
 function makeStory(suffix: string): Story {
@@ -146,6 +149,56 @@ function makePreparation(
   };
 }
 
+function makeAgentRun(story: Story, suffix: string, outcome: "succeeded" | "failed"): AgentRun {
+  const common = {
+    id: agentRunId(`agent-run-inspection-${suffix}`),
+    storyId: story.id,
+    profileId: agentProfileId("storyrail-assignment-editor-v1"),
+    role: "assignment_editor" as const,
+    operation: "assignment_proposal" as const,
+    model: { provider: "openrouter", model: `provider/model-${suffix}` },
+    prompt: { key: "storyrail_assignment_editor", version: "1" },
+    requestedBy: { type: "operator" as const, operatorId: operatorId(`operator-${suffix}`) },
+    startedAt: `started-${suffix}`,
+    completedAt: `completed-${suffix}`,
+    input: {
+      story: {
+        id: story.id,
+        title: story.title,
+        state: story.state,
+        revisionCycle: story.revisionCycle,
+      },
+      evidence: [
+        {
+          sourceId: sourceId(`source-agent-run-${suffix}`),
+          relevance: "Run evidence",
+          evidenceKind: "raw" as const,
+          evidenceId: sourceExtractionId(`extraction-agent-run-${suffix}`),
+        },
+      ],
+      unavailableSourceIds: [],
+      writerProfileIds: [agentProfileId("storyrail-general-writer-v1")],
+    },
+  };
+  return outcome === "succeeded"
+    ? {
+        ...common,
+        outcome,
+        proposal: {
+          writerProfileId: agentProfileId("storyrail-general-writer-v1"),
+          angle: `Angle ${suffix}`,
+          brief: `Brief ${suffix}`,
+          constraints: null,
+          reason: `Reason ${suffix}`,
+        },
+      }
+    : {
+        ...common,
+        outcome,
+        failure: { code: "MODEL_REQUEST_FAILED", retryable: true },
+      };
+}
+
 export function describeStoryInspectionRepositoryContract(
   createHarness: () =>
     StoryInspectionRepositoryContractHarness | Promise<StoryInspectionRepositoryContractHarness>,
@@ -156,6 +209,7 @@ export function describeStoryInspectionRepositoryContract(
   let addPreparation: StoryInspectionRepositoryContractHarness["addPreparation"];
   let addAttachment: StoryInspectionRepositoryContractHarness["addAttachment"];
   let addExtraction: StoryInspectionRepositoryContractHarness["addExtraction"];
+  let addAgentRun: StoryInspectionRepositoryContractHarness["addAgentRun"];
 
   beforeEach(async () => {
     const harness = await createHarness();
@@ -165,6 +219,7 @@ export function describeStoryInspectionRepositoryContract(
     addPreparation = harness.addPreparation;
     addAttachment = harness.addAttachment;
     addExtraction = harness.addExtraction;
+    addAgentRun = harness.addAgentRun;
   });
 
   async function addAttachedSource(
@@ -185,7 +240,7 @@ export function describeStoryInspectionRepositoryContract(
 
       await expect(repository.inspect(story.id)).resolves.toEqual({
         ok: true,
-        inspection: { story, sources: [], assignment: null, transitions: [] },
+        inspection: { story, sources: [], assignment: null, transitions: [], agentRuns: [] },
       });
     });
 
@@ -202,6 +257,7 @@ export function describeStoryInspectionRepositoryContract(
           sources: [{ attachment, source, extractions: [], preparations: [] }],
           assignment: null,
           transitions: [],
+          agentRuns: [],
         },
       });
     });
@@ -314,6 +370,7 @@ export function describeStoryInspectionRepositoryContract(
           sources: [{ attachment, source, extractions: [successful, failed], preparations: [] }],
           assignment: null,
           transitions: [],
+          agentRuns: [],
         },
       });
     });
@@ -349,6 +406,29 @@ export function describeStoryInspectionRepositoryContract(
           ],
           assignment: null,
           transitions: [],
+          agentRuns: [],
+        },
+      });
+    });
+
+    it("returns successful and failed AgentRuns in durable append order without multiplying histories", async () => {
+      const story = makeStory("agent-runs");
+      const source = makeSource("agent-runs");
+      const extraction = makeSuccessfulExtraction(source, "agent-runs");
+      const first = makeAgentRun(story, "first", "succeeded");
+      const second = makeAgentRun(story, "second", "failed");
+      await addStory(story);
+      await addAttachedSource(story, source);
+      await addExtraction(extraction);
+      await addAgentRun(first);
+      await addAgentRun(second);
+
+      const result = await repository.inspect(story.id);
+      expect(result).toMatchObject({
+        ok: true,
+        inspection: {
+          sources: [{ extractions: [extraction] }],
+          agentRuns: [first, second],
         },
       });
     });
@@ -384,6 +464,7 @@ export function describeStoryInspectionRepositoryContract(
           sources: [{ attachment, source, extractions: [extraction], preparations: [] }],
           assignment: null,
           transitions: [],
+          agentRuns: [],
         },
       });
     });
@@ -480,6 +561,7 @@ export function describeStoryInspectionRepositoryContract(
         ],
         assignment: null,
         transitions: [],
+        agentRuns: [],
       });
       expect(second.inspection).not.toBe(first.inspection);
       expect(second.inspection.story).not.toBe(first.inspection.story);
@@ -521,6 +603,7 @@ export function createReferenceStoryInspectionRepositoryHarness(): StoryInspecti
   const attachments = new Map<StoryId, Map<SourceId, StorySourceAttachment>>();
   const extractions = new Map<SourceId, SourceExtraction[]>();
   const preparations = new Map<SourceId, SourceEvidencePreparation[]>();
+  const agentRuns = new Map<StoryId, AgentRun[]>();
 
   return {
     createRepository() {
@@ -563,6 +646,7 @@ export function createReferenceStoryInspectionRepositoryHarness(): StoryInspecti
               sources: inspectionSources,
               assignment: null,
               transitions: [],
+              agentRuns: agentRuns.get(storyIdentity) ?? [],
             }),
           };
         },
@@ -588,6 +672,11 @@ export function createReferenceStoryInspectionRepositoryHarness(): StoryInspecti
       const sourcePreparations = preparations.get(preparation.sourceId) ?? [];
       sourcePreparations.push(structuredClone(preparation));
       preparations.set(preparation.sourceId, sourcePreparations);
+    },
+    addAgentRun(run) {
+      const storyRuns = agentRuns.get(run.storyId) ?? [];
+      storyRuns.push(structuredClone(run));
+      agentRuns.set(run.storyId, storyRuns);
     },
   };
 }

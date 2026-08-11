@@ -436,6 +436,7 @@ describe("createInspectStoryHttpHandler", () => {
       ],
       assignment: null,
       transitions: [],
+      agentRuns: [],
     };
     const inspectStory = vi.fn<StoryRuntime["inspectStory"]>(async () => ({
       ok: true,
@@ -455,7 +456,7 @@ describe("createInspectStoryHttpHandler", () => {
   it("preserves an unattached Story's empty sources as a successful 200", async () => {
     const inspectStory = vi.fn<StoryRuntime["inspectStory"]>(async () => ({
       ok: true,
-      inspection: { story: STORY, sources: [], assignment: null, transitions: [] },
+      inspection: { story: STORY, sources: [], assignment: null, transitions: [], agentRuns: [] },
     }));
     const handler = createInspectStoryHttpHandler({
       getRuntime: () => makeRuntime({ inspectStory }),
@@ -468,7 +469,7 @@ describe("createInspectStoryHttpHandler", () => {
     expect(response.status).toBe(200);
     expect(await responseBody(response)).toEqual({
       ok: true,
-      inspection: { story: STORY, sources: [], assignment: null, transitions: [] },
+      inspection: { story: STORY, sources: [], assignment: null, transitions: [], agentRuns: [] },
     });
   });
 
@@ -479,6 +480,7 @@ describe("createInspectStoryHttpHandler", () => {
         sources: [{ attachment: ATTACHMENT, source: SOURCE, extractions: [], preparations: [] }],
         assignment: null,
         transitions: [],
+        agentRuns: [],
       },
       {
         story: STORY,
@@ -492,6 +494,7 @@ describe("createInspectStoryHttpHandler", () => {
         ],
         assignment: null,
         transitions: [],
+        agentRuns: [],
       },
     ] as const;
     const inspectStory = vi

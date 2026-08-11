@@ -7,6 +7,7 @@ import type { StoryListItem } from "@/application/story-listing";
 import {
   STORY_STATES,
   type AgentProfile,
+  type AgentRun,
   type Assignment,
   type EditorialActor,
   type SourceEvidencePreparation,
@@ -239,6 +240,107 @@ function PersistedPreparationAttempt({
   );
 }
 
+function AssignmentEditorRuns({ runs }: Readonly<{ runs: readonly AgentRun[] }>) {
+  return (
+    <details className={styles.technicalDetails}>
+      <summary>Assignment Editor runs</summary>
+      {runs.length === 0 ? (
+        <p>No Assignment Editor runs are recorded.</p>
+      ) : (
+        runs.map((run) => (
+          <article key={run.id} className={styles.persistedExtraction}>
+            <h4>{run.outcome === "succeeded" ? "Suggestion succeeded" : "Suggestion failed"}</h4>
+            <dl className={styles.receiptFacts}>
+              <div>
+                <dt>Outcome</dt>
+                <dd>{run.outcome}</dd>
+              </div>
+              <div>
+                <dt>Model</dt>
+                <dd>
+                  {run.model.provider} / {run.model.model}
+                </dd>
+              </div>
+              <div>
+                <dt>Requested by</dt>
+                <dd>{actorLabel(run.requestedBy)}</dd>
+              </div>
+              <div>
+                <dt>Started</dt>
+                <dd>{run.startedAt}</dd>
+              </div>
+              <div>
+                <dt>Completed</dt>
+                <dd>{run.completedAt}</dd>
+              </div>
+              {run.outcome === "succeeded" ? (
+                <>
+                  <div>
+                    <dt>Writer Profile</dt>
+                    <dd>{run.proposal.writerProfileId}</dd>
+                  </div>
+                  <div>
+                    <dt>Angle</dt>
+                    <dd>{run.proposal.angle}</dd>
+                  </div>
+                  <div>
+                    <dt>Brief</dt>
+                    <dd>{run.proposal.brief}</dd>
+                  </div>
+                  <div>
+                    <dt>Constraints</dt>
+                    <dd>{run.proposal.constraints ?? "None"}</dd>
+                  </div>
+                  <div>
+                    <dt>Reason</dt>
+                    <dd>{run.proposal.reason}</dd>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <dt>Failure code</dt>
+                    <dd>{run.failure.code}</dd>
+                  </div>
+                  <div>
+                    <dt>Retryable</dt>
+                    <dd>{run.failure.retryable ? "Yes" : "No"}</dd>
+                  </div>
+                </>
+              )}
+            </dl>
+            <details>
+              <summary>Technical AgentRun record</summary>
+              <p>Run ID: {run.id}</p>
+              <p>Profile ID: {run.profileId}</p>
+              <p>
+                Prompt: {run.prompt.key} / {run.prompt.version}
+              </p>
+              <p>
+                Evidence references:{" "}
+                {run.input.evidence.length === 0
+                  ? "None"
+                  : run.input.evidence
+                      .map(
+                        (reference) =>
+                          `${reference.sourceId}: ${reference.relevance}; ${reference.evidenceKind} ${reference.evidenceId}`,
+                      )
+                      .join(", ")}
+              </p>
+              <p>
+                Unavailable Source IDs:{" "}
+                {run.input.unavailableSourceIds.length === 0
+                  ? "None"
+                  : run.input.unavailableSourceIds.join(", ")}
+              </p>
+            </details>
+          </article>
+        ))
+      )}
+    </details>
+  );
+}
+
 function PersistedStoryWorkspace({
   inspection,
   notice,
@@ -259,16 +361,34 @@ function PersistedStoryWorkspace({
     writerProfile: AgentProfile,
   ) => Promise<void>;
 }>) {
-  const { story, sources, assignment, transitions } = inspection;
+  const { story, sources, assignment, transitions, agentRuns } = inspection;
+  const durableProposal = [...agentRuns]
+    .reverse()
+    .find(
+      (run): run is Extract<AgentRun, { readonly outcome: "succeeded" }> =>
+        run.outcome === "succeeded",
+    );
+  const latestDurableRun = agentRuns.at(-1);
   const [profiles, setProfiles] = useState<readonly AgentProfile[]>([]);
   const [profilesUnavailable, setProfilesUnavailable] = useState(false);
   const [pending, setPending] = useState(false);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
-  const [writerProfileId, setWriterProfileId] = useState("");
-  const [angle, setAngle] = useState("");
-  const [brief, setBrief] = useState("");
-  const [constraints, setConstraints] = useState("");
-  const [reason, setReason] = useState("");
+  const [writerProfileId, setWriterProfileId] = useState(
+    durableProposal?.proposal.writerProfileId ?? "",
+  );
+  const [angle, setAngle] = useState(durableProposal?.proposal.angle ?? "");
+  const [brief, setBrief] = useState(durableProposal?.proposal.brief ?? "");
+  const [constraints, setConstraints] = useState(durableProposal?.proposal.constraints ?? "");
+  const [reason, setReason] = useState(durableProposal?.proposal.reason ?? "");
+  const [runs, setRuns] = useState<readonly AgentRun[]>(agentRuns);
+  const [proposalPending, setProposalPending] = useState(false);
+  const [proposalStatus, setProposalStatus] = useState<string | null>(
+    latestDurableRun?.outcome === "failed"
+      ? `Assignment Editor failed: ${latestDurableRun.failure.code}. Retryable: ${latestDurableRun.failure.retryable ? "yes" : "no"}.`
+      : latestDurableRun?.outcome === "succeeded"
+        ? "Assignment Editor suggestion ready. Review or edit it before creating the Assignment."
+        : null,
+  );
 
   useEffect(() => {
     if (story.state !== "intake" || assignment !== null) return;
@@ -322,6 +442,60 @@ function PersistedStoryWorkspace({
       setPending(false);
     }
   }
+
+  async function generateProposal() {
+    if (proposalPending) return;
+    setProposalPending(true);
+    setProposalStatus(null);
+    try {
+      const result = await requests.generateAssignmentProposal(story.id);
+      if (result.kind !== "completed") {
+        setProposalStatus(
+          result.kind === "application-failure" ? result.error.message : result.message,
+        );
+        return;
+      }
+      setRuns((current) => [...current, result.value]);
+      if (result.value.outcome === "failed") {
+        setProposalStatus(
+          `Assignment Editor failed: ${result.value.failure.code}. Retryable: ${result.value.failure.retryable ? "yes" : "no"}.`,
+        );
+        return;
+      }
+      const proposal = result.value.proposal;
+      setWriterProfileId(proposal.writerProfileId);
+      setAngle(proposal.angle);
+      setBrief(proposal.brief);
+      setConstraints(proposal.constraints ?? "");
+      setReason(proposal.reason);
+      setProposalStatus(
+        "Assignment Editor suggestion ready. Review or edit it before creating the Assignment.",
+      );
+    } catch {
+      setProposalStatus("The Assignment Editor request could not be completed.");
+    } finally {
+      setProposalPending(false);
+    }
+  }
+  const latestSuccessfulRun = [...runs]
+    .reverse()
+    .find(
+      (run): run is Extract<AgentRun, { readonly outcome: "succeeded" }> =>
+        run.outcome === "succeeded",
+    );
+  const currentSourceIds = new Set(sources.map(({ source }) => source.id));
+  const proposalSourceIds = new Set(
+    latestSuccessfulRun === undefined
+      ? []
+      : [
+          ...latestSuccessfulRun.input.evidence.map(({ sourceId }) => sourceId),
+          ...latestSuccessfulRun.input.unavailableSourceIds,
+        ],
+  );
+  const evidenceChanged =
+    latestSuccessfulRun !== undefined &&
+    (currentSourceIds.size !== proposalSourceIds.size ||
+      [...currentSourceIds].some((sourceId) => !proposalSourceIds.has(sourceId)));
   return (
     <article className={styles.storyWorkspace} aria-labelledby="workspace-story-title">
       <header className={styles.workspaceHeader}>
@@ -480,68 +654,89 @@ function PersistedStoryWorkspace({
           <p className={styles.sectionNumber}>02</p>
           <h3 id="assignment-heading">Assignment</h3>
           {assignment === null && story.state === "intake" ? (
-            <form
-              className={styles.storyCreationForm}
-              onSubmit={(event) => void submitAssignment(event)}
-            >
-              <p>Assignment will snapshot all currently attached Sources: {sources.length}</p>
-              <label>
-                Writer
-                <select
-                  value={writerProfileId}
-                  onChange={(event) => setWriterProfileId(event.target.value)}
-                  disabled={pending || profilesUnavailable}
-                  required
+            <div>
+              <div className={styles.auditFact}>
+                <button
+                  type="button"
+                  onClick={() => void generateProposal()}
+                  disabled={proposalPending}
                 >
-                  {profiles.length === 0 ? <option value="">No Writers available</option> : null}
-                  {profiles.map((profile) => (
-                    <option value={profile.id} key={profile.id}>
-                      {profile.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Angle
-                <input
-                  value={angle}
-                  onChange={(event) => setAngle(event.target.value)}
-                  disabled={pending}
-                  required
-                />
-              </label>
-              <label>
-                Brief
-                <textarea
-                  value={brief}
-                  onChange={(event) => setBrief(event.target.value)}
-                  disabled={pending}
-                  required
-                />
-              </label>
-              <label>
-                Constraints (optional)
-                <textarea
-                  value={constraints}
-                  onChange={(event) => setConstraints(event.target.value)}
-                  disabled={pending}
-                />
-              </label>
-              <label>
-                Assignment reason
-                <input
-                  value={reason}
-                  onChange={(event) => setReason(event.target.value)}
-                  disabled={pending}
-                  required
-                />
-              </label>
-              <button type="submit" disabled={pending || writerProfileId.length === 0}>
-                {pending ? "Assigning…" : "Create Assignment"}
-              </button>
-              {profilesUnavailable ? <p role="alert">Writer Profiles are unavailable.</p> : null}
-              {submissionError ? <p role="alert">{submissionError}</p> : null}
-            </form>
+                  {proposalPending ? "Assignment Editor is working…" : "Ask Assignment Editor"}
+                </button>
+                <p>
+                  Generates a suggestion only. Review or edit it before creating the Assignment.
+                </p>
+                {proposalStatus ? <p role="status">{proposalStatus}</p> : null}
+                {evidenceChanged ? (
+                  <p role="alert">
+                    Story evidence has changed since this suggestion was generated. Regenerate the
+                    Assignment Editor suggestion before relying on it.
+                  </p>
+                ) : null}
+              </div>
+              <form
+                className={styles.storyCreationForm}
+                onSubmit={(event) => void submitAssignment(event)}
+              >
+                <p>Assignment will snapshot all currently attached Sources: {sources.length}</p>
+                <label>
+                  Writer
+                  <select
+                    value={writerProfileId}
+                    onChange={(event) => setWriterProfileId(event.target.value)}
+                    disabled={pending || profilesUnavailable}
+                    required
+                  >
+                    {profiles.length === 0 ? <option value="">No Writers available</option> : null}
+                    {profiles.map((profile) => (
+                      <option value={profile.id} key={profile.id}>
+                        {profile.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Angle
+                  <input
+                    value={angle}
+                    onChange={(event) => setAngle(event.target.value)}
+                    disabled={pending}
+                    required
+                  />
+                </label>
+                <label>
+                  Brief
+                  <textarea
+                    value={brief}
+                    onChange={(event) => setBrief(event.target.value)}
+                    disabled={pending}
+                    required
+                  />
+                </label>
+                <label>
+                  Constraints (optional)
+                  <textarea
+                    value={constraints}
+                    onChange={(event) => setConstraints(event.target.value)}
+                    disabled={pending}
+                  />
+                </label>
+                <label>
+                  Assignment reason
+                  <input
+                    value={reason}
+                    onChange={(event) => setReason(event.target.value)}
+                    disabled={pending}
+                    required
+                  />
+                </label>
+                <button type="submit" disabled={pending || writerProfileId.length === 0}>
+                  {pending ? "Assigning…" : "Create Assignment"}
+                </button>
+                {profilesUnavailable ? <p role="alert">Writer Profiles are unavailable.</p> : null}
+                {submissionError ? <p role="alert">{submissionError}</p> : null}
+              </form>
+            </div>
           ) : assignment !== null ? (
             <div>
               <dl className={styles.receiptFacts}>
@@ -601,6 +796,7 @@ function PersistedStoryWorkspace({
           ) : (
             <p>No durable Assignment is recorded for this Story.</p>
           )}
+          <AssignmentEditorRuns runs={runs} />
         </section>
         <section aria-labelledby="activity-heading">
           <p className={styles.sectionNumber}>03</p>

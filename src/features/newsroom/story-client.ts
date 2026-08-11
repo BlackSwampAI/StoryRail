@@ -1,9 +1,11 @@
 import {
   SOURCE_EXTRACTION_FAILURE_CODES,
   PREPARATION_FAILURE_CODES,
+  MODEL_FAILURE_CODES,
   type EditorialActor,
   type AgentProfile,
   type Assignment,
+  type AgentRun,
   type SourceExtraction,
   type SourceEvidencePreparation,
   type Story,
@@ -55,6 +57,7 @@ export interface StoryClient {
       readonly transitionReceipt: StoryTransitionReceipt;
     }>
   >;
+  readonly generateAssignmentProposal: (storyId: string) => Promise<StoryClientResult<AgentRun>>;
 }
 
 const STORY_STATES = new Set([
@@ -70,6 +73,7 @@ const STORY_STATES = new Set([
 const AGENT_ROLES = new Set(["assignment_editor", "writer", "fact_checker", "editor_in_chief"]);
 const EXTRACTION_FAILURE_CODES = new Set<string>(SOURCE_EXTRACTION_FAILURE_CODES);
 const PREPARATION_FAILURE_CODE_SET = new Set<string>(PREPARATION_FAILURE_CODES);
+const MODEL_FAILURE_CODE_SET = new Set<string>(MODEL_FAILURE_CODES);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -330,6 +334,152 @@ function isTransition(value: unknown): value is StoryTransitionReceipt {
   );
 }
 
+function isAgentRun(value: unknown): value is AgentRun {
+  if (
+    !isRecord(value) ||
+    !isString(value.id) ||
+    value.id.trim().length === 0 ||
+    value.id !== value.id.trim() ||
+    !isString(value.storyId) ||
+    value.storyId.trim().length === 0 ||
+    value.storyId !== value.storyId.trim() ||
+    !isString(value.profileId) ||
+    value.profileId.trim().length === 0 ||
+    value.profileId !== value.profileId.trim() ||
+    value.role !== "assignment_editor" ||
+    value.operation !== "assignment_proposal" ||
+    !isRecord(value.model) ||
+    !hasExactKeys(value.model, ["provider", "model"]) ||
+    !isString(value.model.provider) ||
+    value.model.provider.trim().length === 0 ||
+    value.model.provider !== value.model.provider.trim() ||
+    !isString(value.model.model) ||
+    value.model.model.trim().length === 0 ||
+    value.model.model !== value.model.model.trim() ||
+    !isRecord(value.prompt) ||
+    !hasExactKeys(value.prompt, ["key", "version"]) ||
+    !isString(value.prompt.key) ||
+    value.prompt.key.trim().length === 0 ||
+    value.prompt.key !== value.prompt.key.trim() ||
+    !isString(value.prompt.version) ||
+    value.prompt.version.trim().length === 0 ||
+    value.prompt.version !== value.prompt.version.trim() ||
+    !isActor(value.requestedBy) ||
+    (value.requestedBy.type === "operator"
+      ? value.requestedBy.operatorId.trim().length === 0 ||
+        value.requestedBy.operatorId !== value.requestedBy.operatorId.trim()
+      : value.requestedBy.runId.trim().length === 0 ||
+        value.requestedBy.runId !== value.requestedBy.runId.trim()) ||
+    !isString(value.startedAt) ||
+    value.startedAt.trim().length === 0 ||
+    value.startedAt !== value.startedAt.trim() ||
+    !isString(value.completedAt) ||
+    value.completedAt.trim().length === 0 ||
+    value.completedAt !== value.completedAt.trim() ||
+    !isRecord(value.input) ||
+    !hasExactKeys(value.input, ["story", "evidence", "unavailableSourceIds", "writerProfileIds"]) ||
+    !isRecord(value.input.story) ||
+    !hasExactKeys(value.input.story, ["id", "title", "state", "revisionCycle"]) ||
+    value.input.story.id !== value.storyId ||
+    !isString(value.input.story.title) ||
+    value.input.story.title.trim().length === 0 ||
+    value.input.story.title !== value.input.story.title.trim() ||
+    !isString(value.input.story.state) ||
+    !STORY_STATES.has(value.input.story.state) ||
+    !Number.isInteger(value.input.story.revisionCycle) ||
+    !Array.isArray(value.input.evidence) ||
+    value.input.evidence.length === 0 ||
+    !Array.isArray(value.input.unavailableSourceIds) ||
+    !value.input.unavailableSourceIds.every(
+      (identity) =>
+        isString(identity) && identity.trim().length > 0 && identity === identity.trim(),
+    ) ||
+    new Set(value.input.unavailableSourceIds).size !== value.input.unavailableSourceIds.length ||
+    !Array.isArray(value.input.writerProfileIds) ||
+    value.input.writerProfileIds.length === 0 ||
+    !value.input.writerProfileIds.every(
+      (identity) =>
+        isString(identity) && identity.trim().length > 0 && identity === identity.trim(),
+    ) ||
+    new Set(value.input.writerProfileIds).size !== value.input.writerProfileIds.length
+  )
+    return false;
+  const sourceIds = new Set<string>();
+  for (const reference of value.input.evidence) {
+    if (
+      !isRecord(reference) ||
+      !hasExactKeys(reference, ["sourceId", "relevance", "evidenceKind", "evidenceId"]) ||
+      !isString(reference.sourceId) ||
+      reference.sourceId.trim().length === 0 ||
+      reference.sourceId !== reference.sourceId.trim() ||
+      sourceIds.has(reference.sourceId) ||
+      value.input.unavailableSourceIds.includes(reference.sourceId) ||
+      !isString(reference.relevance) ||
+      reference.relevance.trim().length === 0 ||
+      reference.relevance !== reference.relevance.trim() ||
+      (reference.evidenceKind !== "prepared" && reference.evidenceKind !== "raw") ||
+      !isString(reference.evidenceId) ||
+      reference.evidenceId.trim().length === 0 ||
+      reference.evidenceId !== reference.evidenceId.trim()
+    )
+      return false;
+    sourceIds.add(reference.sourceId);
+  }
+  const common = [
+    "id",
+    "storyId",
+    "profileId",
+    "role",
+    "operation",
+    "model",
+    "prompt",
+    "requestedBy",
+    "startedAt",
+    "completedAt",
+    "input",
+    "outcome",
+  ];
+  if (value.outcome === "succeeded") {
+    return (
+      hasExactKeys(value, [...common, "proposal"]) &&
+      isRecord(value.proposal) &&
+      hasExactKeys(value.proposal, [
+        "writerProfileId",
+        "angle",
+        "brief",
+        "constraints",
+        "reason",
+      ]) &&
+      isString(value.proposal.writerProfileId) &&
+      value.proposal.writerProfileId.trim().length > 0 &&
+      value.proposal.writerProfileId === value.proposal.writerProfileId.trim() &&
+      value.input.writerProfileIds.includes(value.proposal.writerProfileId) &&
+      isString(value.proposal.angle) &&
+      value.proposal.angle.trim().length > 0 &&
+      value.proposal.angle === value.proposal.angle.trim() &&
+      isString(value.proposal.brief) &&
+      value.proposal.brief.trim().length > 0 &&
+      value.proposal.brief === value.proposal.brief.trim() &&
+      (value.proposal.constraints === null ||
+        (isString(value.proposal.constraints) &&
+          value.proposal.constraints.trim().length > 0 &&
+          value.proposal.constraints === value.proposal.constraints.trim())) &&
+      isString(value.proposal.reason) &&
+      value.proposal.reason.trim().length > 0 &&
+      value.proposal.reason === value.proposal.reason.trim()
+    );
+  }
+  return (
+    value.outcome === "failed" &&
+    hasExactKeys(value, [...common, "failure"]) &&
+    isRecord(value.failure) &&
+    hasExactKeys(value.failure, ["code", "retryable"]) &&
+    isString(value.failure.code) &&
+    MODEL_FAILURE_CODE_SET.has(value.failure.code) &&
+    typeof value.failure.retryable === "boolean"
+  );
+}
+
 function isSource(value: unknown): value is UrlSource {
   return (
     isRecord(value) &&
@@ -356,11 +506,13 @@ function isAttachment(value: unknown): value is StorySourceAttachment {
 function isInspection(value: unknown): value is StoryInspection {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ["story", "sources", "assignment", "transitions"]) ||
+    !hasExactKeys(value, ["story", "sources", "assignment", "transitions", "agentRuns"]) ||
     !isStory(value.story) ||
     !Array.isArray(value.sources) ||
     !Array.isArray(value.transitions) ||
-    !value.transitions.every(isTransition)
+    !value.transitions.every(isTransition) ||
+    !Array.isArray(value.agentRuns) ||
+    !value.agentRuns.every(isAgentRun)
   ) {
     return false;
   }
@@ -377,6 +529,7 @@ function isInspection(value: unknown): value is StoryInspection {
   return (
     assignmentValid &&
     value.transitions.every((receipt) => receipt.storyId === story.id) &&
+    value.agentRuns.every((run) => run.storyId === story.id) &&
     value.sources.every((item) => {
       if (
         !isRecord(item) ||
@@ -442,7 +595,7 @@ async function request<Value>(
   input: string,
   init: RequestInit,
   successStatus: number,
-  successKey: "story" | "stories" | "attachment" | "inspection",
+  successKey: "story" | "stories" | "attachment" | "inspection" | "run",
   validate: (value: unknown) => value is Value,
   applicationErrors: Readonly<Record<number, ReadonlySet<string>>>,
 ): Promise<StoryClientResult<Value>> {
@@ -584,6 +737,22 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
         return unavailable();
       }
     },
+    generateAssignmentProposal: (storyId) =>
+      request(
+        dependencies.fetch,
+        `/api/stories/${encodeURIComponent(storyId)}/assignment-proposals`,
+        { method: "POST", headers: jsonHeaders, body: JSON.stringify({}) },
+        201,
+        "run",
+        isAgentRun,
+        {
+          400: new Set(["INVALID_JSON", "INVALID_REQUEST"]),
+          404: new Set(["STORY_NOT_FOUND"]),
+          409: new Set(["ASSIGNMENT_PROPOSAL_NOT_ALLOWED", "AGENT_RUN_ID_CONFLICT"]),
+          415: new Set(["UNSUPPORTED_MEDIA_TYPE"]),
+          422: new Set(["ASSIGNMENT_EDITOR_EVIDENCE_REQUIRED", "WRITER_PROFILE_REQUIRED"]),
+        },
+      ),
   };
 }
 
