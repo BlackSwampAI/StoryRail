@@ -6,3 +6,4 @@ export * from "./story-inspection";
 export * from "./story-listing";
 export * from "./story-source-persistence";
 export * from "./model";
+export * from "./agent-profile-persistence";

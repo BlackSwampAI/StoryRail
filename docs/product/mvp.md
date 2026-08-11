@@ -6,6 +6,8 @@ The first vertical slice uses Marvel Cinematic Universe (MCU) coverage to exerci
 
 The first four steps are implemented today. The remaining assignment, writing, review, Article, and publishing steps describe the planned completion of this vertical slice.
 
+Durable Agent Profiles now configure the future Assignment Editor, Writer, and Director roles. PostgreSQL seeds three immutable built-in profiles, and operators may create additional immutable Writer profiles with an optional provider-neutral model descriptor. Profiles are configuration only: they do not create Assignments, transition Stories, or execute models.
+
 1. Paste a URL.
 2. Preserve and extract the source.
 3. Review the immutable raw extraction in Source Inbox and optionally prepare cleaner evidence.
@@ -47,7 +49,7 @@ A provider-neutral durable Story inspection read model now returns one authorita
 
 A separate server-only Story runtime composes creation, Source attachment, listing, inspection, pending Source listing, and final Source triage persistence over one owned PostgreSQL Pool without requiring Firecrawl. Lazy Node.js Route Handlers additionally expose `GET /api/source-inbox` and `PUT /api/sources/{sourceId}/triage`. They provide exact JSON transport validation, stable expected-error status mapping, safe unexpected-failure responses, and operator provenance from `STORYRAIL_OPERATOR_ID`.
 
-Fixed operator provenance is not authentication, and the routes still must not be exposed publicly. Source intake never creates a Story or invokes a model automatically; manual preparation and triage are required. Story listing has no searching, filtering, pagination, polling, or browser persistence. Migrations remain external. Assignment Editor automation, Writer and Director model behavior, editable prompt/settings UI, Story transitions and assignments, authentication, graceful shutdown, and development hot-reload lifecycle policy remain deferred. StoryRail is therefore not yet an end-to-end operational editorial workflow, deployed system, or production-ready product.
+Fixed operator provenance is not authentication, and the routes still must not be exposed publicly. Source intake never creates a Story or invokes a model automatically; manual preparation and triage are required. Story listing has no searching, filtering, pagination, polling, or browser persistence. Migrations remain external. Assignment Editor automation, Writer and Director model behavior, profile editing/version management, Story transitions and assignments, authentication, graceful shutdown, and development hot-reload lifecycle policy remain deferred. StoryRail is therefore not yet an end-to-end operational editorial workflow, deployed system, or production-ready product.
 
 ## Full-slice acceptance criteria
 
@@ -69,7 +71,7 @@ These criteria describe the complete target slice and are only partially impleme
 - RSS automation
 - automatic clustering
 - semantic duplicate detection across Sources or Stories
-- multiple writer profiles
+- profile editing and version management
 - direct publishing integrations
 - image generation
 - full rich-text editing

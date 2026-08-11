@@ -47,7 +47,7 @@ flowchart LR
 
 Prepared Evidence is model-derived, cleaned evidence. It never replaces the immutable raw extraction; both histories remain available for audit and survive triage and reload.
 
-Assignment Editor, Writer, Director/editor-in-chief, Article generation, revision, approval, and publishing automation remain planned.
+Durable configuration profiles now exist for the Assignment Editor, Writer, and Director/editor-in-chief roles, but those agents do not execute. Assignments, Article generation, revision, approval, and publishing automation remain planned.
 
 ## What works today
 
@@ -60,12 +60,13 @@ Assignment Editor, Writer, Director/editor-in-chief, Article generation, revisio
 - Manual Prepared Evidence generation through a provider-neutral model boundary, LangChain, and OpenRouter.
 - Immutable successful and failed preparation history alongside the original raw evidence.
 - Reconstruction of raw and prepared evidence from PostgreSQL after triage or browser reload.
+- Immutable, PostgreSQL-backed Agent Profiles with built-in Assignment Editor, General Writer, and Director configurations plus custom Writer creation and optional provider-neutral model selection.
 
 ## Where StoryRail is going
 
 The planned alpha path continues from a Story through an Assignment Editor, a structured Assignment, a configurable Writer, a persisted Article, and independent Director/editor-in-chief review. The intended bounded revision loop ends in an operator-controlled approval or rejection, followed by a separate, explicit publish/export transition.
 
-Those agents and Article workflows are not operational today. Future work also includes configurable model/provider profiles, prompt and personality tooling, resolved triage history as editorial memory, and improved self-hosting packaging.
+Those agents and Article workflows are not operational today. Agent Profiles configure future work but do not contact a model. Future work also includes Assignment-linked profile use, mutable profile/version management, resolved triage history as editorial memory, and improved self-hosting packaging.
 
 ## Core concepts
 
@@ -75,6 +76,7 @@ Those agents and Article workflows are not operational today. Future work also i
 - **Source Inbox** — the queue of preserved Sources awaiting a final editorial decision.
 - **Triage Decision** — an attributable, durable choice to create a Story, attach to an existing Story, or skip coverage.
 - **Story** — the central editorial object that groups evidence and will carry work through the editorial lifecycle.
+- **Agent Profile** — an immutable configuration snapshot for a bounded editorial persona and optional provider-neutral model selection; profiles do not execute agents.
 - **Assignment, Writer, Director, and Article** — planned concepts for later stages of the alpha workflow.
 
 ## Architecture
@@ -119,7 +121,7 @@ Open [http://localhost:3000](http://localhost:3000) to use the development newsr
 | `STORYRAIL_EVIDENCE_PREPARATION_MODEL` | Prepared Evidence only            | Selects the OpenRouter model used for evidence preparation.                    |
 | `STORYRAIL_TEST_DATABASE_URL`          | PostgreSQL integration tests only | Points to a disposable database named exactly `storyrail_test`.                |
 
-Normal Story, Inbox, triage, and inspection workflows do not require Firecrawl or OpenRouter. Raw URL intake requires Firecrawl but not OpenRouter.
+Normal Story, Inbox, triage, inspection, and Agent Profile workflows do not require Firecrawl or OpenRouter. Raw URL intake requires Firecrawl but not OpenRouter.
 
 ## Development and validation
 

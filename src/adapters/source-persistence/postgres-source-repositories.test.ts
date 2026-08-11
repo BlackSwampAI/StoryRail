@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import {
   agentRunId,
+  agentProfileId,
   intakeUrlSource,
   operatorId,
   sourceEvidencePreparationId,
@@ -14,6 +15,7 @@ import {
   storyId,
   STORY_STATES,
   type AgentActor,
+  type AgentProfile,
   type CanonicalSourceUrl,
   type FailedSourceExtraction,
   type OperatorActor,
@@ -30,6 +32,7 @@ import { describeStoryInspectionRepositoryContract } from "@/application/story-i
 import { describeStoryListingRepositoryContract } from "@/application/story-listing/story-listing-repository.contract";
 import { describeStoryRepositoryContract } from "@/application/story-persistence/story-repository.contract";
 import { describeStorySourceAttachmentRepositoryContract } from "@/application/story-source-persistence/story-source-attachment-repository.contract";
+import { describeAgentProfileRepositoryContract } from "@/application/agent-profiles/agent-profile-repository.contract";
 
 import { createPostgresSourceRepositories } from "./postgres-source-repositories";
 import { createPostgresStoryInspectionRepository } from "../story-inspection/postgres-story-inspection-repository";
@@ -39,6 +42,7 @@ import { createPostgresStorySourceAttachmentRepository } from "../story-source-p
 import { createPostgresSourceInboxRepository } from "../source-inbox/postgres-source-inbox-repository";
 import { createPostgresSourceTriageDecisionRepository } from "../source-triage-persistence/postgres-source-triage-decision-repository";
 import { createPostgresSourceEvidencePreparationRepository } from "../source-evidence-preparation-persistence/postgres-source-evidence-preparation-repository";
+import { createPostgresAgentProfileRepository } from "../agent-profile-persistence/postgres-agent-profile-repository";
 
 const databaseUrl = process.env.STORYRAIL_TEST_DATABASE_URL;
 const describePostgres = databaseUrl ? describe : describe.skip;
@@ -58,6 +62,10 @@ const triageMigrationPath = resolve(
 const preparationMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0025-source-evidence-preparations.sql",
+);
+const agentProfileMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0027-agent-profiles.sql",
 );
 
 const OPERATOR: OperatorActor = {
@@ -222,6 +230,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let attachmentMigrationSql: string;
   let triageMigrationSql: string;
   let preparationMigrationSql: string;
+  let agentProfileMigrationSql: string;
   let destructiveSetupAllowed = false;
 
   beforeAll(async () => {
@@ -230,6 +239,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     attachmentMigrationSql = await readFile(attachmentMigrationPath, "utf8");
     triageMigrationSql = await readFile(triageMigrationPath, "utf8");
     preparationMigrationSql = await readFile(preparationMigrationPath, "utf8");
+    agentProfileMigrationSql = await readFile(agentProfileMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -251,6 +261,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await client.query(attachmentMigrationSql);
       await client.query(triageMigrationSql);
       await client.query(preparationMigrationSql);
+      await client.query(agentProfileMigrationSql);
     } finally {
       client.release();
     }
@@ -261,6 +272,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       throw new Error("PostgreSQL test database safety guard did not pass.");
     }
 
+    await pool.query("DELETE FROM storyrail.agent_profiles WHERE built_in = false");
     await pool.query(
       "TRUNCATE storyrail.source_evidence_preparations, storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.stories RESTART IDENTITY",
     );
@@ -380,6 +392,92 @@ describePostgres("PostgreSQL persistence repositories", () => {
         });
       },
     };
+  });
+  describeAgentProfileRepositoryContract(() => createPostgresAgentProfileRepository({ pool }));
+
+  describe("Agent Profiles", () => {
+    const BUILT_INS: readonly AgentProfile[] = [
+      {
+        id: agentProfileId("storyrail-assignment-editor-v1"),
+        role: "assignment_editor",
+        name: "Assignment Editor",
+        instructions:
+          "Assess evidence and editorial value, choose a bounded disposition, and prepare a focused assignment without exceeding the available evidence.",
+        model: null,
+        builtIn: true,
+      },
+      {
+        id: agentProfileId("storyrail-general-writer-v1"),
+        role: "writer",
+        name: "General Writer",
+        instructions:
+          "Produce original editorial work within the assignment scope, grounded in the supplied evidence, and never invent unsupported facts.",
+        model: null,
+        builtIn: true,
+      },
+      {
+        id: agentProfileId("storyrail-director-v1"),
+        role: "editor_in_chief",
+        name: "Director",
+        instructions:
+          "Independently review work against its assignment and evidence, then approve or request changes within StoryRail's bounded review policy.",
+        model: null,
+        builtIn: true,
+      },
+    ];
+
+    it("seeds the three stable built-in identities in presentation order", async () => {
+      await expect(createPostgresAgentProfileRepository({ pool }).list()).resolves.toEqual(
+        BUILT_INS,
+      );
+    });
+
+    it("reconstructs an appended custom Writer through a new repository instance", async () => {
+      const custom: AgentProfile = {
+        id: agentProfileId("custom-postgres-0027"),
+        role: "writer",
+        name: "Specialist Writer",
+        instructions: "Cover the bounded specialist angle from supplied evidence.",
+        model: { provider: "provider", model: "model-id" },
+        builtIn: false,
+      };
+      await createPostgresAgentProfileRepository({ pool }).append(custom);
+      await expect(createPostgresAgentProfileRepository({ pool }).list()).resolves.toEqual([
+        ...BUILT_INS,
+        custom,
+      ]);
+    });
+
+    it("rejects malformed persisted profile payload during invariant decoding", async () => {
+      const custom: AgentProfile = {
+        id: agentProfileId("malformed-postgres-0027"),
+        role: "writer",
+        name: "Malformed Writer",
+        instructions: "Valid before controlled corruption.",
+        model: null,
+        builtIn: false,
+      };
+      await createPostgresAgentProfileRepository({ pool }).append(custom);
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(
+          "ALTER TABLE storyrail.agent_profiles DROP CONSTRAINT agent_profiles_payload_exact_shape_check",
+        );
+        await client.query(
+          `UPDATE storyrail.agent_profiles
+           SET payload = payload || '{"unexpected":true}'::jsonb
+           WHERE profile_id = $1`,
+          [custom.id],
+        );
+        await expect(
+          createPostgresAgentProfileRepository({ pool: client as unknown as Pool }).list(),
+        ).rejects.toMatchObject({ name: "PostgresAgentProfileInvariantError" });
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    });
   });
 
   describe("Source Inbox and triage", () => {
@@ -628,6 +726,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       );
 
       expect(tables.rows.map((row) => row.table_name)).toEqual([
+        "agent_profiles",
         "source_evidence_preparations",
         "source_extractions",
         "source_triage_decisions",
@@ -637,6 +736,34 @@ describePostgres("PostgreSQL persistence repositories", () => {
       ]);
       expect(columns.rows).toEqual(
         expect.arrayContaining([
+          {
+            table_name: "agent_profiles",
+            column_name: "profile_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "agent_profiles",
+            column_name: "role",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "agent_profiles",
+            column_name: "built_in",
+            data_type: "boolean",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "agent_profiles",
+            column_name: "payload",
+            data_type: "jsonb",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
           {
             table_name: "source_evidence_preparations",
             column_name: "preparation_id",
@@ -814,7 +941,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           },
         ]),
       );
-      expect(columns.rows).toHaveLength(25);
+      expect(columns.rows).toHaveLength(29);
     });
 
     it("creates the required primary, unique, foreign-key, and check constraints", async () => {
@@ -836,6 +963,21 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
       expect(constraints.rows).toEqual(
         expect.arrayContaining([
+          {
+            table_name: "agent_profiles",
+            constraint_name: "agent_profiles_pkey",
+            constraint_type: "p",
+          },
+          {
+            table_name: "agent_profiles",
+            constraint_name: "agent_profiles_payload_identity_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "agent_profiles",
+            constraint_name: "agent_profiles_payload_model_check",
+            constraint_type: "c",
+          },
           {
             table_name: "source_evidence_preparations",
             constraint_name: "source_evidence_preparations_extraction_source_fkey",
@@ -1114,27 +1256,47 @@ describePostgres("PostgreSQL persistence repositories", () => {
       );
       expect(foreignKey.rows[0]?.definition).toContain("ON UPDATE RESTRICT ON DELETE RESTRICT");
 
-      const preparationForeignKey = await pool.query<{ definition: string }>(
-        `SELECT pg_get_constraintdef(con.oid) AS definition
+      const preparationForeignKey = await pool.query<{
+        definition: string;
+        referenced_schema: string;
+        referenced_table: string;
+      }>(
+        `SELECT pg_get_constraintdef(con.oid) AS definition,
+                referenced_namespace.nspname AS referenced_schema,
+                referenced_rel.relname AS referenced_table
          FROM pg_constraint AS con
          JOIN pg_class AS rel ON rel.oid = con.conrelid
          JOIN pg_namespace AS namespace ON namespace.oid = rel.relnamespace
+         JOIN pg_class AS referenced_rel ON referenced_rel.oid = con.confrelid
+         JOIN pg_namespace AS referenced_namespace
+           ON referenced_namespace.oid = referenced_rel.relnamespace
          WHERE namespace.nspname = 'storyrail'
            AND con.conname = 'source_evidence_preparations_extraction_source_fkey'`,
       );
-      expect(preparationForeignKey.rows[0]?.definition).toBe(
-        "FOREIGN KEY (extraction_id, source_id) REFERENCES storyrail.source_extractions(extraction_id, source_id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-      );
+      expect(preparationForeignKey.rows[0]).toEqual({
+        definition: expect.stringMatching(
+          /^FOREIGN KEY \(extraction_id, source_id\) REFERENCES (?:storyrail\.)?source_extractions\(extraction_id, source_id\) ON UPDATE RESTRICT ON DELETE RESTRICT$/,
+        ),
+        referenced_schema: "storyrail",
+        referenced_table: "source_extractions",
+      });
 
       const attachmentForeignKeys = await pool.query<{
         constraint_name: string;
         definition: string;
+        referenced_schema: string;
+        referenced_table: string;
       }>(
         `SELECT con.conname AS constraint_name,
-                pg_get_constraintdef(con.oid) AS definition
+                pg_get_constraintdef(con.oid) AS definition,
+                referenced_namespace.nspname AS referenced_schema,
+                referenced_rel.relname AS referenced_table
          FROM pg_constraint AS con
          JOIN pg_class AS rel ON rel.oid = con.conrelid
          JOIN pg_namespace AS namespace ON namespace.oid = rel.relnamespace
+         JOIN pg_class AS referenced_rel ON referenced_rel.oid = con.confrelid
+         JOIN pg_namespace AS referenced_namespace
+           ON referenced_namespace.oid = referenced_rel.relnamespace
          WHERE namespace.nspname = 'storyrail'
            AND rel.relname = 'story_source_attachments'
            AND con.contype = 'f'
@@ -1143,13 +1305,19 @@ describePostgres("PostgreSQL persistence repositories", () => {
       expect(attachmentForeignKeys.rows).toEqual([
         {
           constraint_name: "story_source_attachments_source_id_fkey",
-          definition:
-            "FOREIGN KEY (source_id) REFERENCES storyrail.url_sources(source_id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+          definition: expect.stringMatching(
+            /^FOREIGN KEY \(source_id\) REFERENCES (?:storyrail\.)?url_sources\(source_id\) ON UPDATE RESTRICT ON DELETE RESTRICT$/,
+          ),
+          referenced_schema: "storyrail",
+          referenced_table: "url_sources",
         },
         {
           constraint_name: "story_source_attachments_story_id_fkey",
-          definition:
-            "FOREIGN KEY (story_id) REFERENCES storyrail.stories(story_id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+          definition: expect.stringMatching(
+            /^FOREIGN KEY \(story_id\) REFERENCES (?:storyrail\.)?stories\(story_id\) ON UPDATE RESTRICT ON DELETE RESTRICT$/,
+          ),
+          referenced_schema: "storyrail",
+          referenced_table: "stories",
         },
       ]);
     });
@@ -2521,6 +2689,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         await pool.query(attachmentMigrationSql);
         await pool.query(triageMigrationSql);
         await pool.query(preparationMigrationSql);
+        await pool.query(agentProfileMigrationSql);
       }
     });
 
