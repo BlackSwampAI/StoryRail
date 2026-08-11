@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -208,7 +208,7 @@ describe("NewsroomShell", () => {
     expect(screen.getByText("No agents are running")).toBeVisible();
   });
 
-  it("shows prepared evidence before retained raw evidence after authoritative Story reopen", async () => {
+  it("keeps editorial evidence primary while retaining Story, Source, and raw audit details", async () => {
     const source = {
       id: sourceId("source-story-prepared-25"),
       type: "url" as const,
@@ -284,13 +284,48 @@ describe("NewsroomShell", () => {
     };
     render(<NewsroomShell storyRequests={requests} sourceInboxRequests={inboxRequests()} />);
     fireEvent.click(await screen.findByRole("button", { name: /Persisted Story/ }));
-    const preparedHeading = await screen.findByRole("heading", { name: "Prepared evidence" });
-    const rawHeading = screen.getByRole("heading", { name: "Raw evidence" });
+    expect(await screen.findByRole("heading", { name: "Prepared evidence" })).toBeVisible();
     expect(screen.getByText("# Prepared Story evidence")).toBeVisible();
+    expect(screen.getByRole("link", { name: source.canonicalUrl })).toBeVisible();
+    expect(screen.getByText("Relevant")).toBeVisible();
+
+    const storyDetails = screen.getByText("Technical Story details").closest("details");
+    expect(storyDetails).not.toHaveAttribute("open");
+    expect(screen.getByText(STORY.id)).not.toBeVisible();
+    expect(screen.getByText(STORY.createdAt)).not.toBeVisible();
+    expect(screen.getByText(STORY.updatedAt)).not.toBeVisible();
+    fireEvent.click(screen.getByText("Technical Story details"));
+    expect(screen.getByText(STORY.id)).toBeVisible();
+    expect(screen.getByText(STORY.createdAt)).toBeVisible();
+    expect(screen.getByText(STORY.updatedAt)).toBeVisible();
+
+    const sourceDetails = screen.getByText("Technical source details").closest("details");
+    expect(sourceDetails).not.toHaveAttribute("open");
+    const technicalSourceDetails = within(sourceDetails as HTMLElement);
+    for (const actor of technicalSourceDetails.getAllByText("operator: operator-25")) {
+      expect(actor).not.toBeVisible();
+    }
+    expect(technicalSourceDetails.getByText(source.id)).not.toBeVisible();
+    expect(technicalSourceDetails.getByText("received")).not.toBeVisible();
+    expect(technicalSourceDetails.getByText("attached")).not.toBeVisible();
+    fireEvent.click(screen.getByText("Technical source details"));
+    for (const actor of technicalSourceDetails.getAllByText("operator: operator-25")) {
+      expect(actor).toBeVisible();
+    }
+    expect(technicalSourceDetails.getByText(source.id)).toBeVisible();
+    expect(technicalSourceDetails.getByText("received")).toBeVisible();
+    expect(technicalSourceDetails.getByText("attached")).toBeVisible();
+
+    const rawHistorySummary = screen.getByText("Raw extraction history");
+    expect(rawHistorySummary.closest("details")).not.toHaveAttribute("open");
+    expect(screen.getByText("1 attempt · latest succeeded")).toBeVisible();
+    expect(screen.getByText("# Raw Story evidence")).not.toBeVisible();
+    fireEvent.click(rawHistorySummary);
     expect(screen.getByText("# Raw Story evidence")).toBeVisible();
-    expect(
-      preparedHeading.compareDocumentPosition(rawHeading) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    expect(screen.getByText("Technical extraction record")).toBeVisible();
+
+    expect(screen.getByRole("heading", { name: "Assignment" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Activity" })).toBeVisible();
   });
 
   it("loads the database-only Source Inbox as a distinct workspace", async () => {

@@ -254,6 +254,10 @@
   padding: clamp(2rem, 6vw, 5rem) clamp(1.25rem, 6vw, 5rem);
 }
 
+.storyWorkspace {
+  container-type: inline-size;
+}
+
 .agentsWorkspace {
   display: grid;
   gap: 2rem;
@@ -713,10 +717,43 @@
 }
 
 .rawExtractionHistory > summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
   cursor: pointer;
   color: #e8f0eb;
   font-family: Georgia, "Times New Roman", serif;
   font-size: 1.1rem;
+}
+
+.disclosureLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.disclosureChevron {
+  display: inline-block;
+  color: #82cfb2;
+  font-family: system-ui, sans-serif;
+  font-size: 0.9rem;
+  transition: transform 140ms ease;
+}
+
+.rawExtractionHistory[open] .disclosureChevron {
+  transform: rotate(90deg);
+}
+
+.rawExtractionHistory > summary:hover .disclosureLabel {
+  color: #f4f8f5;
+}
+
+.rawExtractionHistory > summary > span:last-child {
+  color: #91a69c;
+  font-family: inherit;
+  font-size: 0.76rem;
+  white-space: nowrap;
 }
 
 .storyCreation {
@@ -875,10 +912,17 @@
   margin: 0.7rem 0 0;
   color: #f4f7f5;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(2.15rem, 5vw, 4.5rem);
   font-weight: 500;
   letter-spacing: -0.05em;
   line-height: 1.02;
+}
+
+.workspaceHeader h2 {
+  font-size: clamp(2.15rem, 3.8vw, 3.6rem);
+}
+
+.emptyWorkspace h2 {
+  font-size: clamp(2.15rem, 5vw, 4.5rem);
 }
 
 .stateBadge,
@@ -906,13 +950,13 @@
 .storyFacts {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin: 2.75rem 0 0;
+  margin: 1.75rem 0 0;
   border-block: 1px solid #29443a;
 }
 
 .storyFacts div {
   min-width: 0;
-  padding: 1.25rem 1.5rem 1.25rem 0;
+  padding: 0.9rem 1.5rem 0.9rem 0;
 }
 
 .storyFacts div + div {
@@ -937,23 +981,6 @@
   font-size: 1.1rem;
 }
 
-.timestamps {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1.5rem;
-  margin: 1rem 0 0;
-  color: #7f9289;
-  font-size: 0.72rem;
-}
-
-.timestamps p {
-  margin: 0;
-}
-
-.timestamps time {
-  color: #a9b8b1;
-}
-
 .auditFact {
   margin: 0.7rem 0 0;
   overflow-wrap: anywhere;
@@ -961,8 +988,22 @@
   font-size: 0.68rem;
 }
 
+.technicalDetails {
+  margin-top: 0.85rem;
+  color: #91a69c;
+  font-size: 0.8rem;
+}
+
+.technicalDetails > summary {
+  cursor: pointer;
+}
+
+.technicalDetails .receiptFacts {
+  margin-top: 0.85rem;
+}
+
 .persistedSources {
-  margin-top: 3.5rem;
+  margin-top: 2.25rem;
 }
 
 .persistedSources > .sectionNumber {
@@ -990,11 +1031,21 @@
   color: #9de0c5;
 }
 
+.primarySourceFacts {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .workspaceSections {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
   margin-top: 3.5rem;
+}
+
+@container (max-width: 44rem) {
+  .workspaceSections {
+    grid-template-columns: 1fr;
+  }
 }
 
 .workspaceSections section {

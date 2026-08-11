@@ -342,26 +342,39 @@ function PersistedStoryWorkspace({
           <dd>{sources.length}</dd>
         </div>
       </dl>
-      <div className={styles.timestamps}>
-        <p>
-          Created <time dateTime={story.createdAt}>{story.createdAt}</time>
-        </p>
-        <p>
-          Updated <time dateTime={story.updatedAt}>{story.updatedAt}</time>
-        </p>
-      </div>
-      <p className={styles.auditFact}>Story ID: {story.id}</p>
       {notice ? (
         <p role="status" className={styles.auditFact}>
           {notice}
         </p>
       ) : null}
+      <details className={styles.technicalDetails}>
+        <summary>Technical Story details</summary>
+        <dl className={styles.receiptFacts}>
+          <div>
+            <dt>Story ID</dt>
+            <dd>{story.id}</dd>
+          </div>
+          <div>
+            <dt>Created</dt>
+            <dd>
+              <time dateTime={story.createdAt}>{story.createdAt}</time>
+            </dd>
+          </div>
+          <div>
+            <dt>Updated</dt>
+            <dd>
+              <time dateTime={story.updatedAt}>{story.updatedAt}</time>
+            </dd>
+          </div>
+        </dl>
+      </details>
 
       <div className={styles.persistedSources}>
         <p className={styles.sectionNumber}>01</p>
         <h3>Attached Sources</h3>
         {sources.map(({ attachment, source, extractions, preparations }) => {
           const canonicalHref = safeUrl(source.canonicalUrl);
+          const latestExtraction = extractions.at(-1);
           return (
             <section className={styles.persistedSource} key={`${story.id}:${source.id}`}>
               <h4>
@@ -373,40 +386,45 @@ function PersistedStoryWorkspace({
                   </a>
                 )}
               </h4>
-              <dl className={styles.receiptFacts}>
-                <div>
-                  <dt>Submitted URL</dt>
-                  <dd>{source.submittedUrl}</dd>
-                </div>
+              <dl className={`${styles.receiptFacts} ${styles.primarySourceFacts}`}>
                 <div>
                   <dt>Relevance</dt>
                   <dd>{attachment.relevance}</dd>
                 </div>
-                <div>
-                  <dt>Source provenance</dt>
-                  <dd>{actorLabel(source.submittedBy)}</dd>
-                </div>
-                <div>
-                  <dt>Source received</dt>
-                  <dd>
-                    <time dateTime={source.receivedAt}>{source.receivedAt}</time>
-                  </dd>
-                </div>
-                <div>
-                  <dt>Attachment provenance</dt>
-                  <dd>{actorLabel(attachment.attachedBy)}</dd>
-                </div>
-                <div>
-                  <dt>Attached</dt>
-                  <dd>
-                    <time dateTime={attachment.attachedAt}>{attachment.attachedAt}</time>
-                  </dd>
-                </div>
-                <div>
-                  <dt>Source ID</dt>
-                  <dd>{source.id}</dd>
-                </div>
               </dl>
+              <details className={styles.technicalDetails}>
+                <summary>Technical source details</summary>
+                <dl className={styles.receiptFacts}>
+                  <div>
+                    <dt>Submitted URL</dt>
+                    <dd>{source.submittedUrl}</dd>
+                  </div>
+                  <div>
+                    <dt>Source provenance</dt>
+                    <dd>{actorLabel(source.submittedBy)}</dd>
+                  </div>
+                  <div>
+                    <dt>Source received</dt>
+                    <dd>
+                      <time dateTime={source.receivedAt}>{source.receivedAt}</time>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Attachment provenance</dt>
+                    <dd>{actorLabel(attachment.attachedBy)}</dd>
+                  </div>
+                  <div>
+                    <dt>Attached</dt>
+                    <dd>
+                      <time dateTime={attachment.attachedAt}>{attachment.attachedAt}</time>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Source ID</dt>
+                    <dd>{source.id}</dd>
+                  </div>
+                </dl>
+              </details>
               <div className={styles.persistedEvidence}>
                 <h5>Prepared evidence</h5>
                 {preparations.length === 0 ? (
@@ -422,18 +440,35 @@ function PersistedStoryWorkspace({
                     />
                   ))
                 )}
-                <h5>Raw evidence</h5>
-                {extractions.length === 0 ? (
-                  <p className={styles.noExtraction}>No extraction is recorded for this Source.</p>
-                ) : (
-                  extractions.map((extraction, index) => (
-                    <PersistedExtractionAttempt
-                      extraction={extraction}
-                      attemptNumber={index + 1}
-                      key={extraction.id}
-                    />
-                  ))
-                )}
+                <details className={styles.rawExtractionHistory}>
+                  <summary>
+                    <span className={styles.disclosureLabel}>
+                      <span className={styles.disclosureChevron} aria-hidden="true">
+                        ▸
+                      </span>
+                      Raw extraction history
+                    </span>
+                    <span>
+                      {extractions.length} {extractions.length === 1 ? "attempt" : "attempts"}
+                      {latestExtraction === undefined
+                        ? ""
+                        : ` · latest ${latestExtraction.outcome}`}
+                    </span>
+                  </summary>
+                  {extractions.length === 0 ? (
+                    <p className={styles.noExtraction}>
+                      No extraction is recorded for this Source.
+                    </p>
+                  ) : (
+                    extractions.map((extraction, index) => (
+                      <PersistedExtractionAttempt
+                        extraction={extraction}
+                        attemptNumber={index + 1}
+                        key={extraction.id}
+                      />
+                    ))
+                  )}
+                </details>
               </div>
             </section>
           );
