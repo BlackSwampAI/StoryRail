@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   agentProfileId,
+  agentRunId,
   assignmentId,
   operatorId,
   sourceEvidencePreparationId,
@@ -49,9 +50,13 @@ function storyRequests(): StoryClient {
     })),
     inspectStory: vi.fn<StoryClient["inspectStory"]>(async () => ({
       kind: "completed",
-      value: { story: STORY, sources: [], assignment: null, transitions: [] },
+      value: { story: STORY, sources: [], assignment: null, transitions: [], agentRuns: [] },
     })),
     assignStory: vi.fn<StoryClient["assignStory"]>(async () => ({
+      kind: "unavailable",
+      message: "The Story request could not be completed.",
+    })),
+    generateAssignmentProposal: vi.fn<StoryClient["generateAssignmentProposal"]>(async () => ({
       kind: "unavailable",
       message: "The Story request could not be completed.",
     })),
@@ -89,6 +94,119 @@ function agentRequests(): AgentProfileClient {
 }
 
 describe("NewsroomShell", () => {
+  it("prefills the existing editable form from a supervised suggestion without assigning", async () => {
+    const writer = {
+      id: agentProfileId("writer-0030"),
+      role: "writer" as const,
+      name: "Suggested Writer",
+      instructions: "Write from evidence.",
+      model: null,
+      builtIn: false,
+    };
+    const run = {
+      id: agentRunId("run-0030"),
+      storyId: STORY.id,
+      profileId: agentProfileId("storyrail-assignment-editor-v1"),
+      role: "assignment_editor" as const,
+      operation: "assignment_proposal" as const,
+      model: { provider: "openrouter", model: "provider/model" },
+      prompt: { key: "storyrail_assignment_editor", version: "1" },
+      requestedBy: { type: "operator" as const, operatorId: operatorId("operator-0030") },
+      startedAt: "started",
+      completedAt: "completed",
+      input: {
+        story: { id: STORY.id, title: STORY.title, state: "intake" as const, revisionCycle: 0 },
+        evidence: [],
+        unavailableSourceIds: [],
+        writerProfileIds: [writer.id],
+      },
+      outcome: "succeeded" as const,
+      proposal: {
+        writerProfileId: writer.id,
+        angle: "Suggested angle",
+        brief: "Suggested brief",
+        constraints: "Suggested constraint",
+        reason: "Suggested reason",
+      },
+    };
+    const requests: StoryClient = {
+      ...storyRequests(),
+      generateAssignmentProposal: vi.fn<StoryClient["generateAssignmentProposal"]>(async () => ({
+        kind: "completed",
+        value: run,
+      })),
+    };
+    const profiles: AgentProfileClient = {
+      ...agentRequests(),
+      listProfiles: vi.fn<AgentProfileClient["listProfiles"]>(async () => ({
+        kind: "completed",
+        value: [writer],
+      })),
+    };
+    render(
+      <NewsroomShell
+        storyRequests={requests}
+        sourceInboxRequests={inboxRequests()}
+        agentProfileRequests={profiles}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /Persisted Story/ }));
+    expect(await screen.findByText(/Generates a suggestion only/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Ask Assignment Editor" }));
+    expect(await screen.findByDisplayValue("Suggested angle")).toBeVisible();
+    expect(screen.getByDisplayValue("Suggested brief")).toBeVisible();
+    expect(screen.getByDisplayValue("Suggested constraint")).toBeVisible();
+    expect(screen.getByDisplayValue("Suggested reason")).toBeVisible();
+    fireEvent.change(screen.getByLabelText("Angle"), {
+      target: { value: "Operator-edited angle" },
+    });
+    expect(screen.getByDisplayValue("Operator-edited angle")).toBeVisible();
+    expect(requests.assignStory).not.toHaveBeenCalled();
+    expect(screen.getAllByText("Intake")[0]).toBeVisible();
+    fireEvent.click(screen.getByText("Assignment Editor runs"));
+    fireEvent.click(screen.getByText("Technical AgentRun record"));
+    expect(screen.getByText("Run ID: run-0030")).toBeVisible();
+    expect(screen.queryByText(/chain-of-thought/i)).not.toBeInTheDocument();
+  });
+
+  it("shows a failed run without clearing manually entered Assignment fields", async () => {
+    const failedRun = {
+      id: agentRunId("run-failed-0030"),
+      storyId: STORY.id,
+      profileId: agentProfileId("storyrail-assignment-editor-v1"),
+      role: "assignment_editor" as const,
+      operation: "assignment_proposal" as const,
+      model: { provider: "openrouter", model: "provider/model" },
+      prompt: { key: "storyrail_assignment_editor", version: "1" },
+      requestedBy: { type: "operator" as const, operatorId: operatorId("operator-0030") },
+      startedAt: "started",
+      completedAt: "completed",
+      input: {
+        story: { id: STORY.id, title: STORY.title, state: "intake" as const, revisionCycle: 0 },
+        evidence: [],
+        unavailableSourceIds: [],
+        writerProfileIds: [agentProfileId("writer-0030")],
+      },
+      outcome: "failed" as const,
+      failure: { code: "MODEL_REQUEST_FAILED" as const, retryable: true },
+    };
+    const requests: StoryClient = {
+      ...storyRequests(),
+      generateAssignmentProposal: vi.fn<StoryClient["generateAssignmentProposal"]>(async () => ({
+        kind: "completed",
+        value: failedRun,
+      })),
+    };
+    render(<NewsroomShell storyRequests={requests} sourceInboxRequests={inboxRequests()} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Persisted Story/ }));
+    fireEvent.change(await screen.findByLabelText("Angle"), { target: { value: "Manual angle" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ask Assignment Editor" }));
+    expect(
+      await screen.findByText(/^Assignment Editor failed: MODEL_REQUEST_FAILED/),
+    ).toBeVisible();
+    expect(screen.getByDisplayValue("Manual angle")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Ask Assignment Editor" })).toBeEnabled();
+  });
   it("shows only Writer Profiles and moves a successfully assigned Story to Assigned with activity", async () => {
     const writer = {
       id: agentProfileId("writer-0028"),
@@ -148,7 +266,7 @@ describe("NewsroomShell", () => {
         .fn<StoryClient["inspectStory"]>()
         .mockResolvedValueOnce({
           kind: "completed",
-          value: { story: STORY, sources: [], assignment: null, transitions: [] },
+          value: { story: STORY, sources: [], assignment: null, transitions: [], agentRuns: [] },
         })
         .mockResolvedValueOnce({
           kind: "completed",
@@ -157,6 +275,7 @@ describe("NewsroomShell", () => {
             sources: [],
             assignment: { assignment, writerProfile: writer },
             transitions: [receipt],
+            agentRuns: [],
           },
         }),
     };
@@ -279,6 +398,7 @@ describe("NewsroomShell", () => {
           ],
           assignment: null,
           transitions: [],
+          agentRuns: [],
         },
       })),
     };

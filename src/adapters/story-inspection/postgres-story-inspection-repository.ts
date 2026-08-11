@@ -4,6 +4,7 @@ import type { Pool, QueryResultRow } from "pg";
 
 import type {
   AgentProfile,
+  AgentRun,
   Assignment,
   AgentRole,
   AgentRunId,
@@ -30,6 +31,7 @@ import {
   decodePostgresAssignment,
   decodePostgresTransitionReceipt,
 } from "../assignment-persistence/postgres-assignment-decoder";
+import { decodePostgresAgentRun } from "../agent-run-persistence/postgres-agent-run-decoder";
 
 export interface CreatePostgresStoryInspectionRepositoryOptions {
   readonly pool: Pool;
@@ -58,6 +60,7 @@ interface StoryInspectionRow extends QueryResultRow {
   readonly profile_built_in: unknown;
   readonly profile_payload: unknown;
   readonly transition_rows: unknown;
+  readonly agent_run_rows: unknown;
 }
 
 interface AssembledStoryInspectionSource {
@@ -317,6 +320,41 @@ function decodeTransitions(row: StoryInspectionRow): StoryTransitionReceipt[] {
   });
 }
 
+function decodeAgentRuns(row: StoryInspectionRow): AgentRun[] {
+  if (!Array.isArray(row.agent_run_rows)) throw invariantError();
+  return row.agent_run_rows.map((value) => {
+    if (
+      !isRecord(value) ||
+      !hasExactKeys(value, [
+        "run_id",
+        "story_id",
+        "profile_id",
+        "role",
+        "operation",
+        "outcome",
+        "payload",
+      ])
+    )
+      throw invariantError();
+    let run: AgentRun;
+    try {
+      run = decodePostgresAgentRun({
+        run_id: value.run_id,
+        story_id: value.story_id,
+        profile_id: value.profile_id,
+        role: value.role,
+        operation: value.operation,
+        outcome: value.outcome,
+        payload: value.payload,
+      });
+    } catch {
+      throw invariantError();
+    }
+    if (run.storyId !== row.story_id) throw invariantError();
+    return run;
+  });
+}
+
 export function createPostgresStoryInspectionRepository(
   options: CreatePostgresStoryInspectionRepositoryOptions,
 ): StoryInspectionRepository {
@@ -365,7 +403,20 @@ export function createPostgresStoryInspectionRepository(
                   ) ORDER BY transition.append_position ASC)
                   FROM storyrail.story_transition_receipts AS transition
                   WHERE transition.story_id = story.story_id
-                ), '[]'::jsonb) AS transition_rows
+                ), '[]'::jsonb) AS transition_rows,
+                COALESCE((
+                  SELECT jsonb_agg(jsonb_build_object(
+                    'run_id', run.run_id,
+                    'story_id', run.story_id,
+                    'profile_id', run.profile_id,
+                    'role', run.role,
+                    'operation', run.operation,
+                    'outcome', run.outcome,
+                    'payload', run.payload
+                  ) ORDER BY run.append_position ASC)
+                  FROM storyrail.agent_runs AS run
+                  WHERE run.story_id = story.story_id
+                ), '[]'::jsonb) AS agent_run_rows
          FROM storyrail.stories AS story
          LEFT JOIN storyrail.story_source_attachments AS attachment
            ON attachment.story_id = story.story_id
@@ -402,6 +453,7 @@ export function createPostgresStoryInspectionRepository(
       const sources: AssembledStoryInspectionSource[] = [];
       const assignment = decodeAssignment(firstRow);
       const transitions = decodeTransitions(firstRow);
+      const agentRuns = decodeAgentRuns(firstRow);
       const seenSourceIds = new Set<SourceId>();
 
       for (const row of result.rows) {
@@ -411,7 +463,8 @@ export function createPostgresStoryInspectionRepository(
         }
         if (
           !isDeepStrictEqual(decodeAssignment(row), assignment) ||
-          !isDeepStrictEqual(decodeTransitions(row), transitions)
+          !isDeepStrictEqual(decodeTransitions(row), transitions) ||
+          !isDeepStrictEqual(decodeAgentRuns(row), agentRuns)
         )
           throw invariantError();
 
@@ -436,7 +489,7 @@ export function createPostgresStoryInspectionRepository(
         });
       }
 
-      return { ok: true, inspection: { story, sources, assignment, transitions } };
+      return { ok: true, inspection: { story, sources, assignment, transitions, agentRuns } };
     },
   };
 }

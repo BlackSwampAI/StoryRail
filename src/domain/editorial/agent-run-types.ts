@@ -1,0 +1,72 @@
+import type { AssignmentProposal } from "./assignment-proposal-types";
+import type { ModelDescriptor, ModelFailureCode } from "./source-evidence-preparation-types";
+import type {
+  AgentProfileId,
+  AgentRunId,
+  EditorialActor,
+  SourceEvidencePreparationId,
+  SourceExtractionId,
+  SourceId,
+  StoryId,
+  StoryState,
+} from "./types";
+
+export interface EvidenceReference {
+  readonly sourceId: SourceId;
+  readonly relevance: string;
+  readonly evidenceKind: "prepared" | "raw";
+  readonly evidenceId: SourceEvidencePreparationId | SourceExtractionId;
+}
+
+export interface AssignmentProposalAgentRunInput {
+  readonly story: {
+    readonly id: StoryId;
+    readonly title: string;
+    readonly state: StoryState;
+    readonly revisionCycle: number;
+  };
+  readonly evidence: readonly EvidenceReference[];
+  readonly unavailableSourceIds: readonly SourceId[];
+  readonly writerProfileIds: readonly AgentProfileId[];
+}
+
+interface AssignmentProposalAgentRunCommon {
+  readonly id: AgentRunId;
+  readonly storyId: StoryId;
+  readonly profileId: AgentProfileId;
+  readonly role: "assignment_editor";
+  readonly operation: "assignment_proposal";
+  readonly model: ModelDescriptor;
+  readonly prompt: { readonly key: string; readonly version: string };
+  readonly requestedBy: EditorialActor;
+  readonly startedAt: string;
+  readonly completedAt: string;
+  readonly input: AssignmentProposalAgentRunInput;
+}
+
+export type AssignmentProposalAgentRun = AssignmentProposalAgentRunCommon &
+  (
+    | { readonly outcome: "succeeded"; readonly proposal: AssignmentProposal }
+    | {
+        readonly outcome: "failed";
+        readonly failure: { readonly code: ModelFailureCode; readonly retryable: boolean };
+      }
+  );
+
+export type AgentRun = AssignmentProposalAgentRun;
+
+export type AgentRunValidationCode =
+  | "AGENT_RUN_IDENTITY_INVALID"
+  | "AGENT_RUN_ROLE_OPERATION_INVALID"
+  | "AGENT_RUN_MODEL_INVALID"
+  | "AGENT_RUN_PROMPT_INVALID"
+  | "AGENT_RUN_INPUT_INVALID"
+  | "AGENT_RUN_EVIDENCE_DUPLICATE"
+  | "AGENT_RUN_OUTCOME_INVALID";
+
+export type RecordAgentRunResult =
+  | { readonly ok: true; readonly run: AgentRun }
+  | {
+      readonly ok: false;
+      readonly error: { readonly code: AgentRunValidationCode; readonly message: string };
+    };

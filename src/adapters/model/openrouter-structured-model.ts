@@ -12,7 +12,7 @@ import type {
   StructuredModelRequest,
   StructuredModelResult,
 } from "@/application/model";
-import type { PreparationFailureCode } from "@/domain/editorial";
+import type { ModelFailureCode } from "@/domain/editorial";
 
 interface StructuredRunnable {
   invoke(input: unknown, options?: { readonly timeout?: number }): Promise<unknown>;
@@ -47,10 +47,7 @@ export class OpenRouterStructuredModelConfigurationError extends Error {
   }
 }
 
-function failed<Output>(
-  code: PreparationFailureCode,
-  retryable: boolean,
-): StructuredModelResult<Output> {
+function failed<Output>(code: ModelFailureCode, retryable: boolean): StructuredModelResult<Output> {
   return { ok: false, failure: { code, retryable } };
 }
 

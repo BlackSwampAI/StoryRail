@@ -29,3 +29,14 @@ export {
   type CreateEvidencePreparationRuntimeOptions,
   type EvidencePreparationRuntime,
 } from "./evidence-preparation-runtime";
+export {
+  AssignmentEditorRuntimeConfigurationError,
+  loadAssignmentEditorRuntimeConfiguration,
+  type AssignmentEditorRuntimeConfiguration,
+} from "./assignment-editor-configuration";
+export {
+  createAssignmentEditorRuntime,
+  createAssignmentEditorRuntimeFromEnvironment,
+  type AssignmentEditorRuntime,
+  type CreateAssignmentEditorRuntimeOptions,
+} from "./assignment-editor-runtime";

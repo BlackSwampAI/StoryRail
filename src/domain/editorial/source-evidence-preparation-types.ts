@@ -5,7 +5,7 @@ import type {
   SourceId,
 } from "./types";
 
-export const PREPARATION_FAILURE_CODES = [
+export const MODEL_FAILURE_CODES = [
   "MODEL_AUTHENTICATION_FAILED",
   "MODEL_REQUEST_TIMED_OUT",
   "MODEL_REQUEST_FAILED",
@@ -13,7 +13,9 @@ export const PREPARATION_FAILURE_CODES = [
   "MODEL_OUTPUT_INVALID",
 ] as const;
 
-export type PreparationFailureCode = (typeof PREPARATION_FAILURE_CODES)[number];
+export type ModelFailureCode = (typeof MODEL_FAILURE_CODES)[number];
+export const PREPARATION_FAILURE_CODES = MODEL_FAILURE_CODES;
+export type PreparationFailureCode = ModelFailureCode;
 
 export interface ModelDescriptor {
   readonly provider: string;

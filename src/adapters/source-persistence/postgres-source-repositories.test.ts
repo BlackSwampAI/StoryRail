@@ -17,6 +17,7 @@ import {
   transitionId,
   STORY_STATES,
   type AgentActor,
+  type AgentRun,
   type AgentProfile,
   type CanonicalSourceUrl,
   type FailedSourceExtraction,
@@ -35,6 +36,7 @@ import { describeStoryListingRepositoryContract } from "@/application/story-list
 import { describeStoryRepositoryContract } from "@/application/story-persistence/story-repository.contract";
 import { describeStorySourceAttachmentRepositoryContract } from "@/application/story-source-persistence/story-source-attachment-repository.contract";
 import { describeAgentProfileRepositoryContract } from "@/application/agent-profiles/agent-profile-repository.contract";
+import { describeAgentRunRepositoryContract } from "@/application/agent-runs/agent-run-repository.contract";
 
 import { createPostgresSourceRepositories } from "./postgres-source-repositories";
 import { createPostgresStoryInspectionRepository } from "../story-inspection/postgres-story-inspection-repository";
@@ -46,6 +48,7 @@ import { createPostgresSourceTriageDecisionRepository } from "../source-triage-p
 import { createPostgresSourceEvidencePreparationRepository } from "../source-evidence-preparation-persistence/postgres-source-evidence-preparation-repository";
 import { createPostgresAgentProfileRepository } from "../agent-profile-persistence/postgres-agent-profile-repository";
 import { createPostgresAssignmentPersistence } from "../assignment-persistence/postgres-assignment-persistence";
+import { createPostgresAgentRunRepository } from "../agent-run-persistence/postgres-agent-run-repository";
 
 const databaseUrl = process.env.STORYRAIL_TEST_DATABASE_URL;
 const describePostgres = databaseUrl ? describe : describe.skip;
@@ -74,6 +77,7 @@ const assignmentMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0028-durable-assignments.sql",
 );
+const agentRunMigrationPath = resolve(process.cwd(), "database/migrations/0030-agent-runs.sql");
 
 const OPERATOR: OperatorActor = {
   type: "operator",
@@ -230,6 +234,47 @@ function makeAttachment(
   };
 }
 
+function makeAgentRun(story: Story, suffix: string): AgentRun {
+  return {
+    id: agentRunId(`agent-run-${suffix}`),
+    storyId: story.id,
+    profileId: agentProfileId("storyrail-assignment-editor-v1"),
+    role: "assignment_editor",
+    operation: "assignment_proposal",
+    model: { provider: "openrouter", model: "provider/model" },
+    prompt: { key: "storyrail_assignment_editor", version: "1" },
+    requestedBy: OPERATOR,
+    startedAt: `started-${suffix}`,
+    completedAt: `completed-${suffix}`,
+    input: {
+      story: {
+        id: story.id,
+        title: story.title,
+        state: story.state,
+        revisionCycle: story.revisionCycle,
+      },
+      evidence: [
+        {
+          sourceId: sourceId(`source-run-${suffix}`),
+          relevance: "Exact evidence relevance",
+          evidenceKind: "raw",
+          evidenceId: sourceExtractionId(`extraction-run-${suffix}`),
+        },
+      ],
+      unavailableSourceIds: [],
+      writerProfileIds: [agentProfileId("storyrail-general-writer-v1")],
+    },
+    outcome: "succeeded",
+    proposal: {
+      writerProfileId: agentProfileId("storyrail-general-writer-v1"),
+      angle: `Angle ${suffix}`,
+      brief: `Brief ${suffix}`,
+      constraints: null,
+      reason: `Reason ${suffix}`,
+    },
+  };
+}
+
 describePostgres("PostgreSQL persistence repositories", () => {
   let pool: Pool;
   let sourceMigrationSql: string;
@@ -239,6 +284,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let preparationMigrationSql: string;
   let agentProfileMigrationSql: string;
   let assignmentMigrationSql: string;
+  let agentRunMigrationSql: string;
   let destructiveSetupAllowed = false;
 
   beforeAll(async () => {
@@ -249,6 +295,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     preparationMigrationSql = await readFile(preparationMigrationPath, "utf8");
     agentProfileMigrationSql = await readFile(agentProfileMigrationPath, "utf8");
     assignmentMigrationSql = await readFile(assignmentMigrationPath, "utf8");
+    agentRunMigrationSql = await readFile(agentRunMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -272,6 +319,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await client.query(preparationMigrationSql);
       await client.query(agentProfileMigrationSql);
       await client.query(assignmentMigrationSql);
+      await client.query(agentRunMigrationSql);
     } finally {
       client.release();
     }
@@ -283,7 +331,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     }
 
     await pool.query(
-      "TRUNCATE storyrail.story_transition_receipts, storyrail.story_assignments, storyrail.source_evidence_preparations, storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.stories RESTART IDENTITY",
+      "TRUNCATE storyrail.agent_runs, storyrail.story_transition_receipts, storyrail.story_assignments, storyrail.source_evidence_preparations, storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.stories RESTART IDENTITY",
     );
     await pool.query("DELETE FROM storyrail.agent_profiles WHERE built_in = false");
   });
@@ -341,6 +389,11 @@ describePostgres("PostgreSQL persistence repositories", () => {
       if (!result.ok) {
         throw new Error("The PostgreSQL Story inspection contract preparation write must succeed.");
       }
+    },
+    async addAgentRun(run) {
+      const result = await createPostgresAgentRunRepository({ pool }).append(run);
+      if (!result.ok)
+        throw new Error("The PostgreSQL Story inspection AgentRun write must succeed.");
     },
   }));
   describeStoryListingRepositoryContract(() => {
@@ -404,6 +457,88 @@ describePostgres("PostgreSQL persistence repositories", () => {
     };
   });
   describeAgentProfileRepositoryContract(() => createPostgresAgentProfileRepository({ pool }));
+  describe("PostgreSQL AgentRun repository", () => {
+    beforeEach(async () => {
+      await createPostgresStoryRepository({ pool }).persist({
+        story: makeStory("agent-run-contract", { id: storyId("story-contract-agent-runs") }),
+      });
+    });
+    describeAgentRunRepositoryContract(() => createPostgresAgentRunRepository({ pool }));
+  });
+
+  describe("AgentRuns", () => {
+    it("rejects malformed payload shape and profile-role disagreement at the database boundary", async () => {
+      const story = makeStory("agent-run-checks");
+      await createPostgresStoryRepository({ pool }).persist({ story });
+      const run = makeAgentRun(story, "checks");
+      await expect(
+        pool.query(
+          `INSERT INTO storyrail.agent_runs
+             (run_id, story_id, profile_id, role, operation, outcome, payload)
+           VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+          [
+            run.id,
+            run.storyId,
+            run.profileId,
+            run.role,
+            run.operation,
+            run.outcome,
+            JSON.stringify({ ...run, unexpected: true }),
+          ],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      await expect(
+        pool.query(
+          `INSERT INTO storyrail.agent_runs
+             (run_id, story_id, profile_id, role, operation, outcome, payload)
+           VALUES ($1, $2, $3, 'assignment_editor', $4, $5, $6::jsonb)`,
+          [
+            "wrong-role-run",
+            story.id,
+            "storyrail-general-writer-v1",
+            run.operation,
+            run.outcome,
+            JSON.stringify({
+              ...run,
+              id: "wrong-role-run",
+              profileId: "storyrail-general-writer-v1",
+            }),
+          ],
+        ),
+      ).rejects.toMatchObject({ code: "23503" });
+    });
+
+    it("turns a malformed persisted run into one safe inspection invariant failure", async () => {
+      const story = makeStory("agent-run-malformed");
+      await createPostgresStoryRepository({ pool }).persist({ story });
+      const run = makeAgentRun(story, "malformed");
+      await createPostgresAgentRunRepository({ pool }).append(run);
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(
+          "ALTER TABLE storyrail.agent_runs DROP CONSTRAINT agent_runs_payload_exact_shape_check",
+        );
+        await client.query(
+          `UPDATE storyrail.agent_runs SET payload = payload || '{"unexpected":true}'::jsonb
+           WHERE run_id = $1`,
+          [run.id],
+        );
+        await expect(
+          createPostgresStoryInspectionRepository({
+            pool: client as unknown as Pool,
+          }).inspect(story.id),
+        ).rejects.toMatchObject({
+          name: "PostgresStoryInspectionPersistenceInvariantError",
+          message:
+            "PostgreSQL Story inspection returned an invalid or impossible persisted result.",
+        });
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    });
+  });
 
   describe("atomic Story Assignment persistence", () => {
     function commandFor(story: Story, suffix: string) {
@@ -859,6 +994,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
       expect(tables.rows.map((row) => row.table_name)).toEqual([
         "agent_profiles",
+        "agent_runs",
         "source_evidence_preparations",
         "source_extractions",
         "source_triage_decisions",
@@ -870,6 +1006,62 @@ describePostgres("PostgreSQL persistence repositories", () => {
       ]);
       expect(columns.rows).toEqual(
         expect.arrayContaining([
+          {
+            table_name: "agent_runs",
+            column_name: "run_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "agent_runs",
+            column_name: "story_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "agent_runs",
+            column_name: "profile_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "agent_runs",
+            column_name: "role",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "agent_runs",
+            column_name: "operation",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "agent_runs",
+            column_name: "outcome",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "agent_runs",
+            column_name: "payload",
+            data_type: "jsonb",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "agent_runs",
+            column_name: "append_position",
+            data_type: "bigint",
+            is_nullable: "NO",
+            is_identity: "YES",
+          },
           {
             table_name: "agent_profiles",
             column_name: "profile_id",
@@ -1159,7 +1351,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           },
         ]),
       );
-      expect(columns.rows).toHaveLength(41);
+      expect(columns.rows).toHaveLength(49);
     });
 
     it("creates the required primary, unique, foreign-key, and check constraints", async () => {
@@ -1181,6 +1373,31 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
       expect(constraints.rows).toEqual(
         expect.arrayContaining([
+          {
+            table_name: "agent_runs",
+            constraint_name: "agent_runs_pkey",
+            constraint_type: "p",
+          },
+          {
+            table_name: "agent_runs",
+            constraint_name: "agent_runs_story_id_fkey",
+            constraint_type: "f",
+          },
+          {
+            table_name: "agent_runs",
+            constraint_name: "agent_runs_profile_role_fk",
+            constraint_type: "f",
+          },
+          {
+            table_name: "agent_runs",
+            constraint_name: "agent_runs_payload_input_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "agent_runs",
+            constraint_name: "agent_runs_payload_outcome_check",
+            constraint_type: "c",
+          },
           {
             table_name: "agent_profiles",
             constraint_name: "agent_profiles_pkey",
@@ -1567,6 +1784,41 @@ describePostgres("PostgreSQL persistence repositories", () => {
           index_name: "source_extractions_source_id_append_position_idx",
           is_unique: false,
           columns: "source_id,append_position",
+        },
+      ]);
+    });
+
+    it("creates AgentRun append identity and Story ordering indexes", async () => {
+      const indexes = await pool.query<{
+        index_name: string;
+        is_unique: boolean;
+        columns: string;
+      }>(
+        `SELECT index_class.relname AS index_name,
+                idx.indisunique AS is_unique,
+                string_agg(attribute.attname::text, ',' ORDER BY key.ordinality) AS columns
+         FROM pg_index AS idx
+         JOIN pg_class AS table_class ON table_class.oid = idx.indrelid
+         JOIN pg_namespace AS namespace ON namespace.oid = table_class.relnamespace
+         JOIN pg_class AS index_class ON index_class.oid = idx.indexrelid
+         JOIN unnest(idx.indkey) WITH ORDINALITY AS key(attribute_number, ordinality) ON true
+         JOIN pg_attribute AS attribute
+           ON attribute.attrelid = table_class.oid AND attribute.attnum = key.attribute_number
+         WHERE namespace.nspname = 'storyrail'
+           AND index_class.relname IN ('agent_runs_append_position_key','agent_runs_story_append_idx')
+         GROUP BY index_class.relname, idx.indisunique
+         ORDER BY index_class.relname`,
+      );
+      expect(indexes.rows).toEqual([
+        {
+          index_name: "agent_runs_append_position_key",
+          is_unique: true,
+          columns: "append_position",
+        },
+        {
+          index_name: "agent_runs_story_append_idx",
+          is_unique: false,
+          columns: "story_id,append_position",
         },
       ]);
     });
@@ -2358,6 +2610,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           ],
           assignment: null,
           transitions: [],
+          agentRuns: [],
         },
       };
       const countsBefore = await pool.query<{
@@ -2911,6 +3164,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         await pool.query(preparationMigrationSql);
         await pool.query(agentProfileMigrationSql);
         await pool.query(assignmentMigrationSql);
+        await pool.query(agentRunMigrationSql);
       }
     });
 
