@@ -14,6 +14,8 @@ import {
 } from "@/domain/editorial";
 
 import styles from "./newsroom-shell.module.css";
+import { AgentProfilesWorkspace } from "./agent-profiles-workspace";
+import type { AgentProfileClient } from "./agent-profile-client";
 import { STORY_STATE_LABELS } from "./newsroom-state";
 import { SourceEvidenceWorkspace } from "./source-evidence-workspace";
 import type { RequestSourceEvidenceUrl } from "./source-evidence-url-client";
@@ -21,12 +23,13 @@ import { SourceInboxWorkspace } from "./source-inbox-workspace";
 import type { SourceInboxClient } from "./source-inbox-client";
 import { storyClient, type StoryClient } from "./story-client";
 
-type WorkspaceMode = "story" | "source-inbox" | "source-intake" | "assistant";
+type WorkspaceMode = "story" | "source-inbox" | "source-intake" | "agents";
 
 export interface NewsroomShellProps {
   readonly requestSourceEvidence?: RequestSourceEvidenceUrl;
   readonly storyRequests?: StoryClient;
   readonly sourceInboxRequests?: SourceInboxClient;
+  readonly agentProfileRequests?: AgentProfileClient;
 }
 
 function pluralizeStories(count: number): string {
@@ -364,20 +367,6 @@ function PersistedStoryWorkspace({ inspection }: Readonly<{ inspection: StoryIns
   );
 }
 
-function AssistantWorkspace() {
-  return (
-    <section className={styles.assistantWorkspace} aria-labelledby="assistant-workspace-title">
-      <p className={styles.sectionKicker}>Assistant workspace</p>
-      <span className={styles.disconnectedStatus}>Not connected yet</span>
-      <h2 id="assistant-workspace-title">Agent activity will appear here</h2>
-      <p>
-        A later batch will connect bounded agent runs and their receipts. This preview has no model
-        responses or message composer.
-      </p>
-    </section>
-  );
-}
-
 type StoryListingState =
   | { readonly kind: "loading" }
   | { readonly kind: "loaded"; readonly items: readonly StoryListItem[] }
@@ -393,6 +382,7 @@ export function NewsroomShell({
   requestSourceEvidence,
   storyRequests,
   sourceInboxRequests,
+  agentProfileRequests,
 }: NewsroomShellProps) {
   const requests = storyRequests ?? storyClient;
   const [selectedQueue, setSelectedQueue] = useState<StoryState>("intake");
@@ -593,10 +583,10 @@ export function NewsroomShell({
             </button>
             <button
               type="button"
-              aria-pressed={workspaceMode === "assistant"}
-              onClick={() => setWorkspaceMode("assistant")}
+              aria-pressed={workspaceMode === "agents"}
+              onClick={() => setWorkspaceMode("agents")}
             >
-              Assistant
+              Agents
             </button>
           </div>
         </header>
@@ -657,8 +647,10 @@ export function NewsroomShell({
             onSourceAvailable={() => setSourceInboxRefreshVersion((current) => current + 1)}
           />
         </div>
-        <div hidden={workspaceMode !== "assistant"}>
-          <AssistantWorkspace />
+        <div hidden={workspaceMode !== "agents"}>
+          {workspaceMode === "agents" ? (
+            <AgentProfilesWorkspace requests={agentProfileRequests} />
+          ) : null}
         </div>
       </main>
     </div>

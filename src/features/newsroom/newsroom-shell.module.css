@@ -248,10 +248,186 @@
 
 .storyWorkspace,
 .emptyWorkspace,
-.assistantWorkspace,
+.agentsWorkspace,
 .sourceWorkspace {
   width: min(100%, 72rem);
   padding: clamp(2rem, 6vw, 5rem) clamp(1.25rem, 6vw, 5rem);
+}
+
+.agentsWorkspace {
+  display: grid;
+  gap: 2rem;
+}
+
+.agentsHeader {
+  position: relative;
+  max-width: 52rem;
+}
+
+.agentsHeader h2 {
+  margin: 0.7rem 0 0;
+  color: #f4f7f5;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(2.15rem, 5vw, 4.15rem);
+  font-weight: 500;
+  letter-spacing: -0.04em;
+}
+
+.agentsHeader > p:last-of-type {
+  color: #a9bab2;
+  line-height: 1.7;
+}
+
+.profileGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+}
+
+.profileCard {
+  border: 1px solid #315044;
+  border-radius: 0.9rem;
+  background: #0e1d18;
+  padding: 1.25rem;
+}
+
+.profileCard header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.profileCard header p,
+.profileCard header h3,
+.profileCard > p,
+.profileCard dl {
+  margin: 0;
+}
+
+.profileCard header p,
+.profileCard header > span,
+.profileCard dt {
+  color: #82cfb2;
+  font-size: 0.7rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.profileCard h3 {
+  margin-top: 0.25rem;
+  color: #f1f6f2;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.25rem;
+  font-weight: 500;
+}
+
+.profileCard > p {
+  margin-top: 1rem;
+  color: #bac8c1;
+  line-height: 1.6;
+}
+
+.profileCard dl {
+  margin-top: 1rem;
+  border-top: 1px solid #29443a;
+  padding-top: 1rem;
+}
+
+.profileCard dd {
+  margin: 0.3rem 0 0;
+  color: #eef5f0;
+  overflow-wrap: anywhere;
+}
+
+.profileForm {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 52rem;
+  border: 1px solid #315044;
+  border-radius: 0.9rem;
+  background: rgb(13 27 22 / 92%);
+  padding: clamp(1.25rem, 3vw, 2rem);
+}
+
+.profileForm h3,
+.profileForm p {
+  margin: 0;
+}
+
+.profileForm h3 {
+  color: #f1f6f2;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.35rem;
+  font-weight: 500;
+}
+
+.profileForm p {
+  color: #9eafa7;
+  line-height: 1.5;
+}
+
+.profileForm label {
+  color: #dce8e1;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.profileForm input,
+.profileForm textarea,
+.profileForm button,
+.profileStatus button {
+  border: 1px solid #41695a;
+  border-radius: 0.6rem;
+  font: inherit;
+}
+
+.profileForm input,
+.profileForm textarea {
+  min-width: 0;
+  background: #08110e;
+  padding: 0.7rem 0.85rem;
+  color: #eef5f0;
+}
+
+.profileForm textarea {
+  min-height: 8rem;
+  resize: vertical;
+}
+
+.profileModelFields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.profileModelFields > div {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.profileForm button,
+.profileStatus button {
+  justify-self: start;
+  min-height: 2.75rem;
+  background: #2d664f;
+  padding: 0.65rem 1rem;
+  color: #f4faf6;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.profileForm button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.profileStatus {
+  border: 1px solid #6b493f;
+  border-radius: 0.8rem;
+  padding: 1rem;
+  color: #edc6bb;
 }
 
 .sourceWorkspace {
@@ -694,8 +870,7 @@
 }
 
 .workspaceHeader h2,
-.emptyWorkspace h2,
-.assistantWorkspace h2 {
+.emptyWorkspace h2 {
   max-width: 52rem;
   margin: 0.7rem 0 0;
   color: #f4f7f5;
@@ -857,31 +1032,17 @@
   color: #6f857b;
 }
 
-.emptyWorkspace,
-.assistantWorkspace {
+.emptyWorkspace {
   display: grid;
   min-height: calc(100vh - 5.5rem);
   align-content: center;
 }
 
-.emptyWorkspace p:last-child,
-.assistantWorkspace > p:last-child {
+.emptyWorkspace p:last-child {
   max-width: 38rem;
   margin: 1.5rem 0 0;
   color: #9dafa6;
   line-height: 1.7;
-}
-
-.assistantWorkspace .disconnectedStatus {
-  display: inline-block;
-  margin-top: 2rem;
-  border-color: #5e6547;
-  background: #252619;
-  color: #d4d49c;
-}
-
-.assistantWorkspace h2 {
-  margin-top: 1.25rem;
 }
 
 .queueButton:focus-visible,
@@ -919,8 +1080,7 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .emptyWorkspace,
-  .assistantWorkspace {
+  .emptyWorkspace {
     min-height: 34rem;
   }
 }

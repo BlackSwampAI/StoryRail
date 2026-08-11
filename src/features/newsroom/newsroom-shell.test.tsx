@@ -13,6 +13,7 @@ import {
 import { NewsroomShell } from "./newsroom-shell";
 import type { SourceInboxClient } from "./source-inbox-client";
 import type { StoryClient } from "./story-client";
+import type { AgentProfileClient } from "./agent-profile-client";
 
 const STORY = {
   id: storyId("story-shell-24"),
@@ -67,9 +68,28 @@ function inboxRequests(): SourceInboxClient {
   };
 }
 
+function agentRequests(): AgentProfileClient {
+  return {
+    listProfiles: vi.fn<AgentProfileClient["listProfiles"]>(async () => ({
+      kind: "completed",
+      value: [],
+    })),
+    createWriterProfile: vi.fn<AgentProfileClient["createWriterProfile"]>(async () => ({
+      kind: "unavailable",
+      message: "The Agent Profile request could not be completed.",
+    })),
+  };
+}
+
 describe("NewsroomShell", () => {
   it("shows real Story queue counts and the four distinct workspace modes", async () => {
-    render(<NewsroomShell storyRequests={storyRequests()} sourceInboxRequests={inboxRequests()} />);
+    render(
+      <NewsroomShell
+        storyRequests={storyRequests()}
+        sourceInboxRequests={inboxRequests()}
+        agentProfileRequests={agentRequests()}
+      />,
+    );
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Intake, 1 story" })).toBeVisible(),
     );
@@ -77,7 +97,11 @@ describe("NewsroomShell", () => {
     expect(workspace).toHaveTextContent("Story");
     expect(workspace).toHaveTextContent("Source inbox");
     expect(workspace).toHaveTextContent("Source intake");
-    expect(workspace).toHaveTextContent("Assistant");
+    expect(workspace).toHaveTextContent("Agents");
+    expect(workspace).not.toHaveTextContent("Assistant");
+    fireEvent.click(screen.getByRole("button", { name: "Agents" }));
+    expect(await screen.findByRole("heading", { name: "Agent Profiles" })).toBeVisible();
+    expect(screen.getByText("No agents are running")).toBeVisible();
   });
 
   it("shows prepared evidence before retained raw evidence after authoritative Story reopen", async () => {

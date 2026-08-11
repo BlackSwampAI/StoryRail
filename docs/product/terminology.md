@@ -17,6 +17,7 @@ These terms form StoryRail's shared editorial language.
 - **Article:** A versioned editorial work product created for a story; it is not the story itself.
 - **Article revision:** An immutable or durably preserved version of an article produced by drafting or revision.
 - **Agent run:** One recorded execution of a bounded role, including inputs, configuration, outputs, timing, and outcome.
+- **Agent Profile:** An immutable configuration snapshot for one bounded first-class editorial persona: its role, name, instructions, optional provider-neutral model selection, and built-in/custom status. A profile contains no credentials and does not imply that an agent has executed.
 - **Editorial review:** A recorded evaluation that may approve, reject, or request changes to editorial work.
 - **Publication:** A separate, explicit act that sends an approved article to an export or publication destination.
 - **Desk/queue:** An operator-facing view of stories awaiting attention, action, or resolution.

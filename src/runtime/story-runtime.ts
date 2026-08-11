@@ -3,12 +3,18 @@ import { randomUUID } from "node:crypto";
 import { Pool, type PoolConfig } from "pg";
 
 import { createPostgresStoryInspectionRepository } from "@/adapters/story-inspection";
+import { createPostgresAgentProfileRepository } from "@/adapters/agent-profile-persistence";
 import { createPostgresStoryListingRepository } from "@/adapters/story-listing";
 import { createPostgresStoryRepository } from "@/adapters/story-persistence";
 import { createPostgresStorySourceAttachmentRepository } from "@/adapters/story-source-persistence";
 import { createPostgresSourceInboxRepository } from "@/adapters/source-inbox";
 import { createPostgresSourceTriageDecisionRepository } from "@/adapters/source-triage-persistence";
 import type { SourceInboxRepository } from "@/application/source-inbox";
+import {
+  createCreateCustomWriterProfile,
+  type AgentProfileRepository,
+  type CreateCustomWriterProfileWorkflow,
+} from "@/application/agent-profiles";
 import {
   createRecordSourceTriageDecision,
   type RecordSourceTriageDecisionWorkflow,
@@ -20,7 +26,7 @@ import {
   createAttachSourceToStory,
   type AttachSourceToStoryWorkflow,
 } from "@/application/story-source-attachment";
-import { storyId } from "@/domain/editorial";
+import { agentProfileId, storyId } from "@/domain/editorial";
 
 export interface StoryRuntime {
   readonly createStory: CreateStoryWorkflow;
@@ -29,6 +35,8 @@ export interface StoryRuntime {
   readonly listStories: StoryListingRepository["list"];
   readonly listPendingSources: SourceInboxRepository["listPending"];
   readonly recordSourceTriageDecision: RecordSourceTriageDecisionWorkflow;
+  readonly createCustomWriterProfile: CreateCustomWriterProfileWorkflow;
+  readonly listAgentProfiles: AgentProfileRepository["list"];
   close(): Promise<void>;
 }
 
@@ -66,6 +74,7 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
   const listingRepository = createPostgresStoryListingRepository({ pool });
   const sourceInboxRepository = createPostgresSourceInboxRepository({ pool });
   const sourceTriageRepository = createPostgresSourceTriageDecisionRepository({ pool });
+  const agentProfileRepository = createPostgresAgentProfileRepository({ pool });
   const createStory = createCreateStory({
     storyRepository,
     createStoryId: () => storyId(createUuid()),
@@ -81,6 +90,11 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
     repository: sourceTriageRepository,
     now,
   });
+  const createCustomWriterProfile = createCreateCustomWriterProfile({
+    repository: agentProfileRepository,
+    createAgentProfileId: () => agentProfileId(createUuid()),
+  });
+  const listAgentProfiles: AgentProfileRepository["list"] = () => agentProfileRepository.list();
   let closePromise: Promise<void> | undefined;
 
   return Object.freeze({
@@ -90,6 +104,8 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
     listStories,
     listPendingSources,
     recordSourceTriageDecision,
+    createCustomWriterProfile,
+    listAgentProfiles,
     close() {
       closePromise ??= Promise.resolve().then(() => pool.end());
       return closePromise;
