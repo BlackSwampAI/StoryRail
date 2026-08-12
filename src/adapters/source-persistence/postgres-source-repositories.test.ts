@@ -8,6 +8,8 @@ import {
   agentRunId,
   agentProfileId,
   assignmentId,
+  articleId,
+  articleRevisionId,
   intakeUrlSource,
   operatorId,
   sourceEvidencePreparationId,
@@ -49,6 +51,7 @@ import { createPostgresSourceEvidencePreparationRepository } from "../source-evi
 import { createPostgresAgentProfileRepository } from "../agent-profile-persistence/postgres-agent-profile-repository";
 import { createPostgresAssignmentPersistence } from "../assignment-persistence/postgres-assignment-persistence";
 import { createPostgresAgentRunRepository } from "../agent-run-persistence/postgres-agent-run-repository";
+import { createPostgresWriterDraftPersistence } from "../article-persistence/postgres-writer-draft-persistence";
 
 const databaseUrl = process.env.STORYRAIL_TEST_DATABASE_URL;
 const describePostgres = databaseUrl ? describe : describe.skip;
@@ -78,6 +81,10 @@ const assignmentMigrationPath = resolve(
   "database/migrations/0028-durable-assignments.sql",
 );
 const agentRunMigrationPath = resolve(process.cwd(), "database/migrations/0030-agent-runs.sql");
+const writerDraftMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0031-articles-and-writer-drafts.sql",
+);
 
 const OPERATOR: OperatorActor = {
   type: "operator",
@@ -285,6 +292,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let agentProfileMigrationSql: string;
   let assignmentMigrationSql: string;
   let agentRunMigrationSql: string;
+  let writerDraftMigrationSql: string;
   let destructiveSetupAllowed = false;
 
   beforeAll(async () => {
@@ -296,6 +304,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     agentProfileMigrationSql = await readFile(agentProfileMigrationPath, "utf8");
     assignmentMigrationSql = await readFile(assignmentMigrationPath, "utf8");
     agentRunMigrationSql = await readFile(agentRunMigrationPath, "utf8");
+    writerDraftMigrationSql = await readFile(writerDraftMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -320,6 +329,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await client.query(agentProfileMigrationSql);
       await client.query(assignmentMigrationSql);
       await client.query(agentRunMigrationSql);
+      await client.query(writerDraftMigrationSql);
     } finally {
       client.release();
     }
@@ -331,7 +341,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     }
 
     await pool.query(
-      "TRUNCATE storyrail.agent_runs, storyrail.story_transition_receipts, storyrail.story_assignments, storyrail.source_evidence_preparations, storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.stories RESTART IDENTITY",
+      "TRUNCATE storyrail.article_revisions, storyrail.articles, storyrail.agent_runs, storyrail.story_transition_receipts, storyrail.story_assignments, storyrail.source_evidence_preparations, storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.stories RESTART IDENTITY",
     );
     await pool.query("DELETE FROM storyrail.agent_profiles WHERE built_in = false");
   });
@@ -659,6 +669,167 @@ describePostgres("PostgreSQL persistence repositories", () => {
         [second.id],
       );
       expect(counts.rows[0]).toEqual({ assignments: "0", receipts: "0" });
+    });
+  });
+
+  describe("atomic Writer draft persistence", () => {
+    it("commits the Writer run, Article, Revision 1, Story, and receipt as one inspectable result", async () => {
+      const intake = makeStory("writer-draft");
+      const source = makeSource("writer-draft", OPERATOR, "https://example.com/writer-draft");
+      await createPostgresStoryRepository({ pool }).persist({ story: intake });
+      await createPostgresSourceRepositories({ pool }).sources.persist({ source });
+      await createPostgresStorySourceAttachmentRepository({ pool }).attach({
+        attachment: makeAttachment("writer-draft", { storyId: intake.id, sourceId: source.id }),
+      });
+      const assignedAt = "assigned-writer-draft";
+      const assignmentCommand = {
+        expectedStory: intake,
+        assignment: {
+          id: assignmentId("assignment-writer-draft"),
+          storyId: intake.id,
+          writerProfileId: agentProfileId("storyrail-general-writer-v1"),
+          sourceIds: [source.id],
+          angle: "Angle",
+          brief: "Brief",
+          constraints: null,
+          assignedBy: OPERATOR,
+          assignedAt,
+        },
+        story: { ...intake, state: "assigned" as const, updatedAt: assignedAt },
+        transitionReceipt: {
+          transitionId: transitionId("transition-assigned-writer-draft"),
+          storyId: intake.id,
+          previousState: "intake" as const,
+          nextState: "assigned" as const,
+          actor: OPERATOR,
+          reason: "Assign.",
+          occurredAt: assignedAt,
+          revisionCycle: 0,
+        },
+      };
+      const assigned = await createPostgresAssignmentPersistence({ pool }).persist(
+        assignmentCommand,
+      );
+      if (!assigned.ok) throw new Error("Writer draft setup Assignment must persist.");
+      const runIdentity = agentRunId("run-writer-draft");
+      const articleIdentity = articleId("article-writer-draft");
+      const revisionIdentity = articleRevisionId("revision-writer-draft");
+      const actor = { type: "agent" as const, role: "writer" as const, runId: runIdentity };
+      const completedAt = "completed-writer-draft";
+      const run = {
+        id: runIdentity,
+        storyId: intake.id,
+        profileId: assignmentCommand.assignment.writerProfileId,
+        role: "writer" as const,
+        operation: "article_draft" as const,
+        model: { provider: "openrouter", model: "writer-model" },
+        prompt: { key: "storyrail_writer_draft", version: "1" },
+        requestedBy: OPERATOR,
+        startedAt: "started-writer-draft",
+        completedAt,
+        input: {
+          story: {
+            id: intake.id,
+            title: intake.title,
+            state: "assigned" as const,
+            revisionCycle: 0,
+          },
+          assignment: {
+            id: assignmentCommand.assignment.id,
+            storyId: intake.id,
+            writerProfileId: assignmentCommand.assignment.writerProfileId,
+            sourceIds: [source.id],
+            angle: "Angle",
+            brief: "Brief",
+            constraints: null,
+          },
+          evidence: [
+            {
+              sourceId: source.id,
+              relevance: "Relevant evidence writer-draft",
+              evidenceKind: "raw" as const,
+              evidenceId: sourceExtractionId("evidence-writer-draft"),
+            },
+          ],
+          unavailableSourceIds: [],
+        },
+        outcome: "succeeded" as const,
+        articleId: articleIdentity,
+        revisionId: revisionIdentity,
+      };
+      const article = {
+        id: articleIdentity,
+        storyId: intake.id,
+        assignmentId: assignmentCommand.assignment.id,
+        createdAt: completedAt,
+      };
+      const revision = {
+        id: revisionIdentity,
+        articleId: articleIdentity,
+        revisionNumber: 1 as const,
+        writerProfileId: run.profileId,
+        agentRunId: runIdentity,
+        headline: "Durable headline",
+        dek: null,
+        bodyMarkdown: "Durable body",
+        createdBy: actor,
+        createdAt: completedAt,
+      };
+      const story = { ...assigned.story, state: "in_progress" as const, updatedAt: completedAt };
+      const transitionReceipt = {
+        transitionId: transitionId("transition-writer-draft"),
+        storyId: intake.id,
+        previousState: "assigned" as const,
+        nextState: "in_progress" as const,
+        actor,
+        reason: "Writer created the initial Article draft.",
+        occurredAt: completedAt,
+        revisionCycle: 0,
+      };
+      await expect(
+        createPostgresWriterDraftPersistence({ pool }).persist({
+          expectedStory: assigned.story,
+          run,
+          article,
+          revision,
+          story,
+          transitionReceipt,
+        }),
+      ).resolves.toEqual({ ok: true, run, article, revision, story, transitionReceipt });
+      await expect(
+        createPostgresStoryInspectionRepository({ pool }).inspect(intake.id),
+      ).resolves.toMatchObject({
+        ok: true,
+        inspection: {
+          story: { state: "in_progress" },
+          agentRuns: [run],
+          article: { article, revisions: [revision] },
+        },
+      });
+      await expect(
+        createPostgresWriterDraftPersistence({ pool }).persist({
+          expectedStory: assigned.story,
+          run: {
+            ...run,
+            id: agentRunId("stale-run"),
+            articleId: articleId("stale-article"),
+            revisionId: articleRevisionId("stale-revision"),
+          } as never,
+          article: { ...article, id: articleId("stale-article") },
+          revision: {
+            ...revision,
+            id: articleRevisionId("stale-revision"),
+            articleId: articleId("stale-article"),
+            agentRunId: agentRunId("stale-run"),
+            createdBy: { type: "agent", role: "writer", runId: agentRunId("stale-run") },
+          },
+          story,
+          transitionReceipt: {
+            ...transitionReceipt,
+            actor: { type: "agent", role: "writer", runId: agentRunId("stale-run") },
+          },
+        }),
+      ).resolves.toMatchObject({ ok: false, error: { code: "WRITER_DRAFT_CONFLICT" } });
     });
   });
 
@@ -995,6 +1166,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
       expect(tables.rows.map((row) => row.table_name)).toEqual([
         "agent_profiles",
         "agent_runs",
+        "article_revisions",
+        "articles",
         "source_evidence_preparations",
         "source_extractions",
         "source_triage_decisions",
@@ -1057,6 +1230,97 @@ describePostgres("PostgreSQL persistence repositories", () => {
           },
           {
             table_name: "agent_runs",
+            column_name: "append_position",
+            data_type: "bigint",
+            is_nullable: "NO",
+            is_identity: "YES",
+          },
+          {
+            table_name: "articles",
+            column_name: "article_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "articles",
+            column_name: "story_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "articles",
+            column_name: "assignment_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "articles",
+            column_name: "payload",
+            data_type: "jsonb",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "article_revisions",
+            column_name: "revision_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "article_revisions",
+            column_name: "article_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "article_revisions",
+            column_name: "revision_number",
+            data_type: "integer",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "article_revisions",
+            column_name: "writer_profile_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "article_revisions",
+            column_name: "writer_role",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "article_revisions",
+            column_name: "agent_run_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "article_revisions",
+            column_name: "agent_run_outcome",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "article_revisions",
+            column_name: "payload",
+            data_type: "jsonb",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "article_revisions",
             column_name: "append_position",
             data_type: "bigint",
             is_nullable: "NO",
@@ -1351,7 +1615,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           },
         ]),
       );
-      expect(columns.rows).toHaveLength(49);
+      expect(columns.rows).toHaveLength(62);
     });
 
     it("creates the required primary, unique, foreign-key, and check constraints", async () => {
@@ -1407,6 +1671,31 @@ describePostgres("PostgreSQL persistence repositories", () => {
             table_name: "agent_profiles",
             constraint_name: "agent_profiles_payload_identity_check",
             constraint_type: "c",
+          },
+          {
+            table_name: "articles",
+            constraint_name: "articles_pkey",
+            constraint_type: "p",
+          },
+          {
+            table_name: "articles",
+            constraint_name: "articles_assignment_story_fk",
+            constraint_type: "f",
+          },
+          {
+            table_name: "article_revisions",
+            constraint_name: "article_revisions_pkey",
+            constraint_type: "p",
+          },
+          {
+            table_name: "article_revisions",
+            constraint_name: "article_revisions_article_number_key",
+            constraint_type: "u",
+          },
+          {
+            table_name: "article_revisions",
+            constraint_name: "article_revisions_agent_run_fk",
+            constraint_type: "f",
           },
           {
             table_name: "agent_profiles",
@@ -2611,6 +2900,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           assignment: null,
           transitions: [],
           agentRuns: [],
+          article: null,
         },
       };
       const countsBefore = await pool.query<{
@@ -3165,6 +3455,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         await pool.query(agentProfileMigrationSql);
         await pool.query(assignmentMigrationSql);
         await pool.query(agentRunMigrationSql);
+        await pool.query(writerDraftMigrationSql);
       }
     });
 

@@ -126,6 +126,7 @@ function clients() {
         assignment: null,
         transitions: [],
         agentRuns: [],
+        article: null,
       },
     })),
     assignStory: vi.fn<StoryClient["assignStory"]>(async () => ({
@@ -133,6 +134,10 @@ function clients() {
       message: "The Story request could not be completed.",
     })),
     generateAssignmentProposal: vi.fn<StoryClient["generateAssignmentProposal"]>(async () => ({
+      kind: "unavailable",
+      message: "The Story request could not be completed.",
+    })),
+    createWriterDraft: vi.fn<StoryClient["createWriterDraft"]>(async () => ({
       kind: "unavailable",
       message: "The Story request could not be completed.",
     })),

@@ -3,6 +3,9 @@ import type { ModelDescriptor, ModelFailureCode } from "./source-evidence-prepar
 import type {
   AgentProfileId,
   AgentRunId,
+  ArticleId,
+  ArticleRevisionId,
+  AssignmentId,
   EditorialActor,
   SourceEvidencePreparationId,
   SourceExtractionId,
@@ -53,7 +56,49 @@ export type AssignmentProposalAgentRun = AssignmentProposalAgentRunCommon &
       }
   );
 
-export type AgentRun = AssignmentProposalAgentRun;
+export interface WriterArticleDraftAgentRunInput {
+  readonly story: AssignmentProposalAgentRunInput["story"];
+  readonly assignment: {
+    readonly id: AssignmentId;
+    readonly storyId: StoryId;
+    readonly writerProfileId: AgentProfileId;
+    readonly sourceIds: readonly SourceId[];
+    readonly angle: string;
+    readonly brief: string;
+    readonly constraints: string | null;
+  };
+  readonly evidence: readonly EvidenceReference[];
+  readonly unavailableSourceIds: readonly SourceId[];
+}
+
+interface WriterArticleDraftAgentRunCommon {
+  readonly id: AgentRunId;
+  readonly storyId: StoryId;
+  readonly profileId: AgentProfileId;
+  readonly role: "writer";
+  readonly operation: "article_draft";
+  readonly model: ModelDescriptor;
+  readonly prompt: { readonly key: string; readonly version: string };
+  readonly requestedBy: EditorialActor;
+  readonly startedAt: string;
+  readonly completedAt: string;
+  readonly input: WriterArticleDraftAgentRunInput;
+}
+
+export type WriterArticleDraftAgentRun = WriterArticleDraftAgentRunCommon &
+  (
+    | {
+        readonly outcome: "succeeded";
+        readonly articleId: ArticleId;
+        readonly revisionId: ArticleRevisionId;
+      }
+    | {
+        readonly outcome: "failed";
+        readonly failure: { readonly code: ModelFailureCode; readonly retryable: boolean };
+      }
+  );
+
+export type AgentRun = AssignmentProposalAgentRun | WriterArticleDraftAgentRun;
 
 export type AgentRunValidationCode =
   | "AGENT_RUN_IDENTITY_INVALID"

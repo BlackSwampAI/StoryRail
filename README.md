@@ -4,7 +4,7 @@
 
 > An agent-first editorial control plane that turns incoming evidence into deliberate, reviewable publishing work.
 
-StoryRail helps solo publishers and small editorial teams manage the work that begins before an article editor: preserving source evidence, deciding what deserves coverage, organizing Stories, and—eventually—coordinating bounded writing and review agents. It is a headless editorial system, not a page-building CMS.
+StoryRail helps solo publishers and small editorial teams preserve source evidence, decide what deserves coverage, organize Stories, and coordinate bounded, supervised editorial agents. It is a headless editorial system, not a page-building CMS.
 
 **Status: pre-alpha and under active development. StoryRail is not production-ready.**
 
@@ -16,7 +16,7 @@ Its central distinction is **Source ≠ Story**:
 
 - A **Source** is incoming evidence, such as a submitted URL and its extraction history.
 - A **Story** is an editorial decision to pursue and organize coverage.
-- An **Article** is a versioned editorial work product. Article generation and persistence are planned, not implemented yet.
+- An **Article** is a durable, versioned editorial work product separate from its Story. Supervised Writer execution creates the first Article and immutable Revision 1.
 
 One Story may draw on many Sources. A Source may be skipped or attached to an existing Story; submitting a URL never creates a Story automatically.
 
@@ -51,7 +51,7 @@ flowchart LR
 
 Prepared Evidence is model-derived, cleaned evidence. It never replaces the immutable raw extraction; both histories remain available for audit and survive triage and reload.
 
-Durable configuration profiles exist for the Assignment Editor, Writer, and Director/editor-in-chief roles. The built-in Assignment Editor is the first executing editorial agent: for an unassigned Intake Story it can produce a supervised, structured Assignment suggestion from authoritative evidence and available Writer Profiles. The suggestion is recorded as a durable AgentRun, but it does not create an Assignment or change Story state. The operator reviews or edits it in the existing manual form, then may create one durable Assignment that snapshots the Story's attached Source identities and atomically moves the Story from Intake to Assigned. Writer and Director execution, Article generation, revision, approval, and publishing automation remain planned.
+Durable Profiles configure the Assignment Editor, Writer, and Director/editor-in-chief roles. The Assignment Editor can produce a supervised suggestion for an Intake Story. The operator reviews or edits it, then creates the durable Assignment. From Assigned, the operator may run the exact assigned Writer. That bounded execution uses only Assignment evidence, records a durable Writer AgentRun, creates the first Article and immutable Revision 1, and atomically moves the Story to In Progress. Revision, Director execution, approval, and publishing remain planned.
 
 ## What works today
 
@@ -69,13 +69,14 @@ Durable configuration profiles exist for the Assignment Editor, Writer, and Dire
 - The first persisted Story transition, `intake` to `assigned`, committed atomically with its Assignment and durable transition receipt/activity.
 - Supervised Assignment Editor proposal generation through the provider-neutral structured-model boundary, with no browsing or tools.
 - Durable, append-ordered AgentRun history that records the exact Story, evidence references, Writer candidates, model, prompt version, requester, outcome, and proposal or safe failure.
+- Supervised Writer execution with Assignment-selected identity, Profile model override or `STORYRAIL_WRITER_MODEL` default, durable Article Revision 1, and an `assigned` to `in_progress` transition.
 - Operator review and editing of suggestions in the existing Assignment form; the manual Assignment remains the authoritative state-mutation boundary and remains attributed to the operator.
 
 ## Where StoryRail is going
 
 The planned alpha path continues from a Story through an Assignment Editor, a structured Assignment, a configurable Writer, a persisted Article, and independent Director/editor-in-chief review. The intended bounded revision loop ends in an operator-controlled approval or rejection, followed by a separate, explicit publish/export transition.
 
-Automatic Assignment Editor decisions, Writer and Director execution, and Article workflows are not operational today. Future work also includes Assignment-linked proposal provenance, mutable profile/version management, resolved triage history as editorial memory, and improved self-hosting packaging.
+Automatic Assignment Editor decisions, Writer revision, and Director execution are not operational today. Future work includes the review/request-changes loop, approval, rejection, publication, and retrieval hardening.
 
 ## Core concepts
 
@@ -89,7 +90,8 @@ Automatic Assignment Editor decisions, Writer and Director execution, and Articl
 - **Assignment** — an immutable operator-created brief that selects a Writer Profile, records angle/brief/optional constraints and provenance, and snapshots attached Source identities.
 - **Assignment Proposal** — a supervised Assignment Editor suggestion that prefills the manual Assignment form but cannot create an Assignment or transition a Story.
 - **AgentRun** — one immutable execution record containing bounded input references, configuration, timing, and a structured success or failure outcome.
-- **Writer, Director, and Article** — later execution and work-product concepts; the Assignment Editor cannot invoke them.
+- **Writer and Article** — supervised Writer execution creates the first durable Article revision from the Assignment; it cannot browse, use tools, revise, or send work to review.
+- **Director** — a future independently supervised review role; no Director execution is implemented.
 
 ## Architecture
 
@@ -132,9 +134,10 @@ Open [http://localhost:3000](http://localhost:3000) to use the development newsr
 | `OPENROUTER_API_KEY`                   | Model-backed workflows            | Authenticates the current OpenRouter model adapter.                            |
 | `STORYRAIL_EVIDENCE_PREPARATION_MODEL` | Prepared Evidence only            | Selects the OpenRouter model used for evidence preparation.                    |
 | `STORYRAIL_ASSIGNMENT_EDITOR_MODEL`    | Assignment Editor only            | Explicitly selects the OpenRouter model used for supervised proposals.         |
+| `STORYRAIL_WRITER_MODEL`               | Writer default                    | Used when the assigned Writer Profile has no OpenRouter model.                 |
 | `STORYRAIL_TEST_DATABASE_URL`          | PostgreSQL integration tests only | Points to a disposable database named exactly `storyrail_test`.                |
 
-Normal Story, Inbox, triage, inspection, Agent Profile, and manual Assignment workflows do not require Firecrawl or OpenRouter. Raw URL intake requires Firecrawl but not OpenRouter. Assignment Editor execution is unavailable when its explicit model or OpenRouter key is absent, without affecting those normal workflows.
+Normal Story, Inbox, triage, inspection, Agent Profile, and manual Assignment workflows do not require Firecrawl or OpenRouter. Writer execution is isolated: a Profile's OpenRouter model wins, otherwise `STORYRAIL_WRITER_MODEL` is required. Missing Writer configuration does not affect normal workflows.
 
 ## Development and validation
 
@@ -154,7 +157,7 @@ pnpm build
 
 ## Project status and limitations
 
-StoryRail is a development-oriented pre-alpha. It currently has no authentication, migrations are external/manual, and some anti-bot publishers remain inaccessible through Firecrawl. Supervised Assignment proposals and manual Assignment are implemented; automatic Assignment decisions, Writer execution, review, Article, and publishing workflows are not, and the newsroom UI is still designed for development rather than production operations.
+StoryRail is a development-oriented pre-alpha. It currently has no authentication, migrations are external/manual, and some anti-bot publishers remain inaccessible through Firecrawl. Supervised Assignment proposals, manual Assignment, supervised first-draft Writer execution, and durable Article Revision 1 are implemented. Revision, review, approval, rejection, and publishing are not.
 
 ## Technical documentation
 

@@ -37,10 +37,13 @@ export function recordAgentRun(candidate: AgentRun): RecordAgentRunResult {
   if (!nonEmpty(candidate.id) || !nonEmpty(candidate.storyId) || !nonEmpty(candidate.profileId)) {
     return invalid("AGENT_RUN_IDENTITY_INVALID", "AgentRun identities must be non-empty.");
   }
-  if (candidate.role !== "assignment_editor" || candidate.operation !== "assignment_proposal") {
+  if (!(
+    (candidate.role === "assignment_editor" && candidate.operation === "assignment_proposal") ||
+    (candidate.role === "writer" && candidate.operation === "article_draft")
+  )) {
     return invalid(
       "AGENT_RUN_ROLE_OPERATION_INVALID",
-      "Only Assignment Editor assignment_proposal runs are supported.",
+      "The AgentRun role and operation combination is unsupported.",
     );
   }
   if (!nonEmpty(candidate.model.provider) || !nonEmpty(candidate.model.model)) {
@@ -60,8 +63,6 @@ export function recordAgentRun(candidate: AgentRun): RecordAgentRunResult {
     input.evidence.length === 0 ||
     !input.evidence.every(validReference) ||
     !input.unavailableSourceIds.every(nonEmpty) ||
-    input.writerProfileIds.length === 0 ||
-    !input.writerProfileIds.every(nonEmpty) ||
     !validActor(candidate.requestedBy)
   ) {
     return invalid("AGENT_RUN_INPUT_INVALID", "AgentRun input snapshot is invalid.");
@@ -74,7 +75,6 @@ export function recordAgentRun(candidate: AgentRun): RecordAgentRunResult {
     new Set(evidenceKeys).size !== evidenceKeys.length ||
     new Set(input.evidence.map(({ sourceId }) => sourceId)).size !== input.evidence.length ||
     new Set(input.unavailableSourceIds).size !== input.unavailableSourceIds.length ||
-    new Set(input.writerProfileIds).size !== input.writerProfileIds.length ||
     input.evidence.some(({ sourceId }) => input.unavailableSourceIds.includes(sourceId))
   ) {
     return invalid("AGENT_RUN_EVIDENCE_DUPLICATE", "AgentRun input identities must be unique.");
@@ -82,15 +82,54 @@ export function recordAgentRun(candidate: AgentRun): RecordAgentRunResult {
   if (!nonEmpty(candidate.startedAt) || !nonEmpty(candidate.completedAt)) {
     return invalid("AGENT_RUN_OUTCOME_INVALID", "AgentRun timestamps must be non-empty.");
   }
-  if (candidate.outcome === "succeeded") {
-    const proposal = createAssignmentProposal(candidate.proposal);
-    if (!proposal.ok || !input.writerProfileIds.includes(proposal.proposal.writerProfileId)) {
-      return invalid("AGENT_RUN_OUTCOME_INVALID", "Successful AgentRun proposal is invalid.");
+  if (candidate.role === "writer") {
+    const assignment = candidate.input.assignment;
+    if (
+      assignment.storyId !== candidate.storyId ||
+      assignment.writerProfileId !== candidate.profileId ||
+      !nonEmpty(assignment.id) ||
+      !nonEmpty(assignment.angle) ||
+      !nonEmpty(assignment.brief) ||
+      (assignment.constraints !== null && !nonEmpty(assignment.constraints)) ||
+      assignment.sourceIds.length === 0 ||
+      !assignment.sourceIds.every(nonEmpty) ||
+      new Set(assignment.sourceIds).size !== assignment.sourceIds.length ||
+      input.evidence.some(({ sourceId }) => !assignment.sourceIds.includes(sourceId)) ||
+      input.unavailableSourceIds.some((sourceId) => !assignment.sourceIds.includes(sourceId)) ||
+      input.evidence.length + input.unavailableSourceIds.length !== assignment.sourceIds.length
+    ) {
+      return invalid("AGENT_RUN_INPUT_INVALID", "Writer AgentRun Assignment input is invalid.");
     }
-    return {
-      ok: true,
-      run: structuredClone({ ...candidate, proposal: proposal.proposal }),
-    };
+    if (candidate.outcome === "succeeded") {
+      if (!nonEmpty(candidate.articleId) || !nonEmpty(candidate.revisionId)) {
+        return invalid(
+          "AGENT_RUN_OUTCOME_INVALID",
+          "Successful Writer AgentRun references are invalid.",
+        );
+      }
+      return { ok: true, run: structuredClone(candidate) };
+    }
+  } else {
+    const writerProfileIds = candidate.input.writerProfileIds;
+    if (
+      writerProfileIds.length === 0 ||
+      !writerProfileIds.every(nonEmpty) ||
+      new Set(writerProfileIds).size !== writerProfileIds.length
+    ) {
+      return invalid("AGENT_RUN_INPUT_INVALID", "Assignment Editor Writer identities are invalid.");
+    }
+    if (candidate.outcome !== "succeeded") {
+      // The shared failed-outcome validation below preserves the same input rules.
+    } else {
+      const proposal = createAssignmentProposal(candidate.proposal);
+      if (!proposal.ok || !writerProfileIds.includes(proposal.proposal.writerProfileId)) {
+        return invalid("AGENT_RUN_OUTCOME_INVALID", "Successful AgentRun proposal is invalid.");
+      }
+      return {
+        ok: true,
+        run: structuredClone({ ...candidate, proposal: proposal.proposal }),
+      };
+    }
   }
   if (
     candidate.outcome !== "failed" ||

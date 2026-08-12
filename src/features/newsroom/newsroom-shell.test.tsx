@@ -50,13 +50,24 @@ function storyRequests(): StoryClient {
     })),
     inspectStory: vi.fn<StoryClient["inspectStory"]>(async () => ({
       kind: "completed",
-      value: { story: STORY, sources: [], assignment: null, transitions: [], agentRuns: [] },
+      value: {
+        story: STORY,
+        sources: [],
+        assignment: null,
+        transitions: [],
+        agentRuns: [],
+        article: null,
+      },
     })),
     assignStory: vi.fn<StoryClient["assignStory"]>(async () => ({
       kind: "unavailable",
       message: "The Story request could not be completed.",
     })),
     generateAssignmentProposal: vi.fn<StoryClient["generateAssignmentProposal"]>(async () => ({
+      kind: "unavailable",
+      message: "The Story request could not be completed.",
+    })),
+    createWriterDraft: vi.fn<StoryClient["createWriterDraft"]>(async () => ({
       kind: "unavailable",
       message: "The Story request could not be completed.",
     })),
@@ -266,7 +277,14 @@ describe("NewsroomShell", () => {
         .fn<StoryClient["inspectStory"]>()
         .mockResolvedValueOnce({
           kind: "completed",
-          value: { story: STORY, sources: [], assignment: null, transitions: [], agentRuns: [] },
+          value: {
+            story: STORY,
+            sources: [],
+            assignment: null,
+            transitions: [],
+            agentRuns: [],
+            article: null,
+          },
         })
         .mockResolvedValueOnce({
           kind: "completed",
@@ -276,6 +294,7 @@ describe("NewsroomShell", () => {
             assignment: { assignment, writerProfile: writer },
             transitions: [receipt],
             agentRuns: [],
+            article: null,
           },
         }),
     };
@@ -399,6 +418,7 @@ describe("NewsroomShell", () => {
           assignment: null,
           transitions: [],
           agentRuns: [],
+          article: null,
         },
       })),
     };
@@ -487,5 +507,96 @@ describe("NewsroomShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Preserve and extract" }));
     await waitFor(() => expect(inbox.listPendingSources).toHaveBeenCalledTimes(2));
     expect(stories.createStory).not.toHaveBeenCalled();
+  });
+
+  it("runs only the assigned Writer and keeps retry available after a durable failure", async () => {
+    const assigned = { ...STORY, state: "assigned" as const, updatedAt: "assigned" };
+    const writer = {
+      id: agentProfileId("writer-31"),
+      role: "writer" as const,
+      name: "Assigned Writer",
+      instructions: "Write.",
+      model: null,
+      builtIn: true,
+    };
+    const assignment = {
+      id: assignmentId("assignment-31"),
+      storyId: assigned.id,
+      writerProfileId: writer.id,
+      sourceIds: [sourceId("source-31")],
+      angle: "Angle",
+      brief: "Brief",
+      constraints: null,
+      assignedBy: { type: "operator" as const, operatorId: operatorId("operator-31") },
+      assignedAt: "assigned",
+    };
+    const failedRun = {
+      id: agentRunId("writer-run-31"),
+      storyId: assigned.id,
+      profileId: writer.id,
+      role: "writer" as const,
+      operation: "article_draft" as const,
+      model: { provider: "openrouter", model: "writer-model" },
+      prompt: { key: "storyrail_writer_draft", version: "1" },
+      requestedBy: assignment.assignedBy,
+      startedAt: "started",
+      completedAt: "completed",
+      input: {
+        story: {
+          id: assigned.id,
+          title: assigned.title,
+          state: "assigned" as const,
+          revisionCycle: 0,
+        },
+        assignment: {
+          id: assignment.id,
+          storyId: assignment.storyId,
+          writerProfileId: assignment.writerProfileId,
+          sourceIds: assignment.sourceIds,
+          angle: assignment.angle,
+          brief: assignment.brief,
+          constraints: assignment.constraints,
+        },
+        evidence: [
+          {
+            sourceId: sourceId("source-31"),
+            relevance: "Primary",
+            evidenceKind: "raw" as const,
+            evidenceId: sourceExtractionId("extraction-31"),
+          },
+        ],
+        unavailableSourceIds: [],
+      },
+      outcome: "failed" as const,
+      failure: { code: "MODEL_REQUEST_FAILED" as const, retryable: true },
+    };
+    const requests: StoryClient = {
+      ...storyRequests(),
+      listStories: vi.fn(async () => ({
+        kind: "completed" as const,
+        value: [{ story: assigned, sourceCount: 1 }],
+      })),
+      inspectStory: vi.fn(async () => ({
+        kind: "completed" as const,
+        value: {
+          story: assigned,
+          sources: [],
+          assignment: { assignment, writerProfile: writer },
+          transitions: [],
+          agentRuns: [],
+          article: null,
+        },
+      })),
+      createWriterDraft: vi.fn(async () => ({ kind: "completed" as const, value: failedRun })),
+    };
+    render(<NewsroomShell storyRequests={requests} sourceInboxRequests={inboxRequests()} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Assigned, 1 story/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Persisted Story/ }));
+    const runWriter = await screen.findByRole("button", { name: "Run Writer" });
+    expect(screen.queryByLabelText("Writer")).not.toBeInTheDocument();
+    fireEvent.click(runWriter);
+    expect(await screen.findByText(/Writer failed: MODEL_REQUEST_FAILED/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Run Writer" })).toBeEnabled();
+    expect(requests.createWriterDraft).toHaveBeenCalledWith(assigned.id);
   });
 });

@@ -241,13 +241,17 @@ function PersistedPreparationAttempt({
 }
 
 function AssignmentEditorRuns({ runs }: Readonly<{ runs: readonly AgentRun[] }>) {
+  const editorRuns = runs.filter(
+    (run): run is Extract<AgentRun, { readonly role: "assignment_editor" }> =>
+      run.role === "assignment_editor",
+  );
   return (
     <details className={styles.technicalDetails}>
       <summary>Assignment Editor runs</summary>
-      {runs.length === 0 ? (
+      {editorRuns.length === 0 ? (
         <p>No Assignment Editor runs are recorded.</p>
       ) : (
-        runs.map((run) => (
+        editorRuns.map((run) => (
           <article key={run.id} className={styles.persistedExtraction}>
             <h4>{run.outcome === "succeeded" ? "Suggestion succeeded" : "Suggestion failed"}</h4>
             <dl className={styles.receiptFacts}>
@@ -341,12 +345,113 @@ function AssignmentEditorRuns({ runs }: Readonly<{ runs: readonly AgentRun[] }>)
   );
 }
 
+function WriterRuns({ runs }: Readonly<{ runs: readonly AgentRun[] }>) {
+  const writerRuns = runs.filter(
+    (run): run is Extract<AgentRun, { readonly role: "writer" }> => run.role === "writer",
+  );
+  return (
+    <details className={styles.technicalDetails}>
+      <summary>Writer runs</summary>
+      {writerRuns.length === 0 ? (
+        <p>No Writer runs are recorded.</p>
+      ) : (
+        writerRuns.map((run) => (
+          <article key={run.id} className={styles.persistedExtraction}>
+            <h4>Article draft · {run.outcome}</h4>
+            <dl className={styles.receiptFacts}>
+              <div>
+                <dt>Operation</dt>
+                <dd>{run.operation}</dd>
+              </div>
+              <div>
+                <dt>Writer Profile</dt>
+                <dd>{run.profileId}</dd>
+              </div>
+              <div>
+                <dt>Model</dt>
+                <dd>
+                  {run.model.provider} / {run.model.model}
+                </dd>
+              </div>
+              <div>
+                <dt>Prompt</dt>
+                <dd>
+                  {run.prompt.key} / {run.prompt.version}
+                </dd>
+              </div>
+              <div>
+                <dt>Assignment ID</dt>
+                <dd>{run.input.assignment.id}</dd>
+              </div>
+              <div>
+                <dt>Requested by</dt>
+                <dd>{actorLabel(run.requestedBy)}</dd>
+              </div>
+              <div>
+                <dt>Started</dt>
+                <dd>{run.startedAt}</dd>
+              </div>
+              <div>
+                <dt>Completed</dt>
+                <dd>{run.completedAt}</dd>
+              </div>
+              <div>
+                <dt>Run ID</dt>
+                <dd>{run.id}</dd>
+              </div>
+              {run.outcome === "succeeded" ? (
+                <>
+                  <div>
+                    <dt>Article ID</dt>
+                    <dd>{run.articleId}</dd>
+                  </div>
+                  <div>
+                    <dt>Revision ID</dt>
+                    <dd>{run.revisionId}</dd>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <dt>Failure</dt>
+                    <dd>{run.failure.code}</dd>
+                  </div>
+                  <div>
+                    <dt>Retryable</dt>
+                    <dd>{run.failure.retryable ? "Yes" : "No"}</dd>
+                  </div>
+                </>
+              )}
+            </dl>
+            <p>
+              Evidence:{" "}
+              {run.input.evidence
+                .map(
+                  ({ sourceId, evidenceKind, evidenceId }) =>
+                    `${sourceId} (${evidenceKind}: ${evidenceId})`,
+                )
+                .join(", ")}
+            </p>
+            <p>
+              Unavailable Source IDs:{" "}
+              {run.input.unavailableSourceIds.length === 0
+                ? "None"
+                : run.input.unavailableSourceIds.join(", ")}
+            </p>
+          </article>
+        ))
+      )}
+    </details>
+  );
+}
+
 function PersistedStoryWorkspace({
   inspection,
   notice,
   requests,
   profileRequests,
   onAssigned,
+  onWriterCompleted,
 }: Readonly<{
   inspection: StoryInspection;
   notice?: string;
@@ -360,13 +465,18 @@ function PersistedStoryWorkspace({
     },
     writerProfile: AgentProfile,
   ) => Promise<void>;
+  onWriterCompleted: (inspection: StoryInspection) => void;
 }>) {
-  const { story, sources, assignment, transitions, agentRuns } = inspection;
+  const { story, sources, assignment, transitions, agentRuns, article } = inspection;
   const durableProposal = [...agentRuns]
     .reverse()
     .find(
-      (run): run is Extract<AgentRun, { readonly outcome: "succeeded" }> =>
-        run.outcome === "succeeded",
+      (
+        run,
+      ): run is Extract<
+        AgentRun,
+        { readonly role: "assignment_editor"; readonly outcome: "succeeded" }
+      > => run.role === "assignment_editor" && run.outcome === "succeeded",
     );
   const latestDurableRun = agentRuns.at(-1);
   const [profiles, setProfiles] = useState<readonly AgentProfile[]>([]);
@@ -382,6 +492,8 @@ function PersistedStoryWorkspace({
   const [reason, setReason] = useState(durableProposal?.proposal.reason ?? "");
   const [runs, setRuns] = useState<readonly AgentRun[]>(agentRuns);
   const [proposalPending, setProposalPending] = useState(false);
+  const [writerPending, setWriterPending] = useState(false);
+  const [writerStatus, setWriterStatus] = useState<string | null>(null);
   const [proposalStatus, setProposalStatus] = useState<string | null>(
     latestDurableRun?.outcome === "failed"
       ? `Assignment Editor failed: ${latestDurableRun.failure.code}. Retryable: ${latestDurableRun.failure.retryable ? "yes" : "no"}.`
@@ -456,6 +568,10 @@ function PersistedStoryWorkspace({
         return;
       }
       setRuns((current) => [...current, result.value]);
+      if (result.value.role !== "assignment_editor") {
+        setProposalStatus("The Assignment Editor returned an invalid execution record.");
+        return;
+      }
       if (result.value.outcome === "failed") {
         setProposalStatus(
           `Assignment Editor failed: ${result.value.failure.code}. Retryable: ${result.value.failure.retryable ? "yes" : "no"}.`,
@@ -477,11 +593,47 @@ function PersistedStoryWorkspace({
       setProposalPending(false);
     }
   }
+  async function runWriter() {
+    if (writerPending) return;
+    setWriterPending(true);
+    setWriterStatus(null);
+    try {
+      const result = await requests.createWriterDraft(story.id);
+      if (result.kind !== "completed") {
+        setWriterStatus(
+          result.kind === "application-failure" ? result.error.message : result.message,
+        );
+        return;
+      }
+      setRuns((current) => [...current, result.value]);
+      if (result.value.role !== "writer" || result.value.outcome === "failed") {
+        if (result.value.role === "writer")
+          setWriterStatus(
+            `Writer failed: ${result.value.failure.code}. Retryable: ${result.value.failure.retryable ? "yes" : "no"}.`,
+          );
+        return;
+      }
+      const refreshed = await requests.inspectStory(story.id);
+      if (refreshed.kind === "completed") onWriterCompleted(refreshed.value);
+      else
+        setWriterStatus(
+          "Draft saved, but authoritative inspection refresh is unavailable. Reopen the Story.",
+        );
+    } catch {
+      setWriterStatus("The Writer request could not be completed.");
+    } finally {
+      setWriterPending(false);
+    }
+  }
   const latestSuccessfulRun = [...runs]
     .reverse()
     .find(
-      (run): run is Extract<AgentRun, { readonly outcome: "succeeded" }> =>
-        run.outcome === "succeeded",
+      (
+        run,
+      ): run is Extract<
+        AgentRun,
+        { readonly role: "assignment_editor"; readonly outcome: "succeeded" }
+      > => run.role === "assignment_editor" && run.outcome === "succeeded",
     );
   const currentSourceIds = new Set(sources.map(({ source }) => source.id));
   const proposalSourceIds = new Set(
@@ -797,9 +949,59 @@ function PersistedStoryWorkspace({
             <p>No durable Assignment is recorded for this Story.</p>
           )}
           <AssignmentEditorRuns runs={runs} />
+          {story.state === "assigned" && assignment !== null && article === null ? (
+            <div className={styles.auditFact}>
+              <button type="button" disabled={writerPending} onClick={() => void runWriter()}>
+                {writerPending ? "Writer is working…" : "Run Writer"}
+              </button>
+              <p>
+                The assigned Writer will create the first Article draft from the durable Assignment
+                and evidence.
+              </p>
+              {writerStatus ? (
+                <p role={writerStatus.startsWith("Writer failed") ? "alert" : "status"}>
+                  {writerStatus}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          <WriterRuns runs={runs} />
+        </section>
+        <section aria-labelledby="article-heading">
+          <p className={styles.sectionNumber}>03</p>
+          <h3 id="article-heading">Article</h3>
+          {article === null ? (
+            <p>No durable Article is recorded for this Story.</p>
+          ) : (
+            article.revisions.map((revision) => (
+              <article key={revision.id}>
+                <h4>{revision.headline}</h4>
+                {revision.dek ? <p>{revision.dek}</p> : null}
+                <pre className={styles.extractedContent}>{revision.bodyMarkdown}</pre>
+                <dl className={styles.receiptFacts}>
+                  <div>
+                    <dt>Revision</dt>
+                    <dd>{revision.revisionNumber}</dd>
+                  </div>
+                  <div>
+                    <dt>Writer Profile</dt>
+                    <dd>{revision.writerProfileId}</dd>
+                  </div>
+                  <div>
+                    <dt>Created</dt>
+                    <dd>{revision.createdAt}</dd>
+                  </div>
+                  <div>
+                    <dt>AgentRun</dt>
+                    <dd>{revision.agentRunId}</dd>
+                  </div>
+                </dl>
+              </article>
+            ))
+          )}
         </section>
         <section aria-labelledby="activity-heading">
-          <p className={styles.sectionNumber}>03</p>
+          <p className={styles.sectionNumber}>04</p>
           <h3 id="activity-heading">Activity</h3>
           {transitions.length === 0 ? (
             <p>No durable Story transitions are recorded.</p>
@@ -1105,6 +1307,14 @@ export function NewsroomShell({
                       "Assignment saved. Authoritative inspection refresh is unavailable; retry by reopening this Story.",
                   });
                 }
+              }}
+              onWriterCompleted={(refreshed) => {
+                upsertStoryListItem({
+                  story: refreshed.story,
+                  sourceCount: refreshed.sources.length,
+                });
+                setSelectedQueue("in_progress");
+                setStorySelection({ kind: "loaded", inspection: refreshed });
               }}
             />
           ) : storySelection.kind === "loading" ? (

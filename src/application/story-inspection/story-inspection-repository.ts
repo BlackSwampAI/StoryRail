@@ -1,6 +1,8 @@
 import type {
   AgentProfile,
   AgentRun,
+  Article,
+  ArticleRevision,
   Assignment,
   SourceExtraction,
   SourceEvidencePreparation,
@@ -27,6 +29,10 @@ export interface StoryInspection {
   } | null;
   readonly transitions: readonly StoryTransitionReceipt[];
   readonly agentRuns: readonly AgentRun[];
+  readonly article: {
+    readonly article: Article;
+    readonly revisions: readonly ArticleRevision[];
+  } | null;
 }
 
 export interface StoryInspectionNotFoundError {

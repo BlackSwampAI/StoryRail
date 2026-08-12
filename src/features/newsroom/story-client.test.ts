@@ -90,6 +90,7 @@ const INSPECTION = {
   assignment: null,
   transitions: [],
   agentRuns: [],
+  article: null,
 };
 const AGENT_RUN = {
   id: "run-0030",
@@ -241,6 +242,7 @@ describe("story-client", () => {
       assignment: null,
       transitions: [],
       agentRuns: [],
+      article: null,
     };
     const timestamps = [
       opaqueInspection.story.createdAt,
@@ -271,6 +273,7 @@ describe("story-client", () => {
         assignment: null,
         transitions: [],
         agentRuns: [],
+        article: null,
       },
       INSPECTION,
     ];
@@ -327,6 +330,7 @@ describe("story-client", () => {
           assignment: null,
           transitions: [],
           agentRuns: [],
+          article: null,
         },
       }),
     );
@@ -505,6 +509,55 @@ describe("story-client", () => {
       kind: "application-failure",
       error: { code: "ASSIGNMENT_EDITOR_EVIDENCE_REQUIRED" },
     });
+  });
+
+  it("posts exactly {} for Writer execution and decodes its durable failed run", async () => {
+    const run = {
+      id: "writer-run-31",
+      storyId: STORY.id,
+      profileId: "writer-31",
+      role: "writer",
+      operation: "article_draft",
+      model: { provider: "openrouter", model: "writer-model" },
+      prompt: { key: "storyrail_writer_draft", version: "1" },
+      requestedBy: { type: "operator", operatorId: "operator" },
+      startedAt: "started",
+      completedAt: "completed",
+      input: {
+        story: { id: STORY.id, title: STORY.title, state: "assigned", revisionCycle: 0 },
+        assignment: {
+          id: "assignment-31",
+          storyId: STORY.id,
+          writerProfileId: "writer-31",
+          sourceIds: ["source-31"],
+          angle: "Angle",
+          brief: "Brief",
+          constraints: null,
+        },
+        evidence: [
+          {
+            sourceId: "source-31",
+            relevance: "Primary",
+            evidenceKind: "raw",
+            evidenceId: "extraction-31",
+          },
+        ],
+        unavailableSourceIds: [],
+      },
+      outcome: "failed",
+      failure: { code: "MODEL_REQUEST_FAILED", retryable: true },
+    };
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(201, { ok: true, run }),
+    );
+    await expect(createStoryClient({ fetch }).createWriterDraft(STORY.id)).resolves.toEqual({
+      kind: "completed",
+      value: run,
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      `/api/stories/${STORY.id}/writer-drafts`,
+      expect.objectContaining({ method: "POST", body: "{}" }),
+    );
   });
 
   it("exports only the focused browser client surface", async () => {

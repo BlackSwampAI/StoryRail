@@ -1,0 +1,48 @@
+import { describe, expect, it } from "vitest";
+import {
+  loadWriterRuntimeConfiguration,
+  WriterRuntimeConfigurationError,
+} from "./writer-configuration";
+import { resolveWriterModel } from "./writer-runtime";
+import type { StructuredModel } from "@/application/model";
+
+describe("Writer runtime configuration", () => {
+  it("allows a missing default model for Profile-owned model resolution", () => {
+    expect(
+      loadWriterRuntimeConfiguration({
+        STORYRAIL_DATABASE_URL: "postgres://db",
+        OPENROUTER_API_KEY: "key",
+      }),
+    ).toEqual({ databaseUrl: "postgres://db", openRouterApiKey: "key", defaultModel: null });
+  });
+  it("requires database and OpenRouter configuration only when the lazy runtime is created", () => {
+    expect(() => loadWriterRuntimeConfiguration({})).toThrow(WriterRuntimeConfigurationError);
+  });
+  it("prefers a Profile OpenRouter model, falls back to the default, and rejects unsupported providers", () => {
+    const createModel = (model: string): StructuredModel => ({
+      descriptor: { provider: "openrouter", model },
+      generateStructured: (async () => ({
+        ok: false as const,
+        failure: { code: "MODEL_REQUEST_FAILED" as const, retryable: true },
+      })) as StructuredModel["generateStructured"],
+    });
+    expect(
+      resolveWriterModel(
+        { provider: "openrouter", model: "profile-model" },
+        "default-model",
+        createModel,
+      ),
+    ).toMatchObject({ ok: true, model: { descriptor: { model: "profile-model" } } });
+    expect(resolveWriterModel(null, "default-model", createModel)).toMatchObject({
+      ok: true,
+      model: { descriptor: { model: "default-model" } },
+    });
+    expect(
+      resolveWriterModel(
+        { provider: "future-provider", model: "model" },
+        "default-model",
+        createModel,
+      ),
+    ).toMatchObject({ ok: false, error: { code: "WRITER_MODEL_UNSUPPORTED" } });
+  });
+});

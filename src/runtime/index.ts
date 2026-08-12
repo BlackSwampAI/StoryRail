@@ -40,3 +40,5 @@ export {
   type AssignmentEditorRuntime,
   type CreateAssignmentEditorRuntimeOptions,
 } from "./assignment-editor-runtime";
+export * from "./writer-configuration";
+export * from "./writer-runtime";
