@@ -9,6 +9,7 @@ export type SourceExtractionId = Identifier<"SourceExtractionId">;
 export type SourceEvidencePreparationId = Identifier<"SourceEvidencePreparationId">;
 export type StoryId = Identifier<"StoryId">;
 export type ArticleId = Identifier<"ArticleId">;
+export type ArticleRevisionId = Identifier<"ArticleRevisionId">;
 export type AgentRunId = Identifier<"AgentRunId">;
 export type AgentProfileId = Identifier<"AgentProfileId">;
 export type AssignmentId = Identifier<"AssignmentId">;
@@ -22,6 +23,7 @@ export const sourceEvidencePreparationId = (value: string): SourceEvidencePrepar
   value as SourceEvidencePreparationId;
 export const storyId = (value: string): StoryId => value as StoryId;
 export const articleId = (value: string): ArticleId => value as ArticleId;
+export const articleRevisionId = (value: string): ArticleRevisionId => value as ArticleRevisionId;
 export const agentRunId = (value: string): AgentRunId => value as AgentRunId;
 export const agentProfileId = (value: string): AgentProfileId => value as AgentProfileId;
 export const assignmentId = (value: string): AssignmentId => value as AssignmentId;

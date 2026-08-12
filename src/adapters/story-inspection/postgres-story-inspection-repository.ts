@@ -5,6 +5,8 @@ import type { Pool, QueryResultRow } from "pg";
 import type {
   AgentProfile,
   AgentRun,
+  Article,
+  ArticleRevision,
   Assignment,
   AgentRole,
   AgentRunId,
@@ -32,6 +34,10 @@ import {
   decodePostgresTransitionReceipt,
 } from "../assignment-persistence/postgres-assignment-decoder";
 import { decodePostgresAgentRun } from "../agent-run-persistence/postgres-agent-run-decoder";
+import {
+  decodePostgresArticle,
+  decodePostgresArticleRevision,
+} from "../article-persistence/postgres-article-decoder";
 
 export interface CreatePostgresStoryInspectionRepositoryOptions {
   readonly pool: Pool;
@@ -61,6 +67,11 @@ interface StoryInspectionRow extends QueryResultRow {
   readonly profile_payload: unknown;
   readonly transition_rows: unknown;
   readonly agent_run_rows: unknown;
+  readonly article_id: unknown;
+  readonly article_story_id: unknown;
+  readonly article_assignment_id: unknown;
+  readonly article_payload: unknown;
+  readonly article_revision_rows: unknown;
 }
 
 interface AssembledStoryInspectionSource {
@@ -355,6 +366,41 @@ function decodeAgentRuns(row: StoryInspectionRow): AgentRun[] {
   });
 }
 
+function decodeArticle(
+  row: StoryInspectionRow,
+): { readonly article: Article; readonly revisions: ArticleRevision[] } | null {
+  const values = [
+    row.article_id,
+    row.article_story_id,
+    row.article_assignment_id,
+    row.article_payload,
+  ];
+  if (values.every((value) => value === null)) {
+    if (row.article_revision_rows !== null) throw invariantError();
+    return null;
+  }
+  if (values.some((value) => value === null) || !Array.isArray(row.article_revision_rows))
+    throw invariantError();
+  try {
+    const article = decodePostgresArticle({
+      article_id: row.article_id,
+      story_id: row.article_story_id,
+      assignment_id: row.article_assignment_id,
+      payload: row.article_payload,
+    });
+    if (article.storyId !== row.story_id) throw invariantError();
+    const revisions = row.article_revision_rows.map((value) => {
+      if (!isRecord(value)) throw invariantError();
+      const revision = decodePostgresArticleRevision(value as never);
+      if (revision.articleId !== article.id) throw invariantError();
+      return revision;
+    });
+    return { article, revisions };
+  } catch {
+    throw invariantError();
+  }
+}
+
 export function createPostgresStoryInspectionRepository(
   options: CreatePostgresStoryInspectionRepositoryOptions,
 ): StoryInspectionRepository {
@@ -416,7 +462,23 @@ export function createPostgresStoryInspectionRepository(
                   ) ORDER BY run.append_position ASC)
                   FROM storyrail.agent_runs AS run
                   WHERE run.story_id = story.story_id
-                ), '[]'::jsonb) AS agent_run_rows
+                ), '[]'::jsonb) AS agent_run_rows,
+                article.article_id,
+                article.story_id AS article_story_id,
+                article.assignment_id AS article_assignment_id,
+                article.payload AS article_payload,
+                CASE WHEN article.article_id IS NULL THEN NULL ELSE COALESCE((
+                  SELECT jsonb_agg(jsonb_build_object(
+                    'revision_id', revision.revision_id,
+                    'article_id', revision.article_id,
+                    'revision_number', revision.revision_number,
+                    'writer_profile_id', revision.writer_profile_id,
+                    'agent_run_id', revision.agent_run_id,
+                    'payload', revision.payload
+                  ) ORDER BY revision.revision_number ASC, revision.append_position ASC)
+                  FROM storyrail.article_revisions AS revision
+                  WHERE revision.article_id = article.article_id
+                ), '[]'::jsonb) END AS article_revision_rows
          FROM storyrail.stories AS story
          LEFT JOIN storyrail.story_source_attachments AS attachment
            ON attachment.story_id = story.story_id
@@ -426,6 +488,8 @@ export function createPostgresStoryInspectionRepository(
            ON assignment.story_id = story.story_id
          LEFT JOIN storyrail.agent_profiles AS profile
            ON profile.profile_id = assignment.writer_profile_id
+         LEFT JOIN storyrail.articles AS article
+           ON article.story_id = story.story_id
          WHERE story.story_id = $1
          ORDER BY attachment.source_id COLLATE "C" ASC`,
         [storyIdentity],
@@ -454,6 +518,27 @@ export function createPostgresStoryInspectionRepository(
       const assignment = decodeAssignment(firstRow);
       const transitions = decodeTransitions(firstRow);
       const agentRuns = decodeAgentRuns(firstRow);
+      const article = decodeArticle(firstRow);
+      if (
+        article !== null &&
+        (assignment === null ||
+          article.article.assignmentId !== assignment.assignment.id ||
+          article.revisions.length !== 1)
+      )
+        throw invariantError();
+      if (
+        article?.revisions.some((revision) => {
+          const run = agentRuns.find(({ id }) => id === revision.agentRunId);
+          return (
+            run?.role !== "writer" ||
+            run.outcome !== "succeeded" ||
+            run.profileId !== revision.writerProfileId ||
+            run.articleId !== article.article.id ||
+            run.revisionId !== revision.id
+          );
+        })
+      )
+        throw invariantError();
       const seenSourceIds = new Set<SourceId>();
 
       for (const row of result.rows) {
@@ -464,7 +549,8 @@ export function createPostgresStoryInspectionRepository(
         if (
           !isDeepStrictEqual(decodeAssignment(row), assignment) ||
           !isDeepStrictEqual(decodeTransitions(row), transitions) ||
-          !isDeepStrictEqual(decodeAgentRuns(row), agentRuns)
+          !isDeepStrictEqual(decodeAgentRuns(row), agentRuns) ||
+          !isDeepStrictEqual(decodeArticle(row), article)
         )
           throw invariantError();
 
@@ -489,7 +575,10 @@ export function createPostgresStoryInspectionRepository(
         });
       }
 
-      return { ok: true, inspection: { story, sources, assignment, transitions, agentRuns } };
+      return {
+        ok: true,
+        inspection: { story, sources, assignment, transitions, agentRuns, article },
+      };
     },
   };
 }

@@ -1,4 +1,5 @@
 export * from "./source-extraction";
+export * from "./article-persistence";
 export * from "./source-evidence-preparation-persistence";
 export * from "./source-persistence";
 export * from "./story-persistence";

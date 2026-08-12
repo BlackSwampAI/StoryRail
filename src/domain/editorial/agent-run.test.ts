@@ -3,8 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   agentProfileId,
   agentRunId,
+  articleId,
+  articleRevisionId,
+  assignmentId,
   operatorId,
   sourceEvidencePreparationId,
+  sourceExtractionId,
   sourceId,
   storyId,
 } from "./types";
@@ -51,6 +55,53 @@ const successful: AgentRun = {
 };
 
 describe("AgentRun", () => {
+  it("accepts Writer article_draft success references and rejects a mismatched operation", () => {
+    const writerRun = {
+      id: agentRunId("writer-run-31"),
+      storyId: storyId("story-31"),
+      profileId: agentProfileId("writer-31"),
+      role: "writer" as const,
+      operation: "article_draft" as const,
+      model: { provider: "openrouter", model: "writer-model" },
+      prompt: { key: "storyrail_writer_draft", version: "1" },
+      requestedBy: { type: "operator" as const, operatorId: operatorId("operator-31") },
+      startedAt: "started",
+      completedAt: "completed",
+      input: {
+        story: {
+          id: storyId("story-31"),
+          title: "Story",
+          state: "assigned" as const,
+          revisionCycle: 0,
+        },
+        assignment: {
+          id: assignmentId("assignment-31"),
+          storyId: storyId("story-31"),
+          writerProfileId: agentProfileId("writer-31"),
+          sourceIds: [sourceId("source-31")],
+          angle: "Angle",
+          brief: "Brief",
+          constraints: null,
+        },
+        evidence: [
+          {
+            sourceId: sourceId("source-31"),
+            relevance: "Primary",
+            evidenceKind: "raw" as const,
+            evidenceId: sourceExtractionId("extraction-31"),
+          },
+        ],
+        unavailableSourceIds: [],
+      },
+      outcome: "succeeded" as const,
+      articleId: articleId("article-31"),
+      revisionId: articleRevisionId("revision-31"),
+    };
+    expect(recordAgentRun(writerRun)).toMatchObject({ ok: true });
+    expect(
+      recordAgentRun({ ...writerRun, operation: "assignment_proposal" } as never),
+    ).toMatchObject({ ok: false, error: { code: "AGENT_RUN_ROLE_OPERATION_INVALID" } });
+  });
   it("records a valid successful run as a fresh immutable snapshot", () => {
     const result = recordAgentRun(successful);
     expect(result).toEqual({ ok: true, run: successful });

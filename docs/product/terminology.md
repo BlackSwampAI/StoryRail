@@ -14,8 +14,8 @@ These terms form StoryRail's shared editorial language.
 - **Revision cycle:** One bounded return from `in_review` to `changes_requested`; a Story may enter no more than two revision cycles.
 - **Story source:** The immutable, durable relationship between an existing Story and an existing Source, identified by that pair and recording required relevance, attributable actor provenance, and one attachment time.
 - **Assignment:** One immutable, durable brief for a Story in the current Alpha workflow. It selects an immutable Writer Profile, snapshots all attached Source identities in deterministic order, records a required angle and brief, optional constraints, the assigning actor, and one application-owned assignment time. In the current supervised Assignment Editor flow that actor remains the operator. Creating it atomically persists the Assignment, the Story's `intake` to `assigned` transition, and its transition receipt; it does not execute the Writer.
-- **Article:** A versioned editorial work product created for a story; it is not the story itself.
-- **Article revision:** An immutable or durably preserved version of an article produced by drafting or revision.
+- **Article:** A durable, versioned editorial work product created for one Story and its immutable Assignment; it is not the Story itself. The current Alpha allows one Article per Story.
+- **Article revision:** An immutable preserved version of an Article. Supervised Writer execution creates Revision 1 with Writer Profile and AgentRun provenance; later revisions are not implemented.
 - **AgentRun:** One immutable, append-ordered execution record for a bounded operation. It records the Story, exact evidence and immutable Profile references used, model and prompt descriptors, requester, timing, and either a structured success or safe failure outcome; it does not become editorial state by itself.
 - **Assignment Proposal:** A strict, provider-neutral Assignment Editor suggestion containing a Writer Profile identity, angle, brief, optional constraints, and editorial reason. It is not an Assignment: it has no Assignment identity, assignment actor or time, evidence snapshot ownership, or Story transition. In supervised mode the operator may edit it before using the existing manual Assignment workflow.
 - **Agent Profile:** An immutable configuration snapshot for one bounded first-class editorial persona: its role, name, instructions, optional provider-neutral model selection, and built-in/custom status. A profile contains no credentials and does not imply that an agent has executed.
@@ -23,7 +23,7 @@ These terms form StoryRail's shared editorial language.
 - **Publication:** A separate, explicit act that sends an approved article to an export or publication destination.
 - **Desk/queue:** An operator-facing view of stories awaiting attention, action, or resolution.
 - **Assignment editor:** The role that assesses a story and prepares or refines its assignment.
-- **Writer:** The role that researches and drafts within an assignment's scope.
+- **Writer:** The supervised role that drafts within an Assignment's exact Source snapshot. The current execution uses only supplied evidence, with no browsing, tools, or external research, and stops after creating Revision 1 and moving the Story to In Progress.
 - **Fact checker:** The role that evaluates material claims against cited evidence and records findings.
 - **Editor-in-chief:** The independent review role responsible for an overall editorial decision.
 - **SEO packaging:** Preparation of accurate discovery metadata and presentation options without making rankings the sole editorial purpose.

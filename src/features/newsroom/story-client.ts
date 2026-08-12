@@ -6,6 +6,8 @@ import {
   type AgentProfile,
   type Assignment,
   type AgentRun,
+  type Article,
+  type ArticleRevision,
   type SourceExtraction,
   type SourceEvidencePreparation,
   type Story,
@@ -58,6 +60,7 @@ export interface StoryClient {
     }>
   >;
   readonly generateAssignmentProposal: (storyId: string) => Promise<StoryClientResult<AgentRun>>;
+  readonly createWriterDraft: (storyId: string) => Promise<StoryClientResult<AgentRun>>;
 }
 
 const STORY_STATES = new Set([
@@ -335,6 +338,7 @@ function isTransition(value: unknown): value is StoryTransitionReceipt {
 }
 
 function isAgentRun(value: unknown): value is AgentRun {
+  if (isWriterAgentRun(value)) return true;
   if (
     !isRecord(value) ||
     !isString(value.id) ||
@@ -480,6 +484,121 @@ function isAgentRun(value: unknown): value is AgentRun {
   );
 }
 
+function isWriterAgentRun(value: unknown): value is AgentRun {
+  if (
+    !isRecord(value) ||
+    value.role !== "writer" ||
+    value.operation !== "article_draft" ||
+    !isString(value.id) ||
+    !isString(value.storyId) ||
+    !isString(value.profileId) ||
+    !isRecord(value.model) ||
+    !hasExactKeys(value.model, ["provider", "model"]) ||
+    !isString(value.model.provider) ||
+    !isString(value.model.model) ||
+    !isRecord(value.prompt) ||
+    !hasExactKeys(value.prompt, ["key", "version"]) ||
+    !isString(value.prompt.key) ||
+    !isString(value.prompt.version) ||
+    !isActor(value.requestedBy) ||
+    !isString(value.startedAt) ||
+    !isString(value.completedAt) ||
+    !isRecord(value.input) ||
+    !hasExactKeys(value.input, ["story", "assignment", "evidence", "unavailableSourceIds"]) ||
+    !isRecord(value.input.story) ||
+    value.input.story.id !== value.storyId ||
+    !isRecord(value.input.assignment) ||
+    value.input.assignment.storyId !== value.storyId ||
+    value.input.assignment.writerProfileId !== value.profileId ||
+    !Array.isArray(value.input.evidence) ||
+    value.input.evidence.length === 0 ||
+    !Array.isArray(value.input.unavailableSourceIds)
+  )
+    return false;
+  const common = [
+    "id",
+    "storyId",
+    "profileId",
+    "role",
+    "operation",
+    "model",
+    "prompt",
+    "requestedBy",
+    "startedAt",
+    "completedAt",
+    "input",
+    "outcome",
+  ];
+  return value.outcome === "succeeded"
+    ? hasExactKeys(value, [...common, "articleId", "revisionId"]) &&
+        isString(value.articleId) &&
+        isString(value.revisionId)
+    : value.outcome === "failed" &&
+        hasExactKeys(value, [...common, "failure"]) &&
+        isRecord(value.failure) &&
+        hasExactKeys(value.failure, ["code", "retryable"]) &&
+        isString(value.failure.code) &&
+        MODEL_FAILURE_CODE_SET.has(value.failure.code) &&
+        typeof value.failure.retryable === "boolean";
+}
+
+function isArticle(value: unknown): value is Article {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ["id", "storyId", "assignmentId", "createdAt"]) &&
+    isString(value.id) &&
+    isString(value.storyId) &&
+    isString(value.assignmentId) &&
+    isString(value.createdAt)
+  );
+}
+
+function isArticleRevision(value: unknown): value is ArticleRevision {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, [
+      "id",
+      "articleId",
+      "revisionNumber",
+      "writerProfileId",
+      "agentRunId",
+      "headline",
+      "dek",
+      "bodyMarkdown",
+      "createdBy",
+      "createdAt",
+    ]) &&
+    isString(value.id) &&
+    isString(value.articleId) &&
+    value.revisionNumber === 1 &&
+    isString(value.writerProfileId) &&
+    isString(value.agentRunId) &&
+    isString(value.headline) &&
+    value.headline.trim().length > 0 &&
+    isStringOrNull(value.dek) &&
+    isString(value.bodyMarkdown) &&
+    value.bodyMarkdown.trim().length > 0 &&
+    isActor(value.createdBy) &&
+    value.createdBy.type === "agent" &&
+    value.createdBy.role === "writer" &&
+    value.createdBy.runId === value.agentRunId &&
+    isString(value.createdAt)
+  );
+}
+
+function isInspectionArticle(value: unknown, story: Story): boolean {
+  if (value === null) return true;
+  if (!isRecord(value) || !hasExactKeys(value, ["article", "revisions"])) return false;
+  const article = value.article;
+  const revisions = value.revisions;
+  return (
+    isArticle(article) &&
+    article.storyId === story.id &&
+    Array.isArray(revisions) &&
+    revisions.every((revision) => isArticleRevision(revision) && revision.articleId === article.id)
+  );
+}
+
 function isSource(value: unknown): value is UrlSource {
   return (
     isRecord(value) &&
@@ -506,7 +625,14 @@ function isAttachment(value: unknown): value is StorySourceAttachment {
 function isInspection(value: unknown): value is StoryInspection {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ["story", "sources", "assignment", "transitions", "agentRuns"]) ||
+    !hasExactKeys(value, [
+      "story",
+      "sources",
+      "assignment",
+      "transitions",
+      "agentRuns",
+      "article",
+    ]) ||
     !isStory(value.story) ||
     !Array.isArray(value.sources) ||
     !Array.isArray(value.transitions) ||
@@ -517,6 +643,7 @@ function isInspection(value: unknown): value is StoryInspection {
     return false;
   }
   const story = value.story;
+  const articleValid = isInspectionArticle(value.article, story);
   const assignmentValid =
     value.assignment === null ||
     (isRecord(value.assignment) &&
@@ -528,6 +655,7 @@ function isInspection(value: unknown): value is StoryInspection {
       value.assignment.writerProfile.role === "writer");
   return (
     assignmentValid &&
+    articleValid &&
     value.transitions.every((receipt) => receipt.storyId === story.id) &&
     value.agentRuns.every((run) => run.storyId === story.id) &&
     value.sources.every((item) => {
@@ -751,6 +879,28 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
           409: new Set(["ASSIGNMENT_PROPOSAL_NOT_ALLOWED", "AGENT_RUN_ID_CONFLICT"]),
           415: new Set(["UNSUPPORTED_MEDIA_TYPE"]),
           422: new Set(["ASSIGNMENT_EDITOR_EVIDENCE_REQUIRED", "WRITER_PROFILE_REQUIRED"]),
+        },
+      ),
+    createWriterDraft: (storyId) =>
+      request(
+        dependencies.fetch,
+        `/api/stories/${encodeURIComponent(storyId)}/writer-drafts`,
+        { method: "POST", headers: jsonHeaders, body: JSON.stringify({}) },
+        201,
+        "run",
+        isAgentRun,
+        {
+          400: new Set(["INVALID_JSON", "INVALID_REQUEST"]),
+          404: new Set(["STORY_NOT_FOUND"]),
+          409: new Set([
+            "WRITER_DRAFT_NOT_ALLOWED",
+            "ASSIGNMENT_REQUIRED",
+            "ARTICLE_ALREADY_EXISTS",
+            "WRITER_DRAFT_CONFLICT",
+            "AGENT_RUN_ID_CONFLICT",
+          ]),
+          415: new Set(["UNSUPPORTED_MEDIA_TYPE"]),
+          422: new Set(["WRITER_EVIDENCE_REQUIRED"]),
         },
       ),
   };

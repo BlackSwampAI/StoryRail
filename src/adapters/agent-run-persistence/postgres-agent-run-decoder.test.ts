@@ -63,6 +63,56 @@ describe("PostgreSQL AgentRun decoder", () => {
     expect(decodePostgresAgentRun({ ...row(failed), outcome: "failed" })).toEqual(failed);
   });
 
+  it("strictly decodes a Writer article_draft run", () => {
+    const writer = {
+      id: "writer-run-31",
+      storyId: "story-decoder-0030",
+      profileId: "writer-decoder-0030",
+      role: "writer",
+      operation: "article_draft",
+      model: { provider: "openrouter", model: "writer-model" },
+      prompt: { key: "storyrail_writer_draft", version: "1" },
+      requestedBy: { type: "operator", operatorId: "operator-decoder-0030" },
+      startedAt: "started",
+      completedAt: "completed",
+      input: {
+        story: { id: "story-decoder-0030", title: "Story", state: "assigned", revisionCycle: 0 },
+        assignment: {
+          id: "assignment-31",
+          storyId: "story-decoder-0030",
+          writerProfileId: "writer-decoder-0030",
+          sourceIds: ["source-decoder-0030"],
+          angle: "Angle",
+          brief: "Brief",
+          constraints: null,
+        },
+        evidence: [
+          {
+            sourceId: "source-decoder-0030",
+            relevance: "Primary",
+            evidenceKind: "raw",
+            evidenceId: "extraction-decoder-0030",
+          },
+        ],
+        unavailableSourceIds: [],
+      },
+      outcome: "succeeded",
+      articleId: "article-31",
+      revisionId: "revision-31",
+    };
+    expect(
+      decodePostgresAgentRun({
+        run_id: writer.id,
+        story_id: writer.storyId,
+        profile_id: writer.profileId,
+        role: writer.role,
+        operation: writer.operation,
+        outcome: writer.outcome,
+        payload: writer,
+      }),
+    ).toEqual(writer);
+  });
+
   it.each([
     { ...payload, extra: true },
     { ...payload, prompt: { ...payload.prompt, extra: true } },

@@ -240,7 +240,14 @@ export function describeStoryInspectionRepositoryContract(
 
       await expect(repository.inspect(story.id)).resolves.toEqual({
         ok: true,
-        inspection: { story, sources: [], assignment: null, transitions: [], agentRuns: [] },
+        inspection: {
+          story,
+          sources: [],
+          assignment: null,
+          transitions: [],
+          agentRuns: [],
+          article: null,
+        },
       });
     });
 
@@ -258,6 +265,7 @@ export function describeStoryInspectionRepositoryContract(
           assignment: null,
           transitions: [],
           agentRuns: [],
+          article: null,
         },
       });
     });
@@ -371,6 +379,7 @@ export function describeStoryInspectionRepositoryContract(
           assignment: null,
           transitions: [],
           agentRuns: [],
+          article: null,
         },
       });
     });
@@ -407,6 +416,7 @@ export function describeStoryInspectionRepositoryContract(
           assignment: null,
           transitions: [],
           agentRuns: [],
+          article: null,
         },
       });
     });
@@ -429,6 +439,7 @@ export function describeStoryInspectionRepositoryContract(
         inspection: {
           sources: [{ extractions: [extraction] }],
           agentRuns: [first, second],
+          article: null,
         },
       });
     });
@@ -465,6 +476,7 @@ export function describeStoryInspectionRepositoryContract(
           assignment: null,
           transitions: [],
           agentRuns: [],
+          article: null,
         },
       });
     });
@@ -562,6 +574,7 @@ export function describeStoryInspectionRepositoryContract(
         assignment: null,
         transitions: [],
         agentRuns: [],
+        article: null,
       });
       expect(second.inspection).not.toBe(first.inspection);
       expect(second.inspection.story).not.toBe(first.inspection.story);
@@ -647,6 +660,7 @@ export function createReferenceStoryInspectionRepositoryHarness(): StoryInspecti
               assignment: null,
               transitions: [],
               agentRuns: agentRuns.get(storyIdentity) ?? [],
+              article: null,
             }),
           };
         },

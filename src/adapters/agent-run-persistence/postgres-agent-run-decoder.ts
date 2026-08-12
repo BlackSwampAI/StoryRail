@@ -32,49 +32,78 @@ const actor = z.discriminatedUnion("type", [
 ]);
 const descriptor = z.object({ provider: nonEmpty, model: nonEmpty }).strict();
 const prompt = z.object({ key: nonEmpty, version: nonEmpty }).strict();
-const input = z
+const storyInput = z
   .object({
-    story: z
+    id: nonEmpty,
+    title: nonEmpty,
+    state: z.enum(STORY_STATES),
+    revisionCycle: z.number().int().min(0).max(2),
+  })
+  .strict();
+const evidence = z
+  .array(
+    z
       .object({
-        id: nonEmpty,
-        title: nonEmpty,
-        state: z.enum(STORY_STATES),
-        revisionCycle: z.number().int().min(0).max(2),
+        sourceId: nonEmpty,
+        relevance: nonEmpty,
+        evidenceKind: z.enum(["prepared", "raw"]),
+        evidenceId: nonEmpty,
       })
       .strict(),
-    evidence: z
-      .array(
-        z
-          .object({
-            sourceId: nonEmpty,
-            relevance: nonEmpty,
-            evidenceKind: z.enum(["prepared", "raw"]),
-            evidenceId: nonEmpty,
-          })
-          .strict(),
-      )
-      .min(1),
+  )
+  .min(1);
+const assignmentInput = z
+  .object({
+    story: storyInput,
+    evidence,
     unavailableSourceIds: z.array(nonEmpty),
     writerProfileIds: z.array(nonEmpty).min(1),
   })
   .strict();
-const common = {
+const writerInput = z
+  .object({
+    story: storyInput,
+    assignment: z
+      .object({
+        id: nonEmpty,
+        storyId: nonEmpty,
+        writerProfileId: nonEmpty,
+        sourceIds: z.array(nonEmpty).min(1),
+        angle: nonEmpty,
+        brief: nonEmpty,
+        constraints: nonEmpty.nullable(),
+      })
+      .strict(),
+    evidence,
+    unavailableSourceIds: z.array(nonEmpty),
+  })
+  .strict();
+const shared = {
   id: nonEmpty,
   storyId: nonEmpty,
   profileId: nonEmpty,
-  role: z.literal("assignment_editor"),
-  operation: z.literal("assignment_proposal"),
   model: descriptor,
   prompt,
   requestedBy: actor,
   startedAt: nonEmpty,
   completedAt: nonEmpty,
-  input,
 };
-const schema = z.discriminatedUnion("outcome", [
+const assignmentCommon = {
+  ...shared,
+  role: z.literal("assignment_editor"),
+  operation: z.literal("assignment_proposal"),
+  input: assignmentInput,
+};
+const writerCommon = {
+  ...shared,
+  role: z.literal("writer"),
+  operation: z.literal("article_draft"),
+  input: writerInput,
+};
+const schema = z.union([
   z
     .object({
-      ...common,
+      ...assignmentCommon,
       outcome: z.literal("succeeded"),
       proposal: z
         .object({
@@ -89,7 +118,22 @@ const schema = z.discriminatedUnion("outcome", [
     .strict(),
   z
     .object({
-      ...common,
+      ...assignmentCommon,
+      outcome: z.literal("failed"),
+      failure: z.object({ code: z.enum(MODEL_FAILURE_CODES), retryable: z.boolean() }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...writerCommon,
+      outcome: z.literal("succeeded"),
+      articleId: nonEmpty,
+      revisionId: nonEmpty,
+    })
+    .strict(),
+  z
+    .object({
+      ...writerCommon,
       outcome: z.literal("failed"),
       failure: z.object({ code: z.enum(MODEL_FAILURE_CODES), retryable: z.boolean() }).strict(),
     })
@@ -124,11 +168,17 @@ export function decodePostgresAgentRun(row: {
     typeof row.run_id !== "string" ||
     typeof row.story_id !== "string" ||
     typeof row.profile_id !== "string" ||
-    row.role !== "assignment_editor" ||
-    row.operation !== "assignment_proposal" ||
+    !(
+      (row.role === "assignment_editor" && row.operation === "assignment_proposal") ||
+      (row.role === "writer" && row.operation === "article_draft")
+    ) ||
     (row.outcome !== "succeeded" && row.outcome !== "failed") ||
     !record(payload) ||
-    !exact(payload, [...common, row.outcome === "succeeded" ? "proposal" : "failure"]) ||
+    !exact(payload, [
+      ...common,
+      row.outcome === "failed" ? "failure" : row.role === "writer" ? "articleId" : "proposal",
+      ...(row.outcome === "succeeded" && row.role === "writer" ? ["revisionId"] : []),
+    ]) ||
     payload.id !== row.run_id ||
     payload.storyId !== row.story_id ||
     payload.profileId !== row.profile_id ||
