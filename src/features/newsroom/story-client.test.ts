@@ -90,6 +90,7 @@ const INSPECTION = {
   assignment: null,
   transitions: [],
   agentRuns: [],
+  reviewDecisions: [],
   article: null,
 };
 const AGENT_RUN = {
@@ -242,6 +243,7 @@ describe("story-client", () => {
       assignment: null,
       transitions: [],
       agentRuns: [],
+      reviewDecisions: [],
       article: null,
     };
     const timestamps = [
@@ -273,6 +275,7 @@ describe("story-client", () => {
         assignment: null,
         transitions: [],
         agentRuns: [],
+        reviewDecisions: [],
         article: null,
       },
       INSPECTION,
@@ -330,6 +333,7 @@ describe("story-client", () => {
           assignment: null,
           transitions: [],
           agentRuns: [],
+          reviewDecisions: [],
           article: null,
         },
       }),
@@ -558,6 +562,37 @@ describe("story-client", () => {
       `/api/stories/${STORY.id}/writer-drafts`,
       expect.objectContaining({ method: "POST", body: "{}" }),
     );
+  });
+
+  it("uses the three focused supervised-review endpoints with exact request bodies", async () => {
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(500, { ok: false, error: { code: "INTERNAL_SERVER_ERROR", message: "Safe." } }),
+    );
+    const client = createStoryClient({ fetch });
+
+    await client.submitReview(STORY.id);
+    await client.runDirectorReview(STORY.id);
+    await client.recordReviewDecision(STORY.id, {
+      directorRunId: "director-run-38",
+      decision: "request_changes",
+      reason: "Support the timeline.",
+    });
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      `/api/stories/${STORY.id}/review-submissions`,
+      expect.objectContaining({ method: "POST", body: "{}" }),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      `/api/stories/${STORY.id}/director-reviews`,
+      expect.objectContaining({ method: "POST", body: "{}" }),
+    );
+    expect(JSON.parse(String(fetch.mock.calls[2]![1]?.body))).toEqual({
+      directorRunId: "director-run-38",
+      decision: "request_changes",
+      reason: "Support the timeline.",
+    });
   });
 
   it("exports only the focused browser client surface", async () => {

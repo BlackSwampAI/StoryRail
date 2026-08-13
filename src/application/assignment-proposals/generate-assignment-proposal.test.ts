@@ -136,6 +136,7 @@ function inspection(): StoryInspection {
     assignment: null,
     transitions: [],
     agentRuns: [],
+    reviewDecisions: [],
     article: null,
   };
 }

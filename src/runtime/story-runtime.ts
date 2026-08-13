@@ -5,6 +5,10 @@ import { Pool, type PoolConfig } from "pg";
 import { createPostgresStoryInspectionRepository } from "@/adapters/story-inspection";
 import { createPostgresAgentProfileRepository } from "@/adapters/agent-profile-persistence";
 import { createPostgresAssignmentPersistence } from "@/adapters/assignment-persistence";
+import {
+  createPostgresReviewDecisionPersistence,
+  createPostgresReviewSubmissionPersistence,
+} from "@/adapters/review-persistence";
 import { createPostgresStoryListingRepository } from "@/adapters/story-listing";
 import { createPostgresStoryRepository } from "@/adapters/story-persistence";
 import { createPostgresStorySourceAttachmentRepository } from "@/adapters/story-source-persistence";
@@ -22,13 +26,30 @@ import {
   type RecordSourceTriageDecisionWorkflow,
 } from "@/application/source-triage";
 import { createCreateStory, type CreateStoryWorkflow } from "@/application/story-creation";
+import {
+  createSubmitStoryReview,
+  type SubmitStoryReviewResult,
+} from "@/application/review-submissions";
+import {
+  createRecordStoryReviewDecision,
+  type RecordStoryReviewDecisionResult,
+} from "@/application/review-decisions";
 import type { StoryInspectionRepository } from "@/application/story-inspection";
 import type { StoryListingRepository } from "@/application/story-listing";
 import {
   createAttachSourceToStory,
   type AttachSourceToStoryWorkflow,
 } from "@/application/story-source-attachment";
-import { agentProfileId, assignmentId, storyId, transitionId } from "@/domain/editorial";
+import {
+  agentProfileId,
+  assignmentId,
+  reviewDecisionId,
+  storyId,
+  transitionId,
+  type AgentRunId,
+  type OperatorActor,
+  type ReviewDecisionValue,
+} from "@/domain/editorial";
 
 export interface StoryRuntime {
   readonly createStory: CreateStoryWorkflow;
@@ -40,6 +61,17 @@ export interface StoryRuntime {
   readonly createCustomWriterProfile: CreateCustomWriterProfileWorkflow;
   readonly listAgentProfiles: AgentProfileRepository["list"];
   readonly assignStory: AssignStoryWorkflow;
+  readonly submitStoryReview: (command: {
+    readonly storyId: import("@/domain/editorial").StoryId;
+    readonly submittedBy: OperatorActor;
+  }) => Promise<SubmitStoryReviewResult>;
+  readonly recordStoryReviewDecision: (command: {
+    readonly storyId: import("@/domain/editorial").StoryId;
+    readonly directorRunId: AgentRunId;
+    readonly decision: ReviewDecisionValue;
+    readonly reason: string;
+    readonly decidedBy: OperatorActor;
+  }) => Promise<RecordStoryReviewDecisionResult>;
   close(): Promise<void>;
 }
 
@@ -79,6 +111,8 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
   const sourceTriageRepository = createPostgresSourceTriageDecisionRepository({ pool });
   const agentProfileRepository = createPostgresAgentProfileRepository({ pool });
   const assignmentPersistence = createPostgresAssignmentPersistence({ pool });
+  const reviewSubmissionPersistence = createPostgresReviewSubmissionPersistence({ pool });
+  const reviewDecisionPersistence = createPostgresReviewDecisionPersistence({ pool });
   const createStory = createCreateStory({
     storyRepository,
     createStoryId: () => storyId(createUuid()),
@@ -108,6 +142,19 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
     createTransitionId: () => transitionId(createUuid()),
     now,
   });
+  const submitStoryReview = createSubmitStoryReview({
+    inspections: inspectionRepository,
+    persistence: reviewSubmissionPersistence,
+    createTransitionId: () => transitionId(createUuid()),
+    now,
+  });
+  const recordStoryReviewDecision = createRecordStoryReviewDecision({
+    inspections: inspectionRepository,
+    persistence: reviewDecisionPersistence,
+    createDecisionId: () => reviewDecisionId(createUuid()),
+    createTransitionId: () => transitionId(createUuid()),
+    now,
+  });
   let closePromise: Promise<void> | undefined;
 
   return Object.freeze({
@@ -120,6 +167,8 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
     createCustomWriterProfile,
     listAgentProfiles,
     assignStory,
+    submitStoryReview,
+    recordStoryReviewDecision,
     close() {
       closePromise ??= Promise.resolve().then(() => pool.end());
       return closePromise;

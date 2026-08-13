@@ -1,6 +1,7 @@
 import { MODEL_FAILURE_CODES } from "./source-evidence-preparation-types";
 import { AGENT_ROLES, STORY_STATES, type EditorialActor } from "./types";
 import { createAssignmentProposal } from "./assignment-proposal";
+import { createDirectorReview } from "./director-review";
 import type {
   AgentRun,
   AgentRunValidationCode,
@@ -39,7 +40,8 @@ export function recordAgentRun(candidate: AgentRun): RecordAgentRunResult {
   }
   if (!(
     (candidate.role === "assignment_editor" && candidate.operation === "assignment_proposal") ||
-    (candidate.role === "writer" && candidate.operation === "article_draft")
+    (candidate.role === "writer" && candidate.operation === "article_draft") ||
+    (candidate.role === "editor_in_chief" && candidate.operation === "article_review")
   )) {
     return invalid(
       "AGENT_RUN_ROLE_OPERATION_INVALID",
@@ -109,7 +111,7 @@ export function recordAgentRun(candidate: AgentRun): RecordAgentRunResult {
       }
       return { ok: true, run: structuredClone(candidate) };
     }
-  } else {
+  } else if (candidate.role === "assignment_editor") {
     const writerProfileIds = candidate.input.writerProfileIds;
     if (
       writerProfileIds.length === 0 ||
@@ -129,6 +131,42 @@ export function recordAgentRun(candidate: AgentRun): RecordAgentRunResult {
         ok: true,
         run: structuredClone({ ...candidate, proposal: proposal.proposal }),
       };
+    }
+  } else {
+    const { assignment, article, revision } = candidate.input;
+    if (
+      candidate.input.story.state !== "in_review" ||
+      assignment.storyId !== candidate.storyId ||
+      !nonEmpty(assignment.id) ||
+      !nonEmpty(assignment.writerProfileId) ||
+      assignment.sourceIds.length === 0 ||
+      !assignment.sourceIds.every(nonEmpty) ||
+      new Set(assignment.sourceIds).size !== assignment.sourceIds.length ||
+      !nonEmpty(assignment.angle) ||
+      !nonEmpty(assignment.brief) ||
+      (assignment.constraints !== null && !nonEmpty(assignment.constraints)) ||
+      article.assignmentId !== assignment.id ||
+      !nonEmpty(article.id) ||
+      revision.articleId !== article.id ||
+      revision.revisionNumber !== 1 ||
+      revision.writerProfileId !== assignment.writerProfileId ||
+      !nonEmpty(revision.id) ||
+      !nonEmpty(revision.writerProfileId) ||
+      !nonEmpty(revision.agentRunId) ||
+      !nonEmpty(revision.headline) ||
+      (revision.dek !== null && !nonEmpty(revision.dek)) ||
+      !nonEmpty(revision.bodyMarkdown) ||
+      input.evidence.some(({ sourceId }) => !assignment.sourceIds.includes(sourceId)) ||
+      input.unavailableSourceIds.some((sourceId) => !assignment.sourceIds.includes(sourceId)) ||
+      input.evidence.length + input.unavailableSourceIds.length !== assignment.sourceIds.length
+    ) {
+      return invalid("AGENT_RUN_INPUT_INVALID", "Director AgentRun review input is invalid.");
+    }
+    if (candidate.outcome === "succeeded") {
+      const review = createDirectorReview(candidate.review);
+      if (!review.ok)
+        return invalid("AGENT_RUN_OUTCOME_INVALID", "Successful Director review is invalid.");
+      return { ok: true, run: structuredClone({ ...candidate, review: review.review }) };
     }
   }
   if (

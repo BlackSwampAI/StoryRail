@@ -5,7 +5,7 @@ export type AppendAgentRunResult =
   | {
       readonly ok: false;
       readonly error: {
-        readonly code: "AGENT_RUN_ID_CONFLICT";
+        readonly code: "AGENT_RUN_ID_CONFLICT" | "DIRECTOR_REVIEW_ALREADY_SUCCEEDED";
         readonly message: string;
         readonly runId: AgentRunId;
       };

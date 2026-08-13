@@ -48,11 +48,17 @@ flowchart LR
     EXISTING --> PROPOSE
     PROPOSE --> REVIEW[Operator review and editing]
     REVIEW --> ASSIGN[Durable Assignment + intake-to-assigned transition]
+    ASSIGN --> WRITE[Supervised Writer + Article Revision 1]
+    WRITE --> SUBMIT[Operator sends Article to review]
+    SUBMIT --> DIRECTOR[Advisory Director review]
+    DIRECTOR --> OPERATOR{Operator decision}
+    OPERATOR -->|Approve| APPROVED[Approved]
+    OPERATOR -->|Request changes| CHANGES[Changes requested]
 ```
 
 Prepared Evidence is model-derived, cleaned evidence. It never replaces the immutable raw extraction; both histories remain available for audit and survive triage and reload.
 
-Durable Profiles configure the Assignment Editor, Writer, and Director/editor-in-chief roles. The Assignment Editor can produce a supervised suggestion for an Intake Story. The operator reviews or edits it, then creates the durable Assignment. From Assigned, the operator may run the exact assigned Writer. That bounded execution uses only Assignment evidence, records a durable Writer AgentRun, creates the first Article and immutable Revision 1, and atomically moves the Story to In Progress. Revision, Director execution, approval, and publishing remain planned.
+Durable Profiles configure the Assignment Editor, Writer, and Director/editor-in-chief roles. After the supervised Writer creates immutable Revision 1, the operator explicitly submits it to review, runs the Director, and records an approval or request-changes decision. The Director is advisory: it cannot mutate the Article or Story, and the operator may override its recommendation.
 
 ## What works today
 
@@ -71,13 +77,14 @@ Durable Profiles configure the Assignment Editor, Writer, and Director/editor-in
 - Supervised Assignment Editor proposal generation through the provider-neutral structured-model boundary, with no browsing or tools.
 - Durable, append-ordered AgentRun history that records the exact Story, evidence references, Writer candidates, model, prompt version, requester, outcome, and proposal or safe failure.
 - Supervised Writer execution with Assignment-selected identity, Profile model override or `STORYRAIL_WRITER_MODEL` default, durable Article Revision 1, and an `assigned` to `in_progress` transition.
+- Supervised review submission, a durable Director AgentRun against the exact evidence IDs recorded by the Writer run, and an operator-owned ReviewDecision that atomically moves the Story to Approved or Changes Requested.
 - Operator review and editing of suggestions in the existing Assignment form; the manual Assignment remains the authoritative state-mutation boundary and remains attributed to the operator.
 
 ## Where StoryRail is going
 
 The planned alpha path continues from a Story through an Assignment Editor, a structured Assignment, a configurable Writer, a persisted Article, and independent Director/editor-in-chief review. The intended bounded revision loop ends in an operator-controlled approval or rejection, followed by a separate, explicit publish/export transition.
 
-Automatic Assignment Editor decisions, Writer revision, and Director execution are not operational today. Future work includes the review/request-changes loop, approval, rejection, publication, and retrieval hardening.
+Automatic Assignment Editor decisions, automatic Director decisions, and Writer Revision 2 are not implemented. Future work includes the revision workflow, rejection UI, publication, and retrieval hardening.
 
 ## Core concepts
 
@@ -123,6 +130,12 @@ pnpm dev
 
 Before starting the app, configure `.env` and apply every SQL file in `database/migrations/` externally in numeric order. StoryRail does not currently include a migration runner and does not apply migrations automatically; use the PostgreSQL administration or migration tool appropriate to your environment.
 
+For an existing development database already migrated through 0031, maintainers can apply Batch 0038 with the installed `pg` package (no host `psql` required):
+
+```bash
+STORYRAIL_DATABASE_URL=postgresql://storyrail:storyrail_dev@127.0.0.1:5432/storyrail node --input-type=module --eval "import { readFile } from 'node:fs/promises'; import pg from 'pg'; const client = new pg.Client({ connectionString: process.env.STORYRAIL_DATABASE_URL }); await client.connect(); try { await client.query(await readFile('database/migrations/0038-supervised-director-review.sql', 'utf8')); } finally { await client.end(); }"
+```
+
 Open [http://localhost:3000](http://localhost:3000) to use the development newsroom.
 
 ## Environment variables
@@ -136,9 +149,10 @@ Open [http://localhost:3000](http://localhost:3000) to use the development newsr
 | `STORYRAIL_EVIDENCE_PREPARATION_MODEL` | Prepared Evidence only            | Selects the OpenRouter model used for evidence preparation.                    |
 | `STORYRAIL_ASSIGNMENT_EDITOR_MODEL`    | Assignment Editor only            | Explicitly selects the OpenRouter model used for supervised proposals.         |
 | `STORYRAIL_WRITER_MODEL`               | Writer default                    | Used when the assigned Writer Profile has no OpenRouter model.                 |
+| `STORYRAIL_DIRECTOR_MODEL`             | Director default                  | Used when the built-in Director Profile has no OpenRouter model.               |
 | `STORYRAIL_TEST_DATABASE_URL`          | PostgreSQL integration tests only | Points to a disposable database named exactly `storyrail_test`.                |
 
-Normal Story, Inbox, triage, inspection, Agent Profile, and manual Assignment workflows do not require Firecrawl or OpenRouter. Writer execution is isolated: a Profile's OpenRouter model wins, otherwise `STORYRAIL_WRITER_MODEL` is required. Missing Writer configuration does not affect normal workflows.
+Normal Story, Inbox, triage, inspection, Agent Profile, and manual Assignment workflows do not require Firecrawl or OpenRouter. Writer and Director execution are isolated. Each Profile's explicit OpenRouter model wins; otherwise its `STORYRAIL_WRITER_MODEL` or `STORYRAIL_DIRECTOR_MODEL` fallback is required. The resolved model is recorded in the durable AgentRun and is not exposed as browser configuration.
 
 ## Development and validation
 
@@ -158,7 +172,7 @@ pnpm build
 
 ## Project status and limitations
 
-StoryRail is a development-oriented pre-alpha. It currently has no authentication, migrations are external/manual, and some anti-bot publishers remain inaccessible through Firecrawl. Supervised Assignment proposals, manual Assignment, supervised first-draft Writer execution, and durable Article Revision 1 are implemented. Revision, review, approval, rejection, and publishing are not.
+StoryRail is a development-oriented pre-alpha. It currently has no authentication, migrations are external/manual, and some anti-bot publishers remain inaccessible through Firecrawl. Supervised Assignment proposals, manual Assignment, first-draft Writer execution, Director review, and operator approval/request-changes decisions are implemented. Writer Revision 2, rejection UI, and publishing are not.
 
 ## Technical documentation
 

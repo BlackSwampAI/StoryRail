@@ -58,6 +58,7 @@ function inspection(agentRuns: StoryInspection["agentRuns"] = []): StoryInspecti
     assignment: null,
     transitions: [],
     agentRuns,
+    reviewDecisions: [],
     article: null,
   };
 }
@@ -92,6 +93,18 @@ function requests(): StoryClient {
       kind: "unavailable",
       message: STORY_REQUEST_UNAVAILABLE_MESSAGE,
     })),
+    submitReview: vi.fn<StoryClient["submitReview"]>(async () => ({
+      kind: "unavailable",
+      message: STORY_REQUEST_UNAVAILABLE_MESSAGE,
+    })),
+    runDirectorReview: vi.fn<StoryClient["runDirectorReview"]>(async () => ({
+      kind: "unavailable",
+      message: STORY_REQUEST_UNAVAILABLE_MESSAGE,
+    })),
+    recordReviewDecision: vi.fn<StoryClient["recordReviewDecision"]>(async () => ({
+      kind: "unavailable",
+      message: STORY_REQUEST_UNAVAILABLE_MESSAGE,
+    })),
   };
 }
 
@@ -104,6 +117,7 @@ function renderWorkspace(storyInspection: StoryInspection, storyRequests: StoryC
         staff={STAFF}
         onAssigned={vi.fn()}
         onWriterCompleted={vi.fn()}
+        onReviewStateChanged={vi.fn()}
       />
     </DragDropProvider>,
   );

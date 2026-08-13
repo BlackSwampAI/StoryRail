@@ -4,6 +4,7 @@ import type {
   Article,
   ArticleRevision,
   Assignment,
+  ReviewDecision,
   SourceExtraction,
   SourceEvidencePreparation,
   Story,
@@ -33,6 +34,7 @@ export interface StoryInspection {
     readonly article: Article;
     readonly revisions: readonly ArticleRevision[];
   } | null;
+  readonly reviewDecisions: readonly ReviewDecision[];
 }
 
 export interface StoryInspectionNotFoundError {

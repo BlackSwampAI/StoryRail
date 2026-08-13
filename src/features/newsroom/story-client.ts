@@ -8,6 +8,7 @@ import {
   type AgentRun,
   type Article,
   type ArticleRevision,
+  type ReviewDecision,
   type SourceExtraction,
   type SourceEvidencePreparation,
   type Story,
@@ -61,6 +62,26 @@ export interface StoryClient {
   >;
   readonly generateAssignmentProposal: (storyId: string) => Promise<StoryClientResult<AgentRun>>;
   readonly createWriterDraft: (storyId: string) => Promise<StoryClientResult<AgentRun>>;
+  readonly submitReview: (
+    storyId: string,
+  ) => Promise<
+    StoryClientResult<{ readonly story: Story; readonly transitionReceipt: StoryTransitionReceipt }>
+  >;
+  readonly runDirectorReview: (storyId: string) => Promise<StoryClientResult<AgentRun>>;
+  readonly recordReviewDecision: (
+    storyId: string,
+    command: {
+      readonly directorRunId: string;
+      readonly decision: "approve" | "request_changes";
+      readonly reason: string;
+    },
+  ) => Promise<
+    StoryClientResult<{
+      readonly decision: ReviewDecision;
+      readonly story: Story;
+      readonly transitionReceipt: StoryTransitionReceipt;
+    }>
+  >;
 }
 
 const STORY_STATES = new Set([
@@ -338,6 +359,7 @@ function isTransition(value: unknown): value is StoryTransitionReceipt {
 }
 
 function isAgentRun(value: unknown): value is AgentRun {
+  if (isDirectorAgentRun(value)) return true;
   if (isWriterAgentRun(value)) return true;
   if (
     !isRecord(value) ||
@@ -481,6 +503,140 @@ function isAgentRun(value: unknown): value is AgentRun {
     isString(value.failure.code) &&
     MODEL_FAILURE_CODE_SET.has(value.failure.code) &&
     typeof value.failure.retryable === "boolean"
+  );
+}
+
+function isReviewCheck(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ["status", "note"]) &&
+    (value.status === "pass" || value.status === "needs_changes") &&
+    isString(value.note) &&
+    value.note.trim().length > 0
+  );
+}
+
+function isDirectorAgentRun(value: unknown): value is AgentRun {
+  if (
+    !isRecord(value) ||
+    value.role !== "editor_in_chief" ||
+    value.operation !== "article_review" ||
+    !isString(value.id) ||
+    !isString(value.storyId) ||
+    !isString(value.profileId) ||
+    !isRecord(value.model) ||
+    !hasExactKeys(value.model, ["provider", "model"]) ||
+    !isString(value.model.provider) ||
+    !isString(value.model.model) ||
+    !isRecord(value.prompt) ||
+    !hasExactKeys(value.prompt, ["key", "version"]) ||
+    !isString(value.prompt.key) ||
+    !isString(value.prompt.version) ||
+    !isActor(value.requestedBy) ||
+    !isString(value.startedAt) ||
+    !isString(value.completedAt) ||
+    !isRecord(value.input) ||
+    !hasExactKeys(value.input, [
+      "story",
+      "assignment",
+      "article",
+      "revision",
+      "evidence",
+      "unavailableSourceIds",
+    ]) ||
+    !isRecord(value.input.story) ||
+    value.input.story.id !== value.storyId ||
+    !isRecord(value.input.assignment) ||
+    value.input.assignment.storyId !== value.storyId ||
+    !isRecord(value.input.article) ||
+    !isString(value.input.article.id) ||
+    !isRecord(value.input.revision) ||
+    value.input.revision.articleId !== value.input.article.id ||
+    !isString(value.input.revision.id) ||
+    !Array.isArray(value.input.evidence) ||
+    !Array.isArray(value.input.unavailableSourceIds)
+  )
+    return false;
+  const common = [
+    "id",
+    "storyId",
+    "profileId",
+    "role",
+    "operation",
+    "model",
+    "prompt",
+    "requestedBy",
+    "startedAt",
+    "completedAt",
+    "input",
+    "outcome",
+  ];
+  if (value.outcome === "failed")
+    return (
+      hasExactKeys(value, [...common, "failure"]) &&
+      isRecord(value.failure) &&
+      hasExactKeys(value.failure, ["code", "retryable"]) &&
+      isString(value.failure.code) &&
+      MODEL_FAILURE_CODE_SET.has(value.failure.code) &&
+      typeof value.failure.retryable === "boolean"
+    );
+  if (
+    value.outcome !== "succeeded" ||
+    !hasExactKeys(value, [...common, "review"]) ||
+    !isRecord(value.review)
+  )
+    return false;
+  const review = value.review;
+  const checks = review.checks;
+  const shapeValid =
+    hasExactKeys(review, ["recommendation", "summary", "checks", "revisionInstructions"]) &&
+    (review.recommendation === "approve" || review.recommendation === "request_changes") &&
+    isString(review.summary) &&
+    review.summary.trim().length > 0 &&
+    isRecord(checks) &&
+    hasExactKeys(checks, ["assignment", "accuracy", "headline", "structure", "style"]) &&
+    ["assignment", "accuracy", "headline", "structure", "style"].every((name) =>
+      isReviewCheck(checks[name]),
+    ) &&
+    (review.revisionInstructions === null ||
+      (isString(review.revisionInstructions) && review.revisionInstructions.trim().length > 0));
+  if (!shapeValid) return false;
+  const validatedChecks = checks as Record<string, unknown>;
+  const statuses = ["assignment", "accuracy", "headline", "structure", "style"].map(
+    (name) => (validatedChecks[name] as Record<string, unknown>).status,
+  );
+  return review.recommendation === "approve"
+    ? statuses.every((status) => status === "pass") && review.revisionInstructions === null
+    : statuses.some((status) => status === "needs_changes") &&
+        isString(review.revisionInstructions) &&
+        review.revisionInstructions.trim().length > 0;
+}
+
+function isReviewDecision(value: unknown): value is ReviewDecision {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, [
+      "id",
+      "storyId",
+      "articleId",
+      "revisionId",
+      "directorRunId",
+      "decision",
+      "reason",
+      "decidedBy",
+      "decidedAt",
+    ]) &&
+    isString(value.id) &&
+    isString(value.storyId) &&
+    isString(value.articleId) &&
+    isString(value.revisionId) &&
+    isString(value.directorRunId) &&
+    (value.decision === "approve" || value.decision === "request_changes") &&
+    isString(value.reason) &&
+    value.reason.trim().length > 0 &&
+    isActor(value.decidedBy) &&
+    value.decidedBy.type === "operator" &&
+    isString(value.decidedAt)
   );
 }
 
@@ -632,13 +788,16 @@ function isInspection(value: unknown): value is StoryInspection {
       "transitions",
       "agentRuns",
       "article",
+      "reviewDecisions",
     ]) ||
     !isStory(value.story) ||
     !Array.isArray(value.sources) ||
     !Array.isArray(value.transitions) ||
     !value.transitions.every(isTransition) ||
     !Array.isArray(value.agentRuns) ||
-    !value.agentRuns.every(isAgentRun)
+    !value.agentRuns.every(isAgentRun) ||
+    !Array.isArray(value.reviewDecisions) ||
+    !value.reviewDecisions.every(isReviewDecision)
   ) {
     return false;
   }
@@ -658,6 +817,7 @@ function isInspection(value: unknown): value is StoryInspection {
     articleValid &&
     value.transitions.every((receipt) => receipt.storyId === story.id) &&
     value.agentRuns.every((run) => run.storyId === story.id) &&
+    value.reviewDecisions.every((decision) => decision.storyId === story.id) &&
     value.sources.every((item) => {
       if (
         !isRecord(item) ||
@@ -903,6 +1063,108 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
           422: new Set(["WRITER_EVIDENCE_REQUIRED"]),
         },
       ),
+    async submitReview(storyId) {
+      try {
+        const response = await dependencies.fetch(
+          `/api/stories/${encodeURIComponent(storyId)}/review-submissions`,
+          {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({}),
+          },
+        );
+        const body: unknown = await response.json();
+        if (
+          isRecord(body) &&
+          response.status === 201 &&
+          body.ok === true &&
+          hasExactKeys(body, ["ok", "story", "transitionReceipt"]) &&
+          isStory(body.story) &&
+          isTransition(body.transitionReceipt)
+        )
+          return {
+            kind: "completed",
+            value: { story: body.story, transitionReceipt: body.transitionReceipt },
+          };
+        if (
+          isRecord(body) &&
+          body.ok === false &&
+          isApplicationError(body.error) &&
+          response.status >= 400 &&
+          response.status < 500
+        )
+          return { kind: "application-failure", error: body.error };
+        return unavailable();
+      } catch {
+        return unavailable();
+      }
+    },
+    runDirectorReview: (storyId) =>
+      request(
+        dependencies.fetch,
+        `/api/stories/${encodeURIComponent(storyId)}/director-reviews`,
+        { method: "POST", headers: jsonHeaders, body: JSON.stringify({}) },
+        201,
+        "run",
+        isAgentRun,
+        {
+          400: new Set(["INVALID_JSON", "INVALID_REQUEST"]),
+          404: new Set(["STORY_NOT_FOUND"]),
+          409: new Set([
+            "DIRECTOR_REVIEW_NOT_ALLOWED",
+            "DIRECTOR_REVIEW_ALREADY_SUCCEEDED",
+            "AGENT_RUN_ID_CONFLICT",
+          ]),
+          415: new Set(["UNSUPPORTED_MEDIA_TYPE"]),
+          422: new Set([
+            "ASSIGNMENT_REQUIRED",
+            "ARTICLE_REQUIRED",
+            "ARTICLE_REVISION_REQUIRED",
+            "DIRECTOR_EVIDENCE_UNAVAILABLE",
+          ]),
+        },
+      ),
+    async recordReviewDecision(storyId, command) {
+      try {
+        const response = await dependencies.fetch(
+          `/api/stories/${encodeURIComponent(storyId)}/review-decisions`,
+          {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify(command),
+          },
+        );
+        const body: unknown = await response.json();
+        if (
+          isRecord(body) &&
+          response.status === 201 &&
+          body.ok === true &&
+          hasExactKeys(body, ["ok", "decision", "story", "transitionReceipt"]) &&
+          isReviewDecision(body.decision) &&
+          isStory(body.story) &&
+          isTransition(body.transitionReceipt)
+        )
+          return {
+            kind: "completed",
+            value: {
+              decision: body.decision,
+              story: body.story,
+              transitionReceipt: body.transitionReceipt,
+            },
+          };
+        if (
+          isRecord(body) &&
+          body.ok === false &&
+          isApplicationError(body.error) &&
+          response.status >= 400 &&
+          response.status < 500
+        )
+          return { kind: "application-failure", error: body.error };
+        return unavailable();
+      } catch {
+        return unavailable();
+      }
+    },
   };
 }
 

@@ -55,6 +55,85 @@ const successful: AgentRun = {
 };
 
 describe("AgentRun", () => {
+  it("accepts editor_in_chief article_review success and failure", () => {
+    const common = {
+      id: agentRunId("director-run-38"),
+      storyId: storyId("story-38"),
+      profileId: agentProfileId("storyrail-director-v1"),
+      role: "editor_in_chief" as const,
+      operation: "article_review" as const,
+      model: { provider: "openrouter", model: "director-model" },
+      prompt: { key: "storyrail_director_review", version: "1" },
+      requestedBy: { type: "operator" as const, operatorId: operatorId("operator-38") },
+      startedAt: "started",
+      completedAt: "completed",
+      input: {
+        story: {
+          id: storyId("story-38"),
+          title: "Story",
+          state: "in_review" as const,
+          revisionCycle: 0,
+        },
+        assignment: {
+          id: assignmentId("assignment-38"),
+          storyId: storyId("story-38"),
+          writerProfileId: agentProfileId("writer-38"),
+          sourceIds: [sourceId("source-38")],
+          angle: "Angle",
+          brief: "Brief",
+          constraints: null,
+        },
+        article: { id: articleId("article-38"), assignmentId: assignmentId("assignment-38") },
+        revision: {
+          id: articleRevisionId("revision-38"),
+          articleId: articleId("article-38"),
+          revisionNumber: 1 as const,
+          writerProfileId: agentProfileId("writer-38"),
+          agentRunId: agentRunId("writer-run-38"),
+          headline: "Headline",
+          dek: null,
+          bodyMarkdown: "Body",
+        },
+        evidence: [
+          {
+            sourceId: sourceId("source-38"),
+            relevance: "Primary",
+            evidenceKind: "prepared" as const,
+            evidenceId: sourceEvidencePreparationId("preparation-38"),
+          },
+        ],
+        unavailableSourceIds: [],
+      },
+    };
+    const run: AgentRun = {
+      ...common,
+      outcome: "succeeded",
+      review: {
+        recommendation: "approve",
+        summary: "Ready.",
+        checks: {
+          assignment: { status: "pass", note: "Aligned." },
+          accuracy: { status: "pass", note: "Supported." },
+          headline: { status: "pass", note: "Supported." },
+          structure: { status: "pass", note: "Coherent." },
+          style: { status: "pass", note: "Clear." },
+        },
+        revisionInstructions: null,
+      },
+    };
+    expect(recordAgentRun(run)).toMatchObject({ ok: true });
+    expect(
+      recordAgentRun({
+        ...common,
+        outcome: "failed",
+        failure: { code: "MODEL_REQUEST_FAILED", retryable: true },
+      }),
+    ).toMatchObject({ ok: true });
+    expect(recordAgentRun({ ...run, role: "writer" } as never)).toMatchObject({
+      ok: false,
+      error: { code: "AGENT_RUN_ROLE_OPERATION_INVALID" },
+    });
+  });
   it("accepts Writer article_draft success references and rejects a mismatched operation", () => {
     const writerRun = {
       id: agentRunId("writer-run-31"),

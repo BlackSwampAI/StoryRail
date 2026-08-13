@@ -42,3 +42,5 @@ export {
 } from "./assignment-editor-runtime";
 export * from "./writer-configuration";
 export * from "./writer-runtime";
+export * from "./director-configuration";
+export * from "./director-runtime";

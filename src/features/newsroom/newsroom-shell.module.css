@@ -268,6 +268,103 @@
   container-type: inline-size;
 }
 
+.articleReviewWorkspace {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.reviewTask,
+.directorReview {
+  border: 1px solid #315044;
+  border-radius: 0.9rem;
+  background: #0e1d18;
+  padding: clamp(1.25rem, 3vw, 2rem);
+}
+
+.reviewTask h2,
+.directorReview h2,
+.directorReview h3 {
+  color: #f1f6f2;
+}
+
+.reviewChecks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+
+.reviewChecks article {
+  border: 1px solid #29443a;
+  border-radius: 0.7rem;
+  background: #0a1512;
+  padding: 1rem;
+}
+
+.reviewChecks h3 {
+  margin: 0 0 0.55rem;
+  font-size: 0.8rem;
+  text-transform: capitalize;
+}
+
+.reviewChecks strong {
+  color: #82cfb2;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+}
+
+.reviewChecks p,
+.revisionInstructions p {
+  color: #bac8c1;
+  line-height: 1.55;
+}
+
+.revisionInstructions,
+.decisionForm,
+.decisionResult {
+  margin-top: 1.25rem;
+  border-top: 1px solid #29443a;
+  padding-top: 1.25rem;
+}
+
+.decisionForm {
+  display: grid;
+  gap: 1rem;
+}
+
+.decisionForm fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.decisionForm legend,
+.decisionForm label {
+  color: #eef5f0;
+  font-weight: 700;
+}
+
+.decisionForm label {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.decisionForm textarea {
+  min-height: 7rem;
+  border: 1px solid #38594d;
+  border-radius: 0.6rem;
+  background: #09100e;
+  padding: 0.75rem;
+  color: #eef5f0;
+  font: inherit;
+}
+
+.decisionForm button[aria-pressed="true"] {
+  border-color: #79d8b4;
+  background: #203c32;
+  color: #f4f8f5;
+}
+
 .agentsWorkspace {
   display: grid;
   gap: 2rem;

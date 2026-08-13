@@ -113,6 +113,91 @@ describe("PostgreSQL AgentRun decoder", () => {
     ).toEqual(writer);
   });
 
+  it("strictly decodes a Director article_review run", () => {
+    const director = {
+      id: "director-run-38",
+      storyId: payload.storyId,
+      profileId: "storyrail-director-v1",
+      role: "editor_in_chief",
+      operation: "article_review",
+      model: { provider: "openrouter", model: "director-model" },
+      prompt: { key: "storyrail_director_review", version: "1" },
+      requestedBy: payload.requestedBy,
+      startedAt: "started",
+      completedAt: "completed",
+      input: {
+        story: { id: payload.storyId, title: "Story", state: "in_review", revisionCycle: 0 },
+        assignment: {
+          id: "assignment-38",
+          storyId: payload.storyId,
+          writerProfileId: "writer-38",
+          sourceIds: ["source-decoder-0030"],
+          angle: "Angle",
+          brief: "Brief",
+          constraints: null,
+        },
+        article: { id: "article-38", assignmentId: "assignment-38" },
+        revision: {
+          id: "revision-38",
+          articleId: "article-38",
+          revisionNumber: 1,
+          writerProfileId: "writer-38",
+          agentRunId: "writer-run-38",
+          headline: "Headline",
+          dek: null,
+          bodyMarkdown: "Body",
+        },
+        evidence: [
+          {
+            sourceId: "source-decoder-0030",
+            relevance: "Primary",
+            evidenceKind: "raw",
+            evidenceId: "extraction-decoder-0030",
+          },
+        ],
+        unavailableSourceIds: [],
+      },
+      outcome: "succeeded",
+      review: {
+        recommendation: "approve",
+        summary: "Ready.",
+        checks: {
+          assignment: { status: "pass", note: "Aligned." },
+          accuracy: { status: "pass", note: "Supported." },
+          headline: { status: "pass", note: "Supported." },
+          structure: { status: "pass", note: "Coherent." },
+          style: { status: "pass", note: "Clear." },
+        },
+        revisionInstructions: null,
+      },
+    };
+    expect(
+      decodePostgresAgentRun({
+        run_id: director.id,
+        story_id: director.storyId,
+        profile_id: director.profileId,
+        role: director.role,
+        operation: director.operation,
+        outcome: director.outcome,
+        payload: director,
+      }),
+    ).toEqual(director);
+    expect(() =>
+      decodePostgresAgentRun({
+        run_id: director.id,
+        story_id: director.storyId,
+        profile_id: director.profileId,
+        role: director.role,
+        operation: director.operation,
+        outcome: director.outcome,
+        payload: {
+          ...director,
+          review: { ...director.review, revisionInstructions: "Unexpected" },
+        },
+      }),
+    ).toThrowError(expect.objectContaining({ name: "PostgresAgentRunInvariantError" }));
+  });
+
   it.each([
     { ...payload, extra: true },
     { ...payload, prompt: { ...payload.prompt, extra: true } },

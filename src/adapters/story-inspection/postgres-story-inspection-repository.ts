@@ -8,6 +8,7 @@ import type {
   Article,
   ArticleRevision,
   Assignment,
+  ReviewDecision,
   AgentRole,
   AgentRunId,
   CanonicalSourceUrl,
@@ -38,6 +39,7 @@ import {
   decodePostgresArticle,
   decodePostgresArticleRevision,
 } from "../article-persistence/postgres-article-decoder";
+import { decodePostgresReviewDecision } from "../review-persistence";
 
 export interface CreatePostgresStoryInspectionRepositoryOptions {
   readonly pool: Pool;
@@ -72,6 +74,7 @@ interface StoryInspectionRow extends QueryResultRow {
   readonly article_assignment_id: unknown;
   readonly article_payload: unknown;
   readonly article_revision_rows: unknown;
+  readonly review_decision_rows: unknown;
 }
 
 interface AssembledStoryInspectionSource {
@@ -401,6 +404,20 @@ function decodeArticle(
   }
 }
 
+function decodeReviewDecisions(row: StoryInspectionRow): ReviewDecision[] {
+  if (!Array.isArray(row.review_decision_rows)) throw invariantError();
+  return row.review_decision_rows.map((value) => {
+    if (!isRecord(value)) throw invariantError();
+    try {
+      const decision = decodePostgresReviewDecision(value as never);
+      if (decision.storyId !== row.story_id) throw invariantError();
+      return decision;
+    } catch {
+      throw invariantError();
+    }
+  });
+}
+
 export function createPostgresStoryInspectionRepository(
   options: CreatePostgresStoryInspectionRepositoryOptions,
 ): StoryInspectionRepository {
@@ -478,7 +495,20 @@ export function createPostgresStoryInspectionRepository(
                   ) ORDER BY revision.revision_number ASC, revision.append_position ASC)
                   FROM storyrail.article_revisions AS revision
                   WHERE revision.article_id = article.article_id
-                ), '[]'::jsonb) END AS article_revision_rows
+                ), '[]'::jsonb) END AS article_revision_rows,
+                COALESCE((
+                  SELECT jsonb_agg(jsonb_build_object(
+                    'decision_id', decision.decision_id,
+                    'story_id', decision.story_id,
+                    'article_id', decision.article_id,
+                    'revision_id', decision.revision_id,
+                    'director_run_id', decision.director_run_id,
+                    'decision', decision.decision,
+                    'payload', decision.payload
+                  ) ORDER BY decision.append_position ASC)
+                  FROM storyrail.review_decisions AS decision
+                  WHERE decision.story_id = story.story_id
+                ), '[]'::jsonb) AS review_decision_rows
          FROM storyrail.stories AS story
          LEFT JOIN storyrail.story_source_attachments AS attachment
            ON attachment.story_id = story.story_id
@@ -519,6 +549,7 @@ export function createPostgresStoryInspectionRepository(
       const transitions = decodeTransitions(firstRow);
       const agentRuns = decodeAgentRuns(firstRow);
       const article = decodeArticle(firstRow);
+      const reviewDecisions = decodeReviewDecisions(firstRow);
       if (
         article !== null &&
         (assignment === null ||
@@ -539,6 +570,22 @@ export function createPostgresStoryInspectionRepository(
         })
       )
         throw invariantError();
+      if (
+        reviewDecisions.some((decision) => {
+          const run = agentRuns.find(({ id }) => id === decision.directorRunId);
+          const revision = article?.revisions.find(({ id }) => id === decision.revisionId);
+          return (
+            article === null ||
+            decision.articleId !== article.article.id ||
+            revision === undefined ||
+            run?.role !== "editor_in_chief" ||
+            run.outcome !== "succeeded" ||
+            run.input.article.id !== decision.articleId ||
+            run.input.revision.id !== decision.revisionId
+          );
+        })
+      )
+        throw invariantError();
       const seenSourceIds = new Set<SourceId>();
 
       for (const row of result.rows) {
@@ -550,7 +597,8 @@ export function createPostgresStoryInspectionRepository(
           !isDeepStrictEqual(decodeAssignment(row), assignment) ||
           !isDeepStrictEqual(decodeTransitions(row), transitions) ||
           !isDeepStrictEqual(decodeAgentRuns(row), agentRuns) ||
-          !isDeepStrictEqual(decodeArticle(row), article)
+          !isDeepStrictEqual(decodeArticle(row), article) ||
+          !isDeepStrictEqual(decodeReviewDecisions(row), reviewDecisions)
         )
           throw invariantError();
 
@@ -577,7 +625,15 @@ export function createPostgresStoryInspectionRepository(
 
       return {
         ok: true,
-        inspection: { story, sources, assignment, transitions, agentRuns, article },
+        inspection: {
+          story,
+          sources,
+          assignment,
+          transitions,
+          agentRuns,
+          article,
+          reviewDecisions,
+        },
       };
     },
   };
