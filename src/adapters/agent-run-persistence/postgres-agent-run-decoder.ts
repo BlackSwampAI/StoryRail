@@ -87,7 +87,7 @@ const directorInput = z
       .object({
         id: nonEmpty,
         articleId: nonEmpty,
-        revisionNumber: z.literal(1),
+        revisionNumber: z.number().int().min(1).max(3),
         writerProfileId: nonEmpty,
         agentRunId: nonEmpty,
         headline: nonEmpty,
@@ -145,6 +145,29 @@ const review = z
     revisionInstructions: nonEmpty.nullable(),
   })
   .strict();
+const writerRevisionCommon = {
+  ...shared,
+  role: z.literal("writer"),
+  operation: z.literal("article_revision"),
+  input: writerInput.extend({
+    article: z.object({ id: nonEmpty, assignmentId: nonEmpty }).strict(),
+    revision: directorInput.shape.revision,
+    directorReview: review,
+    reviewDecision: z
+      .object({
+        id: nonEmpty,
+        storyId: nonEmpty,
+        articleId: nonEmpty,
+        revisionId: nonEmpty,
+        directorRunId: nonEmpty,
+        decision: z.literal("request_changes"),
+        reason: nonEmpty,
+        decidedBy: z.object({ type: z.literal("operator"), operatorId: nonEmpty }).strict(),
+        decidedAt: nonEmpty,
+      })
+      .strict(),
+  }),
+};
 const schema = z.union([
   z
     .object({
@@ -174,6 +197,21 @@ const schema = z.union([
       outcome: z.literal("succeeded"),
       articleId: nonEmpty,
       revisionId: nonEmpty,
+    })
+    .strict(),
+  z
+    .object({
+      ...writerRevisionCommon,
+      outcome: z.literal("succeeded"),
+      articleId: nonEmpty,
+      revisionId: nonEmpty,
+    })
+    .strict(),
+  z
+    .object({
+      ...writerRevisionCommon,
+      outcome: z.literal("failed"),
+      failure: z.object({ code: z.enum(MODEL_FAILURE_CODES), retryable: z.boolean() }).strict(),
     })
     .strict(),
   z
@@ -223,7 +261,8 @@ export function decodePostgresAgentRun(row: {
     typeof row.profile_id !== "string" ||
     !(
       (row.role === "assignment_editor" && row.operation === "assignment_proposal") ||
-      (row.role === "writer" && row.operation === "article_draft") ||
+      (row.role === "writer" &&
+        (row.operation === "article_draft" || row.operation === "article_revision")) ||
       (row.role === "editor_in_chief" && row.operation === "article_review")
     ) ||
     (row.outcome !== "succeeded" && row.outcome !== "failed") ||

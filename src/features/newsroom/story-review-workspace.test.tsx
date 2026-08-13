@@ -19,6 +19,7 @@ const requests: StoryClient = {
   assignStory: vi.fn(unavailable),
   generateAssignmentProposal: vi.fn(unavailable),
   createWriterDraft: vi.fn(unavailable),
+  createWriterRevision: vi.fn(unavailable),
   submitReview: vi.fn(unavailable),
   runDirectorReview: vi.fn(unavailable),
   recordReviewDecision: vi.fn(unavailable),
@@ -169,5 +170,228 @@ describe("Director review workspace", () => {
       "Support the timeline or remove the claim.",
     );
     expect(screen.getByRole("button", { name: "Record decision" })).toBeVisible();
+  });
+
+  it("offers the bounded Writer revision after an operator requests changes", async () => {
+    const reviewed = inspection();
+    const revisionRequested = {
+      ...reviewed,
+      story: { ...reviewed.story, state: "changes_requested" as const, revisionCycle: 1 },
+      reviewDecisions: [
+        {
+          id: "decision-41",
+          storyId: reviewed.story.id,
+          articleId: reviewed.article!.article.id,
+          revisionId: reviewed.article!.revisions[0]!.id,
+          directorRunId: reviewed.agentRuns[0]!.id,
+          decision: "request_changes" as const,
+          reason: "Support the timeline or remove the claim.",
+          decidedBy: { type: "operator" as const, operatorId: "operator-38" },
+          decidedAt: "decided",
+        },
+      ],
+    } as unknown as StoryInspection;
+    const createWriterRevision = vi.fn<StoryClient["createWriterRevision"]>(async () => ({
+      kind: "application-failure",
+      error: { code: "WRITER_EVIDENCE_UNAVAILABLE", message: "Evidence unavailable." },
+    }));
+
+    render(
+      <DragDropProvider>
+        <StoryWorkspace
+          inspection={revisionRequested}
+          requests={{ ...requests, createWriterRevision }}
+          staff={{ kind: "loaded", profiles: [] }}
+          onAssigned={vi.fn()}
+          onWriterCompleted={vi.fn()}
+          onReviewStateChanged={vi.fn()}
+        />
+      </DragDropProvider>,
+    );
+
+    expect(screen.getByRole("heading", { name: "Create Article Revision 2" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Run Writer Revision" }));
+    expect(createWriterRevision).toHaveBeenCalledWith(reviewed.story.id);
+    expect(await screen.findByText("Evidence unavailable.")).toBeVisible();
+  });
+
+  it("requires a fresh Director run for the newly revised Article", () => {
+    const reviewed = inspection();
+    const firstRevision = reviewed.article!.revisions[0]!;
+    const revised = {
+      ...reviewed,
+      story: { ...reviewed.story, state: "in_review" as const, revisionCycle: 1 },
+      article: {
+        article: reviewed.article!.article,
+        revisions: [
+          firstRevision,
+          {
+            ...firstRevision,
+            id: "revision-41-2",
+            revisionNumber: 2 as const,
+            agentRunId: "writer-run-41-2",
+            headline: "Revised Article headline",
+            createdBy: {
+              type: "agent" as const,
+              role: "writer" as const,
+              runId: "writer-run-41-2",
+            },
+            createdAt: "revised",
+          },
+        ],
+      },
+    } as unknown as StoryInspection;
+
+    render(
+      <DragDropProvider>
+        <StoryWorkspace
+          inspection={revised}
+          requests={requests}
+          staff={{ kind: "loaded", profiles: [] }}
+          onAssigned={vi.fn()}
+          onWriterCompleted={vi.fn()}
+          onReviewStateChanged={vi.fn()}
+        />
+      </DragDropProvider>,
+    );
+
+    expect(screen.getByRole("button", { name: "Run Director" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Request changes" })).not.toBeInTheDocument();
+  });
+
+  it("shows the shared pending surface and no action while Writer revision is active", async () => {
+    const reviewed = inspection();
+    const revisionRequested = {
+      ...reviewed,
+      story: { ...reviewed.story, state: "changes_requested" as const, revisionCycle: 1 },
+      reviewDecisions: [
+        {
+          id: "decision-pending-41",
+          storyId: reviewed.story.id,
+          articleId: reviewed.article!.article.id,
+          revisionId: reviewed.article!.revisions[0]!.id,
+          directorRunId: reviewed.agentRuns[0]!.id,
+          decision: "request_changes" as const,
+          reason: "Revise it.",
+          decidedBy: { type: "operator" as const, operatorId: "operator-38" },
+          decidedAt: "decided",
+        },
+      ],
+    } as unknown as StoryInspection;
+    const createWriterRevision = vi.fn<StoryClient["createWriterRevision"]>(
+      async () => new Promise<never>(() => undefined),
+    );
+    render(
+      <DragDropProvider>
+        <StoryWorkspace
+          inspection={revisionRequested}
+          requests={{ ...requests, createWriterRevision }}
+          staff={{ kind: "loaded", profiles: [] }}
+          onAssigned={vi.fn()}
+          onWriterCompleted={vi.fn()}
+          onReviewStateChanged={vi.fn()}
+        />
+      </DragDropProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Run Writer Revision" }));
+    const pending = await screen.findByRole("status", {
+      name: "Writer is revising the Article…",
+    });
+    expect(pending).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("heading", { name: "Article headline" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Run Writer Revision" })).not.toBeInTheDocument();
+  });
+
+  it("uses the shared pending surface for Director review", async () => {
+    const reviewed = inspection();
+    const awaitingDirector = { ...reviewed, agentRuns: [] } as StoryInspection;
+    const runDirectorReview = vi.fn<StoryClient["runDirectorReview"]>(
+      async () => new Promise<never>(() => undefined),
+    );
+    render(
+      <DragDropProvider>
+        <StoryWorkspace
+          inspection={awaitingDirector}
+          requests={{ ...requests, runDirectorReview }}
+          staff={{ kind: "loaded", profiles: [] }}
+          onAssigned={vi.fn()}
+          onWriterCompleted={vi.fn()}
+          onReviewStateChanged={vi.fn()}
+        />
+      </DragDropProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Run Director" }));
+    expect(
+      await screen.findByRole("status", { name: "Director is reviewing the Article…" }),
+    ).toHaveAttribute("aria-busy", "true");
+    expect(screen.queryByRole("button", { name: "Run Director" })).not.toBeInTheDocument();
+  });
+
+  it("uses the shared pending surface for the initial Writer", async () => {
+    const reviewed = inspection();
+    const assigned = {
+      ...reviewed,
+      story: { ...reviewed.story, state: "assigned" as const },
+      article: null,
+      agentRuns: [],
+    } as StoryInspection;
+    const createWriterDraft = vi.fn<StoryClient["createWriterDraft"]>(
+      async () => new Promise<never>(() => undefined),
+    );
+    render(
+      <DragDropProvider>
+        <StoryWorkspace
+          inspection={assigned}
+          requests={{ ...requests, createWriterDraft }}
+          staff={{ kind: "loaded", profiles: [] }}
+          onAssigned={vi.fn()}
+          onWriterCompleted={vi.fn()}
+          onReviewStateChanged={vi.fn()}
+        />
+      </DragDropProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Run Writer" }));
+    expect(
+      await screen.findByRole("status", { name: "Writer is drafting the Article…" }),
+    ).toHaveAttribute("aria-busy", "true");
+    expect(screen.queryByRole("button", { name: "Run Writer" })).not.toBeInTheDocument();
+  });
+
+  it("uses the shared pending surface for the Assignment Editor", async () => {
+    const reviewed = inspection();
+    const intake = {
+      ...reviewed,
+      story: { ...reviewed.story, state: "intake" as const },
+      assignment: null,
+      article: null,
+      agentRuns: [],
+      reviewDecisions: [],
+    } as StoryInspection;
+    const generateAssignmentProposal = vi.fn<StoryClient["generateAssignmentProposal"]>(
+      async () => new Promise<never>(() => undefined),
+    );
+    render(
+      <DragDropProvider>
+        <StoryWorkspace
+          inspection={intake}
+          requests={{ ...requests, generateAssignmentProposal }}
+          staff={{ kind: "loaded", profiles: [] }}
+          onAssigned={vi.fn()}
+          onWriterCompleted={vi.fn()}
+          onReviewStateChanged={vi.fn()}
+        />
+      </DragDropProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Ask Assignment Editor" }));
+    expect(
+      await screen.findByRole("status", {
+        name: "Assignment Editor is preparing a recommendation…",
+      }),
+    ).toHaveAttribute("aria-busy", "true");
+    expect(screen.queryByRole("button", { name: "Ask Assignment Editor" })).not.toBeInTheDocument();
   });
 });

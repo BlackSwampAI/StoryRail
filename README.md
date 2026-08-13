@@ -54,11 +54,13 @@ flowchart LR
     DIRECTOR --> OPERATOR{Operator decision}
     OPERATOR -->|Approve| APPROVED[Approved]
     OPERATOR -->|Request changes| CHANGES[Changes requested]
+    CHANGES --> REVISE[Supervised Writer + next immutable revision]
+    REVISE --> SUBMIT
 ```
 
 Prepared Evidence is model-derived, cleaned evidence. It never replaces the immutable raw extraction; both histories remain available for audit and survive triage and reload.
 
-Durable Profiles configure the Assignment Editor, Writer, and Director/editor-in-chief roles. After the supervised Writer creates immutable Revision 1, the operator explicitly submits it to review, runs the Director, and records an approval or request-changes decision. The Director is advisory: it cannot mutate the Article or Story, and the operator may override its recommendation.
+Durable Profiles configure the Assignment Editor, Writer, and Director/editor-in-chief roles. After the supervised Writer creates an immutable revision, the operator explicitly submits it to review, runs the Director, and records an approval or request-changes decision. A request-changes decision lets the Writer create the next immutable revision from the exact historical evidence, Director review, and authoritative operator reason. The Director is advisory, and the existing two-cycle Story limit bounds Articles at Revision 3.
 
 ## What works today
 
@@ -78,13 +80,14 @@ Durable Profiles configure the Assignment Editor, Writer, and Director/editor-in
 - Durable, append-ordered AgentRun history that records the exact Story, evidence references, Writer candidates, model, prompt version, requester, outcome, and proposal or safe failure.
 - Supervised Writer execution with Assignment-selected identity, Profile model override or `STORYRAIL_WRITER_MODEL` default, durable Article Revision 1, and an `assigned` to `in_progress` transition.
 - Supervised review submission, a durable Director AgentRun against the exact evidence IDs recorded by the Writer run, and an operator-owned ReviewDecision that atomically moves the Story to Approved or Changes Requested.
+- Supervised Writer revisions after Request Changes, with immutable Revision 2/3 history, exact evidence reuse, operator-owned revision direction, and an atomic return to In Progress.
 - Operator review and editing of suggestions in the existing Assignment form; the manual Assignment remains the authoritative state-mutation boundary and remains attributed to the operator.
 
 ## Where StoryRail is going
 
 The planned alpha path continues from a Story through an Assignment Editor, a structured Assignment, a configurable Writer, a persisted Article, and independent Director/editor-in-chief review. The intended bounded revision loop ends in an operator-controlled approval or rejection, followed by a separate, explicit publish/export transition.
 
-Automatic Assignment Editor decisions, automatic Director decisions, and Writer Revision 2 are not implemented. Future work includes the revision workflow, rejection UI, publication, and retrieval hardening.
+Automatic Assignment Editor decisions and automatic Director decisions are not implemented. Future work includes rejection UI, publication, and retrieval hardening.
 
 ## Core concepts
 
@@ -98,8 +101,8 @@ Automatic Assignment Editor decisions, automatic Director decisions, and Writer 
 - **Assignment** — an immutable operator-created brief that selects a Writer Profile, records angle/brief/optional constraints and provenance, and snapshots attached Source identities.
 - **Assignment Proposal** — a supervised Assignment Editor suggestion that prefills the manual Assignment form but cannot create an Assignment or transition a Story.
 - **AgentRun** — one immutable execution record containing bounded input references, configuration, timing, and a structured success or failure outcome.
-- **Writer and Article** — supervised Writer execution creates the first durable Article revision from the Assignment; it cannot browse, use tools, revise, or send work to review.
-- **Director** — a future independently supervised review role; no Director execution is implemented.
+- **Writer and Article** — supervised Writer execution creates immutable Article revisions from the Assignment and exact durable evidence; it cannot browse, use tools, or send work to review.
+- **Director** — an independently supervised advisory review role whose recommendation cannot mutate Article or Story state.
 
 ## Architecture
 
@@ -172,7 +175,7 @@ pnpm build
 
 ## Project status and limitations
 
-StoryRail is a development-oriented pre-alpha. It currently has no authentication, migrations are external/manual, and some anti-bot publishers remain inaccessible through Firecrawl. Supervised Assignment proposals, manual Assignment, first-draft Writer execution, Director review, and operator approval/request-changes decisions are implemented. Writer Revision 2, rejection UI, and publishing are not.
+StoryRail is a development-oriented pre-alpha. It currently has no authentication, migrations are external/manual, and some anti-bot publishers remain inaccessible through Firecrawl. Supervised Assignment proposals, manual Assignment, bounded Writer drafting/revision, Director review, and operator approval/request-changes decisions are implemented. Rejection UI and publishing are not.
 
 ## Technical documentation
 

@@ -13,6 +13,7 @@ import {
 } from "@/domain/editorial";
 
 import { ArticleReader } from "./article-reader";
+import { EditorialTaskPending } from "./editorial-task-pending";
 import { STORY_STATE_LABELS } from "./newsroom-state";
 import { WRITER_ASSIGNMENT_DROP_ID, WRITER_DRAG_TYPE, type StaffState } from "./newsroom-staff";
 import styles from "./newsroom-shell.module.css";
@@ -156,7 +157,10 @@ function WriterRuns({ runs }: Readonly<{ runs: readonly AgentRun[] }>) {
       ) : (
         writerRuns.map((run) => (
           <article key={run.id} className={styles.auditRecord}>
-            <h5>Article draft · {run.outcome}</h5>
+            <h5>
+              {run.operation === "article_draft" ? "Article draft" : "Article revision"} ·{" "}
+              {run.outcome}
+            </h5>
             <dl className={styles.auditGrid}>
               <div>
                 <dt>Run ID</dt>
@@ -182,6 +186,18 @@ function WriterRuns({ runs }: Readonly<{ runs: readonly AgentRun[] }>) {
                 <dt>Assignment ID</dt>
                 <dd>{run.input.assignment.id}</dd>
               </div>
+              {run.operation === "article_revision" ? (
+                <>
+                  <div>
+                    <dt>Previous Revision</dt>
+                    <dd>{run.input.revision.id}</dd>
+                  </div>
+                  <div>
+                    <dt>Operator request</dt>
+                    <dd>{run.input.reviewDecision.reason}</dd>
+                  </div>
+                </>
+              ) : null}
               <div>
                 <dt>Requested by</dt>
                 <dd>{actorLabel(run.requestedBy)}</dd>
@@ -746,6 +762,7 @@ export function StoryWorkspace({
   const [constraints, setConstraints] = useState(durableProposal?.proposal.constraints ?? "");
   const [reason, setReason] = useState(durableProposal?.proposal.reason ?? "");
   const [writerOverridden, setWriterOverridden] = useState(false);
+  const currentRevisionId = article?.revisions.at(-1)?.id;
   const successfulDirectorRun = [...runs]
     .reverse()
     .find(
@@ -754,7 +771,10 @@ export function StoryWorkspace({
       ): run is Extract<
         AgentRun,
         { readonly role: "editor_in_chief"; readonly outcome: "succeeded" }
-      > => run.role === "editor_in_chief" && run.outcome === "succeeded",
+      > =>
+        run.role === "editor_in_chief" &&
+        run.outcome === "succeeded" &&
+        run.input.revision.id === currentRevisionId,
     );
   const failedDirectorRun = [...runs]
     .reverse()
@@ -764,9 +784,14 @@ export function StoryWorkspace({
       ): run is Extract<
         AgentRun,
         { readonly role: "editor_in_chief"; readonly outcome: "failed" }
-      > => run.role === "editor_in_chief" && run.outcome === "failed",
+      > =>
+        run.role === "editor_in_chief" &&
+        run.outcome === "failed" &&
+        run.input.revision.id === currentRevisionId,
     );
-  const existingDecision = inspection.reviewDecisions.at(-1);
+  const existingDecision = [...inspection.reviewDecisions]
+    .reverse()
+    .find((decision) => decision.revisionId === currentRevisionId);
   const [operatorDecision, setOperatorDecision] = useState<"approve" | "request_changes" | null>(
     existingDecision?.decision ?? null,
   );
@@ -914,6 +939,47 @@ export function StoryWorkspace({
     }
   }
 
+  async function runWriterRevision() {
+    if (writerPending) return;
+    setWriterPending(true);
+    setWriterStatus(null);
+    try {
+      const result = await requests.createWriterRevision(story.id);
+      if (result.kind !== "completed") {
+        setWriterStatus(
+          result.kind === "application-failure" ? result.error.message : result.message,
+        );
+        return;
+      }
+      setRuns((current) => [...current, result.value]);
+      if (
+        result.value.role !== "writer" ||
+        result.value.operation !== "article_revision" ||
+        result.value.outcome === "failed"
+      ) {
+        if (
+          result.value.role === "writer" &&
+          result.value.operation === "article_revision" &&
+          result.value.outcome === "failed"
+        )
+          setWriterStatus(
+            `Writer failed: ${result.value.failure.code}. Retryable: ${result.value.failure.retryable ? "yes" : "no"}.`,
+          );
+        return;
+      }
+      const refreshed = await requests.inspectStory(story.id);
+      if (refreshed.kind === "completed") onWriterCompleted(refreshed.value);
+      else
+        setWriterStatus(
+          "Revision saved, but authoritative inspection refresh is unavailable. Reopen the Story.",
+        );
+    } catch {
+      setWriterStatus("The Writer revision request could not be completed.");
+    } finally {
+      setWriterPending(false);
+    }
+  }
+
   async function refreshAfterReviewChange(message: string) {
     const refreshed = await requests.inspectStory(story.id);
     if (refreshed.kind === "completed") onReviewStateChanged(refreshed.value);
@@ -1047,7 +1113,14 @@ export function StoryWorkspace({
               writerName={assignment?.writerProfile.name ?? "Writer"}
               headingId="current-task-heading"
             />
-            {story.state === "in_progress" ? (
+            {story.state === "changes_requested" && writerPending ? (
+              <EditorialTaskPending
+                label="Current task · Writer revision"
+                headline="Writer is revising the Article…"
+                subtitle="Applying the operator decision against the exact historical evidence behind this revision."
+                headingId="writer-revision-pending-heading"
+              />
+            ) : story.state === "in_progress" ? (
               <section className={styles.reviewTask} aria-labelledby="review-submission-heading">
                 <p className={styles.currentTaskLabel}>Current task · Editorial review</p>
                 <h2 id="review-submission-heading">Ready for review</h2>
@@ -1062,14 +1135,12 @@ export function StoryWorkspace({
                 </button>
               </section>
             ) : story.state === "in_review" && directorPending ? (
-              <section className={styles.progressCard} role="status" aria-busy="true">
-                <span className={styles.progressMark} aria-hidden="true" />
-                <div>
-                  <p className={styles.currentTaskLabel}>Current task · Director review</p>
-                  <h2>Director is reviewing the Article…</h2>
-                  <p>Checking the Assignment and exact evidence used by the Writer.</p>
-                </div>
-              </section>
+              <EditorialTaskPending
+                label="Current task · Director review"
+                headline="Director is reviewing the Article…"
+                subtitle="Checking the Assignment and exact evidence used by the Writer."
+                headingId="director-review-pending-heading"
+              />
             ) : story.state === "in_review" && !successfulDirectorRun ? (
               <section className={styles.reviewTask} aria-labelledby="director-task-heading">
                 <p className={styles.currentTaskLabel}>Current task · Director review</p>
@@ -1183,8 +1254,24 @@ export function StoryWorkspace({
                     — {existingDecision.reason}
                   </p>
                 ) : null}
-                {story.state === "changes_requested" ? (
-                  <p className={styles.inlineAlert}>Writer revision required.</p>
+                {story.state === "changes_requested" && !writerPending ? (
+                  <section className={styles.reviewTask} aria-labelledby="writer-revision-heading">
+                    <p className={styles.currentTaskLabel}>Current task · Writer revision</p>
+                    <h3 id="writer-revision-heading">
+                      Create Article Revision {(latestRevision?.revisionNumber ?? 1) + 1}
+                    </h3>
+                    <p>
+                      The Writer will revise the current Article using the operator decision and the
+                      exact historical evidence behind this revision.
+                    </p>
+                    <button
+                      type="button"
+                      className={styles.primaryAction}
+                      onClick={() => void runWriterRevision()}
+                    >
+                      Run Writer Revision
+                    </button>
+                  </section>
                 ) : null}
                 {story.state === "approved" ? (
                   <p className={styles.decisionResult}>
@@ -1201,18 +1288,24 @@ export function StoryWorkspace({
                 {reviewStatus}
               </p>
             ) : null}
+            {writerStatus ? (
+              <p
+                role={writerStatus.startsWith("Writer failed") ? "alert" : "status"}
+                className={styles.inlineAlert}
+              >
+                {writerStatus}
+              </p>
+            ) : null}
           </div>
         ) : story.state === "intake" && assignment === null ? (
           <>
             {proposalPending ? (
-              <div className={styles.progressCard} role="status" aria-busy="true">
-                <span className={styles.progressMark} aria-hidden="true" />
-                <div>
-                  <p className={styles.currentTaskLabel}>Current task</p>
-                  <h2 id="current-task-heading">Assignment Editor is reviewing the evidence…</h2>
-                  <p>Evaluating attached Sources, prepared evidence, and available Writers.</p>
-                </div>
-              </div>
+              <EditorialTaskPending
+                label="Current task · Assignment Editor"
+                headline="Assignment Editor is preparing a recommendation…"
+                subtitle="Reviewing the Story, available evidence, and newsroom Writers."
+                headingId="current-task-heading"
+              />
             ) : proposalReady && !editingAssignment ? (
               <div className={styles.proposalCard}>
                 <p className={styles.currentTaskLabel}>Assignment Editor suggestion</p>
@@ -1444,21 +1537,12 @@ export function StoryWorkspace({
           </>
         ) : story.state === "assigned" && assignment !== null ? (
           writerPending ? (
-            <div className={styles.progressCard} role="status" aria-busy="true">
-              <span className={styles.progressMark} aria-hidden="true" />
-              <div>
-                <p className={styles.currentTaskLabel}>Current task · Drafting</p>
-                <h2 id="current-task-heading">{assignment.writerProfile.name} is drafting…</h2>
-                <p>
-                  Using the Assignment brief, {assignment.assignment.sourceIds.length} evidence{" "}
-                  {assignment.assignment.sourceIds.length === 1 ? "Source" : "Sources"}
-                  {assignment.writerProfile.model
-                    ? `, and ${assignment.writerProfile.model.model}`
-                    : ""}
-                  .
-                </p>
-              </div>
-            </div>
+            <EditorialTaskPending
+              label="Current task · Writer"
+              headline="Writer is drafting the Article…"
+              subtitle="Following the Assignment and exact evidence selected for this Story."
+              headingId="current-task-heading"
+            />
           ) : (
             <div className={styles.assignmentSummary}>
               <p className={styles.currentTaskLabel}>Current task · Writer execution</p>

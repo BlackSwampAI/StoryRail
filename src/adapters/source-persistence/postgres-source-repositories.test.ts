@@ -94,6 +94,10 @@ const directorReviewMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0038-supervised-director-review.sql",
 );
+const writerRevisionMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0041-supervised-writer-revisions.sql",
+);
 
 const OPERATOR: OperatorActor = {
   type: "operator",
@@ -303,6 +307,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let agentRunMigrationSql: string;
   let writerDraftMigrationSql: string;
   let directorReviewMigrationSql: string;
+  let writerRevisionMigrationSql: string;
   let destructiveSetupAllowed = false;
 
   beforeAll(async () => {
@@ -316,6 +321,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     agentRunMigrationSql = await readFile(agentRunMigrationPath, "utf8");
     writerDraftMigrationSql = await readFile(writerDraftMigrationPath, "utf8");
     directorReviewMigrationSql = await readFile(directorReviewMigrationPath, "utf8");
+    writerRevisionMigrationSql = await readFile(writerRevisionMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -342,6 +348,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await client.query(agentRunMigrationSql);
       await client.query(writerDraftMigrationSql);
       await client.query(directorReviewMigrationSql);
+      await client.query(writerRevisionMigrationSql);
     } finally {
       client.release();
     }
@@ -1402,6 +1409,19 @@ describePostgres("PostgreSQL persistence repositories", () => {
             is_identity: "NO",
           },
           ...[
+            "writer_revision_article_id",
+            "writer_revision_previous_id",
+            "writer_revision_decision_id",
+            "writer_revision_director_run_id",
+            "writer_revision_decision_value",
+          ].map((column_name) => ({
+            table_name: "agent_runs",
+            column_name,
+            data_type: "text",
+            is_nullable: "YES" as const,
+            is_identity: "NO" as const,
+          })),
+          ...[
             "decision_id",
             "story_id",
             "article_id",
@@ -1812,7 +1832,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           },
         ]),
       );
-      expect(columns.rows).toHaveLength(75);
+      expect(columns.rows).toHaveLength(80);
     });
 
     it("creates the required primary, unique, foreign-key, and check constraints", async () => {
@@ -1892,6 +1912,11 @@ describePostgres("PostgreSQL persistence repositories", () => {
           {
             table_name: "article_revisions",
             constraint_name: "article_revisions_agent_run_fk",
+            constraint_type: "f",
+          },
+          {
+            table_name: "agent_runs",
+            constraint_name: "agent_runs_writer_revision_decision_fk",
             constraint_type: "f",
           },
           {
@@ -3655,6 +3680,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         await pool.query(agentRunMigrationSql);
         await pool.query(writerDraftMigrationSql);
         await pool.query(directorReviewMigrationSql);
+        await pool.query(writerRevisionMigrationSql);
       }
     });
 

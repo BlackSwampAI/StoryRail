@@ -62,6 +62,7 @@ export interface StoryClient {
   >;
   readonly generateAssignmentProposal: (storyId: string) => Promise<StoryClientResult<AgentRun>>;
   readonly createWriterDraft: (storyId: string) => Promise<StoryClientResult<AgentRun>>;
+  readonly createWriterRevision: (storyId: string) => Promise<StoryClientResult<AgentRun>>;
   readonly submitReview: (
     storyId: string,
   ) => Promise<
@@ -644,7 +645,7 @@ function isWriterAgentRun(value: unknown): value is AgentRun {
   if (
     !isRecord(value) ||
     value.role !== "writer" ||
-    value.operation !== "article_draft" ||
+    (value.operation !== "article_draft" && value.operation !== "article_revision") ||
     !isString(value.id) ||
     !isString(value.storyId) ||
     !isString(value.profileId) ||
@@ -660,7 +661,21 @@ function isWriterAgentRun(value: unknown): value is AgentRun {
     !isString(value.startedAt) ||
     !isString(value.completedAt) ||
     !isRecord(value.input) ||
-    !hasExactKeys(value.input, ["story", "assignment", "evidence", "unavailableSourceIds"]) ||
+    !(
+      (value.operation === "article_draft" &&
+        hasExactKeys(value.input, ["story", "assignment", "evidence", "unavailableSourceIds"])) ||
+      (value.operation === "article_revision" &&
+        hasExactKeys(value.input, [
+          "story",
+          "assignment",
+          "article",
+          "revision",
+          "directorReview",
+          "reviewDecision",
+          "evidence",
+          "unavailableSourceIds",
+        ]))
+    ) ||
     !isRecord(value.input.story) ||
     value.input.story.id !== value.storyId ||
     !isRecord(value.input.assignment) ||
@@ -671,6 +686,68 @@ function isWriterAgentRun(value: unknown): value is AgentRun {
     !Array.isArray(value.input.unavailableSourceIds)
   )
     return false;
+  if (value.operation === "article_revision") {
+    const { article, revision, directorReview, reviewDecision } = value.input;
+    if (
+      !isRecord(article) ||
+      !hasExactKeys(article, ["id", "assignmentId"]) ||
+      !isString(article.id) ||
+      !isString(article.assignmentId) ||
+      !isRecord(revision) ||
+      !hasExactKeys(revision, [
+        "id",
+        "articleId",
+        "revisionNumber",
+        "writerProfileId",
+        "agentRunId",
+        "headline",
+        "dek",
+        "bodyMarkdown",
+      ]) ||
+      revision.articleId !== article.id ||
+      !isString(revision.id) ||
+      !Number.isInteger(revision.revisionNumber) ||
+      (revision.revisionNumber as number) < 1 ||
+      (revision.revisionNumber as number) > 2 ||
+      !isString(revision.writerProfileId) ||
+      !isString(revision.agentRunId) ||
+      !isString(revision.headline) ||
+      !isStringOrNull(revision.dek) ||
+      !isString(revision.bodyMarkdown) ||
+      !isRecord(directorReview) ||
+      !hasExactKeys(directorReview, [
+        "recommendation",
+        "summary",
+        "checks",
+        "revisionInstructions",
+      ]) ||
+      (directorReview.recommendation !== "approve" &&
+        directorReview.recommendation !== "request_changes") ||
+      !isString(directorReview.summary) ||
+      !isRecord(directorReview.checks) ||
+      !hasExactKeys(directorReview.checks, [
+        "assignment",
+        "accuracy",
+        "headline",
+        "structure",
+        "style",
+      ]) ||
+      !["assignment", "accuracy", "headline", "structure", "style"].every((name) =>
+        isReviewCheck((directorReview.checks as Record<string, unknown>)[name]),
+      ) ||
+      !(
+        directorReview.revisionInstructions === null ||
+        (isString(directorReview.revisionInstructions) &&
+          directorReview.revisionInstructions.trim().length > 0)
+      ) ||
+      !isReviewDecision(reviewDecision) ||
+      reviewDecision.storyId !== value.storyId ||
+      reviewDecision.articleId !== article.id ||
+      reviewDecision.revisionId !== revision.id ||
+      reviewDecision.decision !== "request_changes"
+    )
+      return false;
+  }
   const common = [
     "id",
     "storyId",
@@ -726,7 +803,9 @@ function isArticleRevision(value: unknown): value is ArticleRevision {
     ]) &&
     isString(value.id) &&
     isString(value.articleId) &&
-    value.revisionNumber === 1 &&
+    Number.isInteger(value.revisionNumber) &&
+    (value.revisionNumber as number) >= 1 &&
+    (value.revisionNumber as number) <= 3 &&
     isString(value.writerProfileId) &&
     isString(value.agentRunId) &&
     isString(value.headline) &&
@@ -751,7 +830,14 @@ function isInspectionArticle(value: unknown, story: Story): boolean {
     isArticle(article) &&
     article.storyId === story.id &&
     Array.isArray(revisions) &&
-    revisions.every((revision) => isArticleRevision(revision) && revision.articleId === article.id)
+    revisions.length >= 1 &&
+    revisions.length <= 3 &&
+    revisions.every(
+      (revision, index) =>
+        isArticleRevision(revision) &&
+        revision.articleId === article.id &&
+        revision.revisionNumber === index + 1,
+    )
   );
 }
 
@@ -1061,6 +1147,31 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
           ]),
           415: new Set(["UNSUPPORTED_MEDIA_TYPE"]),
           422: new Set(["WRITER_EVIDENCE_REQUIRED"]),
+        },
+      ),
+    createWriterRevision: (storyId) =>
+      request(
+        dependencies.fetch,
+        `/api/stories/${encodeURIComponent(storyId)}/writer-revisions`,
+        { method: "POST", headers: jsonHeaders, body: JSON.stringify({}) },
+        201,
+        "run",
+        isAgentRun,
+        {
+          400: new Set(["INVALID_JSON", "INVALID_REQUEST"]),
+          404: new Set(["STORY_NOT_FOUND"]),
+          409: new Set([
+            "WRITER_REVISION_NOT_ALLOWED",
+            "ASSIGNMENT_REQUIRED",
+            "ARTICLE_REQUIRED",
+            "ARTICLE_REVISION_REQUIRED",
+            "REVIEW_DECISION_REQUIRED",
+            "REVIEW_CONTEXT_MISMATCH",
+            "WRITER_REVISION_CONFLICT",
+            "AGENT_RUN_ID_CONFLICT",
+          ]),
+          415: new Set(["UNSUPPORTED_MEDIA_TYPE"]),
+          422: new Set(["WRITER_EVIDENCE_UNAVAILABLE"]),
         },
       ),
     async submitReview(storyId) {

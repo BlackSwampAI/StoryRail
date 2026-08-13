@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { Pool, type PoolConfig } from "pg";
 import { createPostgresAgentRunRepository } from "@/adapters/agent-run-persistence";
-import { createPostgresWriterDraftPersistence } from "@/adapters/article-persistence";
+import {
+  createPostgresWriterDraftPersistence,
+  createPostgresWriterRevisionPersistence,
+} from "@/adapters/article-persistence";
 import { createOpenRouterStructuredModel } from "@/adapters/model";
 import { createPostgresStoryInspectionRepository } from "@/adapters/story-inspection";
 import {
@@ -9,6 +12,10 @@ import {
   type CreateWriterDraftResult,
   type WriterModelResolution,
 } from "@/application/writer-drafts";
+import {
+  createWriterRevision,
+  type CreateWriterRevisionResult,
+} from "@/application/writer-revisions";
 import {
   agentRunId,
   articleId,
@@ -28,6 +35,10 @@ export interface WriterRuntime {
     readonly storyId: StoryId;
     readonly requestedBy: EditorialActor;
   }) => Promise<CreateWriterDraftResult>;
+  readonly createWriterRevision: (command: {
+    readonly storyId: StoryId;
+    readonly requestedBy: EditorialActor;
+  }) => Promise<CreateWriterRevisionResult>;
   close(): Promise<void>;
 }
 
@@ -80,9 +91,23 @@ export function createWriterRuntime(options: {
     createTransitionId: () => transitionId(uuid()),
     now: options.now ?? (() => new Date().toISOString()),
   });
+  const revisionWorkflow = createWriterRevision({
+    inspections: createPostgresStoryInspectionRepository({ pool }),
+    runs: createPostgresAgentRunRepository({ pool }),
+    persistence: createPostgresWriterRevisionPersistence({ pool }),
+    resolveModel: (descriptor) =>
+      resolveWriterModel(descriptor, options.configuration.defaultModel, (model) =>
+        createOpenRouterStructuredModel({ apiKey: options.configuration.openRouterApiKey, model }),
+      ),
+    createAgentRunId: () => agentRunId(uuid()),
+    createRevisionId: () => articleRevisionId(uuid()),
+    createTransitionId: () => transitionId(uuid()),
+    now: options.now ?? (() => new Date().toISOString()),
+  });
   let closePromise: Promise<void> | undefined;
   return Object.freeze({
     createWriterDraft: workflow,
+    createWriterRevision: revisionWorkflow,
     close() {
       closePromise ??= Promise.resolve().then(() => pool.end());
       return closePromise;

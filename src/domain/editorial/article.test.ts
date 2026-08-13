@@ -6,6 +6,7 @@ import {
   articleRevisionId,
   assignmentId,
   createArticle,
+  createArticleRevision,
   createFirstArticleRevision,
   storyId,
 } from ".";
@@ -62,5 +63,30 @@ describe("Article domain", () => {
         createdAt: "now",
       } as never),
     ).toMatchObject({ ok: false });
+  });
+
+  it("accepts bounded immutable revisions 2 and 3 but rejects revision 4", () => {
+    const runId = agentRunId("run-revision");
+    const candidate = {
+      id: articleRevisionId("revision-next"),
+      articleId: articleId("article-31"),
+      revisionNumber: 2 as const,
+      writerProfileId: agentProfileId("writer-31"),
+      agentRunId: runId,
+      headline: "Revised headline",
+      dek: null,
+      bodyMarkdown: "Revised body.",
+      createdBy: { type: "agent" as const, role: "writer" as const, runId },
+      createdAt: "now",
+    };
+    expect(createArticleRevision(candidate)).toMatchObject({
+      ok: true,
+      revision: { revisionNumber: 2 },
+    });
+    expect(createArticleRevision({ ...candidate, revisionNumber: 3 })).toMatchObject({ ok: true });
+    expect(createArticleRevision({ ...candidate, revisionNumber: 4 } as never)).toMatchObject({
+      ok: false,
+      error: { code: "ARTICLE_REVISION_NUMBER_INVALID" },
+    });
   });
 });

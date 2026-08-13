@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import {
   createArticle,
-  createFirstArticleRevision,
+  createArticleRevision,
   type Article,
   type ArticleRevision,
 } from "@/domain/editorial";
@@ -15,7 +15,7 @@ const revisionSchema = z
   .object({
     id: nonEmpty,
     articleId: nonEmpty,
-    revisionNumber: z.literal(1),
+    revisionNumber: z.number().int().min(1).max(3),
     writerProfileId: nonEmpty,
     agentRunId: nonEmpty,
     headline: nonEmpty,
@@ -72,7 +72,7 @@ export function decodePostgresArticleRevision(row: {
     parsed.data.agentRunId !== row.agent_run_id
   )
     throw new PostgresArticleInvariantError();
-  const created = createFirstArticleRevision(parsed.data as ArticleRevision);
+  const created = createArticleRevision(parsed.data as ArticleRevision);
   if (!created.ok) throw new PostgresArticleInvariantError();
   return created.revision;
 }
