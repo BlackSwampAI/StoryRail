@@ -14,7 +14,8 @@ import {
 } from "./source-evidence-url-client";
 export interface SourceEvidenceWorkspaceProps {
   readonly requestSourceEvidence?: RequestSourceEvidenceUrl;
-  readonly onSourceAvailable?: () => void;
+  readonly onSourceAvailable?: (sourceId: string) => void;
+  readonly onReviewInInbox?: (sourceId: string) => void;
 }
 
 function ActorValue({ actor }: Readonly<{ actor: EditorialActor }>) {
@@ -196,8 +197,26 @@ function ResultReceipt({ result }: Readonly<{ result: SourceEvidenceUrlResult }>
               : "Source preserved; extraction failure recorded"}
           </h2>
           <p>Source preserved and available for editorial review in Source Inbox.</p>
-          <SourceFacts source={result.source} />
-          <ExtractionFacts extraction={result.extraction} />
+          <ul className={styles.completionChecklist}>
+            <li>Source preserved</li>
+            <li>
+              {result.extraction.outcome === "succeeded"
+                ? "Extraction completed"
+                : "Extraction failure recorded"}
+            </li>
+          </ul>
+          <details className={styles.secondaryPanel}>
+            <summary>
+              <span>
+                <strong>Operation details</strong>
+                <small>Preserved Source and extraction receipt</small>
+              </span>
+            </summary>
+            <div className={styles.secondaryPanelContent}>
+              <SourceFacts source={result.source} />
+              <ExtractionFacts extraction={result.extraction} />
+            </div>
+          </details>
         </article>
       );
     case "preservation-validation-failure":
@@ -268,14 +287,27 @@ function ResultReceipt({ result }: Readonly<{ result: SourceEvidenceUrlResult }>
   }
 }
 
+function reviewableSourceId(result: SourceEvidenceUrlResult): string | null {
+  if (result.kind === "completed" || result.kind === "partial-completion") {
+    return result.source.id;
+  }
+  if (result.kind === "preservation-conflict" && result.error.code === "DUPLICATE_SOURCE") {
+    return result.error.existingSourceId;
+  }
+  return null;
+}
+
 export function SourceEvidenceWorkspace({
   requestSourceEvidence = requestSourceEvidenceUrl,
   onSourceAvailable,
+  onReviewInInbox,
 }: SourceEvidenceWorkspaceProps) {
   const [submittedUrl, setSubmittedUrl] = useState("");
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<SourceEvidenceUrlResult | null>(null);
   const pendingRef = useRef(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const sourceIdForReview = result === null ? null : reviewableSourceId(result);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -290,13 +322,14 @@ export function SourceEvidenceWorkspace({
     try {
       const nextResult = await requestSourceEvidence(submittedUrl);
       setResult(nextResult);
-      if (
-        nextResult.kind === "completed" ||
-        nextResult.kind === "partial-completion" ||
-        (nextResult.kind === "preservation-conflict" &&
-          nextResult.error.code === "DUPLICATE_SOURCE")
+      if (nextResult.kind === "completed" || nextResult.kind === "partial-completion") {
+        setSubmittedUrl("");
+        onSourceAvailable?.(nextResult.source.id);
+      } else if (
+        nextResult.kind === "preservation-conflict" &&
+        nextResult.error.code === "DUPLICATE_SOURCE"
       ) {
-        onSourceAvailable?.();
+        onSourceAvailable?.(nextResult.error.existingSourceId);
       }
     } catch {
       setResult({ kind: "unavailable", message: SOURCE_EVIDENCE_UNAVAILABLE_MESSAGE });
@@ -326,6 +359,7 @@ export function SourceEvidenceWorkspace({
         <label htmlFor="source-url">Source URL</label>
         <div className={styles.sourceFormControls}>
           <input
+            ref={inputRef}
             id="source-url"
             type="text"
             inputMode="url"
@@ -347,7 +381,33 @@ export function SourceEvidenceWorkspace({
       </form>
 
       <div className={styles.resultRegion} aria-live="polite" aria-atomic="true">
-        {result === null ? null : <ResultReceipt result={result} />}
+        {result === null ? null : (
+          <>
+            <ResultReceipt result={result} />
+            {sourceIdForReview !== null ? (
+              <div className={styles.handoffActions}>
+                <button
+                  type="button"
+                  className={styles.primaryAction}
+                  onClick={() => onReviewInInbox?.(sourceIdForReview)}
+                >
+                  Review in Source Inbox
+                </button>
+                <button
+                  type="button"
+                  className={styles.secondaryAction}
+                  onClick={() => {
+                    setResult(null);
+                    setSubmittedUrl("");
+                    inputRef.current?.focus();
+                  }}
+                >
+                  Add another Source
+                </button>
+              </div>
+            ) : null}
+          </>
+        )}
       </div>
     </section>
   );

@@ -151,6 +151,7 @@ function renderInbox(
   options: {
     readonly sourceCount?: number;
     readonly onStoryKnown?: SourceInboxWorkspaceProps["onStoryKnown"];
+    readonly onStoryLoaded?: SourceInboxWorkspaceProps["onStoryLoaded"];
   } = {},
 ) {
   return render(
@@ -160,7 +161,7 @@ function renderInbox(
       inboxRequests={inbox}
       storyRequests={stories}
       onStoryKnown={options.onStoryKnown ?? vi.fn()}
-      onStoryLoaded={vi.fn()}
+      onStoryLoaded={options.onStoryLoaded ?? vi.fn()}
     />,
   );
 }
@@ -240,9 +241,10 @@ describe("SourceInboxWorkspace", () => {
     expect(screen.getByText("RETRIEVAL_FAILED · retryable: yes")).toBeVisible();
   });
 
-  it("runs create, attach, triage, inspect in order and only then removes the Source", async () => {
+  it("shows a completed new-Story handoff and opens the Story only on explicit request", async () => {
     const { inbox, stories } = clients();
-    renderInbox(inbox, stories);
+    const onStoryLoaded = vi.fn<SourceInboxWorkspaceProps["onStoryLoaded"]>();
+    renderInbox(inbox, stories, { onStoryLoaded });
     fireEvent.click(await screen.findByRole("button", { name: "Create new Story" }));
     fireEvent.change(screen.getByLabelText("Source relevance"), { target: { value: "Relevant" } });
     fireEvent.change(screen.getByLabelText("Editorial decision reason"), {
@@ -258,7 +260,13 @@ describe("SourceInboxWorkspace", () => {
       story.id,
       "New subject",
     );
-    expect(screen.queryByText("# Persisted evidence")).not.toBeInTheDocument();
+    expect(await screen.findByText("Story created and Source attached.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Open Story" })).toBeVisible();
+    expect(onStoryLoaded).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Open Story" }));
+    expect(onStoryLoaded).toHaveBeenCalledWith(
+      expect.objectContaining({ story: expect.objectContaining({ id: story.id }) }),
+    );
   });
 
   it("attaches to an existing Story without creating another Story", async () => {
@@ -281,6 +289,8 @@ describe("SourceInboxWorkspace", () => {
       story.id,
       "Same subject",
     );
+    expect(await screen.findByText("Source attached to Story.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Open Story" })).toBeVisible();
   });
 
   it("records skip without mutating Stories", async () => {
@@ -302,6 +312,8 @@ describe("SourceInboxWorkspace", () => {
     expect(stories.createStory).not.toHaveBeenCalled();
     expect(stories.attachSource).not.toHaveBeenCalled();
     expect(stories.inspectStory).not.toHaveBeenCalled();
+    expect(await screen.findByText(/Skip decision recorded/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Continue triage" })).toBeVisible();
   });
 
   it("preserves a known count of one when new Story inspection fails", async () => {

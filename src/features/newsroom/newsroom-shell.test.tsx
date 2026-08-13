@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   agentProfileId,
   agentRunId,
+  articleId,
+  articleRevisionId,
   assignmentId,
   operatorId,
   sourceEvidencePreparationId,
@@ -105,7 +107,7 @@ function agentRequests(): AgentProfileClient {
 }
 
 describe("NewsroomShell", () => {
-  it("prefills the existing editable form from a supervised suggestion without assigning", async () => {
+  it("reviews a supervised suggestion before revealing the editable Assignment form", async () => {
     const writer = {
       id: agentProfileId("writer-0030"),
       role: "writer" as const,
@@ -162,8 +164,15 @@ describe("NewsroomShell", () => {
       />,
     );
     fireEvent.click(await screen.findByRole("button", { name: /Persisted Story/ }));
-    expect(await screen.findByText(/Generates a suggestion only/)).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Ready for assignment" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Ask Assignment Editor" }));
+    const proposal = await screen.findByRole("region", { name: "Suggested Writer" });
+    expect(within(proposal).getByText("Suggested angle")).toBeVisible();
+    expect(within(proposal).getByText("Suggested brief")).toBeVisible();
+    expect(within(proposal).getByRole("button", { name: "Edit before assigning" })).toBeVisible();
+    expect(screen.queryByLabelText("Angle")).not.toBeInTheDocument();
+    expect(requests.assignStory).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Edit before assigning" }));
     expect(await screen.findByDisplayValue("Suggested angle")).toBeVisible();
     expect(screen.getByDisplayValue("Suggested brief")).toBeVisible();
     expect(screen.getByDisplayValue("Suggested constraint")).toBeVisible();
@@ -174,9 +183,8 @@ describe("NewsroomShell", () => {
     expect(screen.getByDisplayValue("Operator-edited angle")).toBeVisible();
     expect(requests.assignStory).not.toHaveBeenCalled();
     expect(screen.getAllByText("Intake")[0]).toBeVisible();
-    fireEvent.click(screen.getByText("Assignment Editor runs"));
-    fireEvent.click(screen.getByText("Technical AgentRun record"));
-    expect(screen.getByText("Run ID: run-0030")).toBeVisible();
+    fireEvent.click(screen.getByText("History & Audit"));
+    expect(screen.getByText("run-0030")).toBeVisible();
     expect(screen.queryByText(/chain-of-thought/i)).not.toBeInTheDocument();
   });
 
@@ -210,6 +218,7 @@ describe("NewsroomShell", () => {
     };
     render(<NewsroomShell storyRequests={requests} sourceInboxRequests={inboxRequests()} />);
     fireEvent.click(await screen.findByRole("button", { name: /Persisted Story/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Assign manually" }));
     fireEvent.change(await screen.findByLabelText("Angle"), { target: { value: "Manual angle" } });
     fireEvent.click(screen.getByRole("button", { name: "Ask Assignment Editor" }));
     expect(
@@ -306,6 +315,7 @@ describe("NewsroomShell", () => {
       />,
     );
     fireEvent.click(await screen.findByRole("button", { name: /Persisted Story/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Assign manually" }));
     expect(await screen.findByRole("option", { name: "General Writer" })).toBeVisible();
     expect(screen.queryByRole("option", { name: "Assignment Editor" })).not.toBeInTheDocument();
     expect(
@@ -315,16 +325,28 @@ describe("NewsroomShell", () => {
     fireEvent.change(screen.getByLabelText("Brief"), { target: { value: "Brief" } });
     fireEvent.change(screen.getByLabelText("Assignment reason"), { target: { value: "Ready" } });
     fireEvent.click(screen.getByRole("button", { name: "Create Assignment" }));
-    expect(await screen.findByText("Intake → Assigned")).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Assignment ready" })).toBeVisible();
     expect(screen.getByText("General Writer")).toBeVisible();
     expect(screen.getByRole("button", { name: "Assigned, 1 story" })).toHaveAttribute(
       "aria-current",
       "page",
     );
+    expect(screen.getByRole("button", { name: "Assigned, 1 story" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    const movedStory = within(screen.getByRole("region", { name: "Stories" })).getByRole("button", {
+      name: /Persisted Story, Assigned, 0 sources/,
+    });
+    expect(movedStory).toHaveAttribute("aria-pressed", "true");
+    expect(within(movedStory).getByText("Selected")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Create Assignment" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("History & Audit"));
+    expect(screen.getByText("Intake → Assigned")).toBeVisible();
+    expect(screen.getByText(assignment.id)).toBeVisible();
   });
 
-  it("shows real Story queue counts and the four distinct workspace modes", async () => {
+  it("nests only the selected queue's Stories inside the consolidated Desk navigation", async () => {
     render(
       <NewsroomShell
         storyRequests={storyRequests()}
@@ -335,13 +357,64 @@ describe("NewsroomShell", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Intake, 1 story" })).toBeVisible(),
     );
-    const workspace = screen.getByRole("group", { name: "Workspace view" });
-    expect(workspace).toHaveTextContent("Story");
-    expect(workspace).toHaveTextContent("Source inbox");
-    expect(workspace).toHaveTextContent("Source intake");
-    expect(workspace).toHaveTextContent("Agents");
-    expect(workspace).not.toHaveTextContent("Assistant");
+    const navigation = screen.getByRole("navigation", { name: "Newsroom navigation" });
+    expect(navigation).toHaveTextContent("Inbox");
+    expect(navigation).toHaveTextContent("Add Source");
+    expect(navigation).toHaveTextContent("Agents");
+    expect(navigation).not.toHaveTextContent("On the desk");
+    expect(screen.queryByRole("group", { name: "Workspace view" })).not.toBeInTheDocument();
+    const storiesRegion = screen.getByRole("region", { name: "Stories" });
+    expect(within(storiesRegion).getByRole("button", { name: /Persisted Story/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Intake, 1 story" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    fireEvent.click(within(storiesRegion).getByRole("button", { name: /Persisted Story/ }));
+    expect(await screen.findByRole("heading", { name: "Ready for assignment" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Intake, 1 story" }));
+    expect(screen.getByRole("button", { name: "Intake, 1 story" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(
+      within(storiesRegion).queryByRole("button", { name: /Persisted Story/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Ready for assignment" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Assigned, 0 stories" }));
+    expect(screen.getByRole("button", { name: "Assigned, 0 stories" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Assigned, 0 stories" }));
+    expect(screen.getByRole("button", { name: "Assigned, 0 stories" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.getByRole("heading", { name: "Ready for assignment" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Intake, 1 story" }));
+    const selectedStory = within(storiesRegion).getByRole("button", {
+      name: /Persisted Story, Intake, 0 sources/,
+    });
+    expect(selectedStory).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Assigned, 0 stories" }));
+    expect(screen.getByRole("button", { name: "Assigned, 0 stories" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Intake, 1 story" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(
+      within(storiesRegion).queryByRole("button", { name: /Persisted Story/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/No Stories in assigned/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Ready for assignment" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Agents" }));
+    expect(screen.getByRole("button", { name: "Assigned, 0 stories" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
     expect(await screen.findByRole("heading", { name: "Agent Profiles" })).toBeVisible();
     expect(screen.getByText("No agents are running")).toBeVisible();
   });
@@ -424,54 +497,29 @@ describe("NewsroomShell", () => {
     };
     render(<NewsroomShell storyRequests={requests} sourceInboxRequests={inboxRequests()} />);
     fireEvent.click(await screen.findByRole("button", { name: /Persisted Story/ }));
-    expect(await screen.findByRole("heading", { name: "Prepared evidence" })).toBeVisible();
-    expect(screen.getByText("# Prepared Story evidence")).toBeVisible();
-    expect(screen.getByRole("link", { name: source.canonicalUrl })).toBeVisible();
-    expect(screen.getByText("Relevant")).toBeVisible();
-
-    const storyDetails = screen.getByText("Technical Story details").closest("details");
-    expect(storyDetails).not.toHaveAttribute("open");
+    expect(await screen.findByText("Evidence")).toBeVisible();
+    expect(screen.getByText("# Prepared Story evidence")).not.toBeVisible();
     expect(screen.getByText(STORY.id)).not.toBeVisible();
     expect(screen.getByText(STORY.createdAt)).not.toBeVisible();
     expect(screen.getByText(STORY.updatedAt)).not.toBeVisible();
-    fireEvent.click(screen.getByText("Technical Story details"));
+    fireEvent.click(screen.getByText("Evidence"));
+    expect(screen.getByRole("link", { name: source.canonicalUrl })).toBeVisible();
+    expect(screen.getByText(/Relevant/)).toBeVisible();
+    fireEvent.click(screen.getByText(/Prepared evidence attempt 1/));
+    expect(screen.getByText("# Prepared Story evidence")).toBeVisible();
+    fireEvent.click(screen.getByText("History & Audit"));
     expect(screen.getByText(STORY.id)).toBeVisible();
     expect(screen.getByText(STORY.createdAt)).toBeVisible();
     expect(screen.getByText(STORY.updatedAt)).toBeVisible();
-
-    const sourceDetails = screen.getByText("Technical source details").closest("details");
-    expect(sourceDetails).not.toHaveAttribute("open");
-    const technicalSourceDetails = within(sourceDetails as HTMLElement);
-    for (const actor of technicalSourceDetails.getAllByText("operator: operator-25")) {
-      expect(actor).not.toBeVisible();
-    }
-    expect(technicalSourceDetails.getByText(source.id)).not.toBeVisible();
-    expect(technicalSourceDetails.getByText("received")).not.toBeVisible();
-    expect(technicalSourceDetails.getByText("attached")).not.toBeVisible();
-    fireEvent.click(screen.getByText("Technical source details"));
-    for (const actor of technicalSourceDetails.getAllByText("operator: operator-25")) {
-      expect(actor).toBeVisible();
-    }
-    expect(technicalSourceDetails.getByText(source.id)).toBeVisible();
-    expect(technicalSourceDetails.getByText("received")).toBeVisible();
-    expect(technicalSourceDetails.getByText("attached")).toBeVisible();
-
-    const rawHistorySummary = screen.getByText("Raw extraction history");
-    expect(rawHistorySummary.closest("details")).not.toHaveAttribute("open");
-    expect(screen.getByText("1 attempt · latest succeeded")).toBeVisible();
-    expect(screen.getByText("# Raw Story evidence")).not.toBeVisible();
-    fireEvent.click(rawHistorySummary);
-    expect(screen.getByText("# Raw Story evidence")).toBeVisible();
-    expect(screen.getByText("Technical extraction record")).toBeVisible();
-
-    expect(screen.getByRole("heading", { name: "Assignment" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Activity" })).toBeVisible();
+    expect(screen.getByText(source.id)).toBeVisible();
+    expect(screen.getAllByText("operator: operator-25")[0]).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Article" })).not.toBeInTheDocument();
   });
 
   it("loads the database-only Source Inbox as a distinct workspace", async () => {
     const inbox = inboxRequests();
     render(<NewsroomShell storyRequests={storyRequests()} sourceInboxRequests={inbox} />);
-    fireEvent.click(screen.getByRole("button", { name: "Source inbox" }));
+    fireEvent.click(screen.getByRole("button", { name: "Inbox" }));
     expect(await screen.findByText("No Sources await triage")).toBeVisible();
     expect(inbox.listPendingSources).toHaveBeenCalledOnce();
   });
@@ -503,10 +551,14 @@ describe("NewsroomShell", () => {
         requestSourceEvidence={requestSourceEvidence}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Source intake" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Source" }));
     fireEvent.click(screen.getByRole("button", { name: "Preserve and extract" }));
     await waitFor(() => expect(inbox.listPendingSources).toHaveBeenCalledTimes(2));
     expect(stories.createStory).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Review in Source Inbox" })).toBeVisible();
+    expect(screen.getByText("No Sources await triage")).not.toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Review in Source Inbox" }));
+    expect(await screen.findByText("No Sources await triage")).toBeVisible();
   });
 
   it("runs only the assigned Writer and keeps retry available after a durable failure", async () => {
@@ -598,5 +650,237 @@ describe("NewsroomShell", () => {
     expect(await screen.findByText(/Writer failed: MODEL_REQUEST_FAILED/)).toBeVisible();
     expect(screen.getByRole("button", { name: "Run Writer" })).toBeEnabled();
     expect(requests.createWriterDraft).toHaveBeenCalledWith(assigned.id);
+    fireEvent.click(screen.getByText("History & Audit"));
+    expect(screen.getByText(failedRun.id)).toBeVisible();
+  });
+
+  it("keeps a drafted Story selected while moving its nested card to In Progress", async () => {
+    const assigned = { ...STORY, state: "assigned" as const, updatedAt: "assigned" };
+    const inProgress = { ...assigned, state: "in_progress" as const, updatedAt: "drafted" };
+    const writer = {
+      id: agentProfileId("writer-transition-32"),
+      role: "writer" as const,
+      name: "Transition Writer",
+      instructions: "Write.",
+      model: null,
+      builtIn: true,
+    };
+    const assignment = {
+      id: assignmentId("assignment-transition-32"),
+      storyId: assigned.id,
+      writerProfileId: writer.id,
+      sourceIds: [],
+      angle: "Transition angle",
+      brief: "Transition brief",
+      constraints: null,
+      assignedBy: { type: "operator" as const, operatorId: operatorId("operator-32") },
+      assignedAt: "assigned",
+    };
+    const articleIdentity = articleId("article-transition-32");
+    const revisionIdentity = articleRevisionId("revision-transition-32");
+    const writerRunIdentity = agentRunId("writer-run-transition-32");
+    const successfulRun = {
+      id: writerRunIdentity,
+      storyId: assigned.id,
+      profileId: writer.id,
+      role: "writer" as const,
+      operation: "article_draft" as const,
+      model: { provider: "openrouter", model: "writer-model" },
+      prompt: { key: "storyrail_writer_draft", version: "1" },
+      requestedBy: assignment.assignedBy,
+      startedAt: "started",
+      completedAt: "drafted",
+      input: {
+        story: {
+          id: assigned.id,
+          title: assigned.title,
+          state: "assigned" as const,
+          revisionCycle: 0,
+        },
+        assignment: {
+          id: assignment.id,
+          storyId: assignment.storyId,
+          writerProfileId: assignment.writerProfileId,
+          sourceIds: assignment.sourceIds,
+          angle: assignment.angle,
+          brief: assignment.brief,
+          constraints: assignment.constraints,
+        },
+        evidence: [],
+        unavailableSourceIds: [],
+      },
+      outcome: "succeeded" as const,
+      articleId: articleIdentity,
+      revisionId: revisionIdentity,
+    };
+    const assignedInspection = {
+      story: assigned,
+      sources: [],
+      assignment: { assignment, writerProfile: writer },
+      transitions: [],
+      agentRuns: [],
+      article: null,
+    };
+    const draftedInspection = {
+      ...assignedInspection,
+      story: inProgress,
+      agentRuns: [successfulRun],
+      article: {
+        article: {
+          id: articleIdentity,
+          storyId: inProgress.id,
+          assignmentId: assignment.id,
+          createdAt: "drafted",
+        },
+        revisions: [
+          {
+            id: revisionIdentity,
+            articleId: articleIdentity,
+            revisionNumber: 1 as const,
+            writerProfileId: writer.id,
+            agentRunId: writerRunIdentity,
+            headline: "Transition article",
+            dek: null,
+            bodyMarkdown: "The drafted body.",
+            createdBy: {
+              type: "agent" as const,
+              role: "writer" as const,
+              runId: writerRunIdentity,
+            },
+            createdAt: "drafted",
+          },
+        ],
+      },
+    };
+    const requests: StoryClient = {
+      ...storyRequests(),
+      listStories: vi.fn(async () => ({
+        kind: "completed" as const,
+        value: [{ story: assigned, sourceCount: 0 }],
+      })),
+      inspectStory: vi
+        .fn<StoryClient["inspectStory"]>()
+        .mockResolvedValueOnce({ kind: "completed", value: assignedInspection })
+        .mockResolvedValueOnce({ kind: "completed", value: draftedInspection }),
+      createWriterDraft: vi.fn(async () => ({
+        kind: "completed" as const,
+        value: successfulRun,
+      })),
+    };
+
+    render(<NewsroomShell storyRequests={requests} sourceInboxRequests={inboxRequests()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Assigned, 1 story" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Persisted Story, Assigned/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Run Writer" }));
+
+    expect(await screen.findByRole("heading", { name: "Transition article" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "In progress, 1 story" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    const movedStory = screen.getByRole("button", {
+      name: /Persisted Story, In progress, 0 sources/,
+    });
+    expect(movedStory).toHaveAttribute("aria-pressed", "true");
+    expect(within(movedStory).getByText("Selected")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Assigned, 0 stories" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("makes the latest Article primary, renders Markdown readably, and keeps raw source secondary", async () => {
+    const inProgress = { ...STORY, state: "in_progress" as const, updatedAt: "drafted" };
+    const writer = {
+      id: agentProfileId("writer-article-32"),
+      role: "writer" as const,
+      name: "News Writer",
+      instructions: "Write.",
+      model: null,
+      builtIn: true,
+    };
+    const assignment = {
+      id: assignmentId("assignment-article-32"),
+      storyId: inProgress.id,
+      writerProfileId: writer.id,
+      sourceIds: [],
+      angle: "Reader-first angle",
+      brief: "Readable brief",
+      constraints: null,
+      assignedBy: { type: "operator" as const, operatorId: operatorId("operator-32") },
+      assignedAt: "assigned",
+    };
+    const bodyMarkdown =
+      "## What happened\n\nReadable **editorial copy** with a [source](https://example.com/report).\n\n<script>alert('unsafe')</script>";
+    const articleIdentity = articleId("article-32");
+    const revisionIdentity = articleRevisionId("revision-32");
+    const requests: StoryClient = {
+      ...storyRequests(),
+      listStories: vi.fn(async () => ({
+        kind: "completed" as const,
+        value: [{ story: inProgress, sourceCount: 0 }],
+      })),
+      inspectStory: vi.fn(async () => ({
+        kind: "completed" as const,
+        value: {
+          story: inProgress,
+          sources: [],
+          assignment: { assignment, writerProfile: writer },
+          transitions: [],
+          agentRuns: [],
+          article: {
+            article: {
+              id: articleIdentity,
+              storyId: inProgress.id,
+              assignmentId: assignment.id,
+              createdAt: "drafted",
+            },
+            revisions: [
+              {
+                id: revisionIdentity,
+                articleId: articleIdentity,
+                revisionNumber: 1 as const,
+                writerProfileId: writer.id,
+                agentRunId: agentRunId("writer-run-article-32"),
+                headline: "A readable newsroom headline",
+                dek: "A clear editorial deck.",
+                bodyMarkdown,
+                createdBy: {
+                  type: "agent" as const,
+                  role: "writer" as const,
+                  runId: agentRunId("writer-run-article-32"),
+                },
+                createdAt: "drafted",
+              },
+            ],
+          },
+        },
+      })),
+    };
+    render(<NewsroomShell storyRequests={requests} sourceInboxRequests={inboxRequests()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "In progress, 1 story" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Persisted Story/ }));
+
+    expect(
+      await screen.findByRole("heading", { name: "A readable newsroom headline" }),
+    ).toBeVisible();
+    expect(screen.getByRole("heading", { name: "What happened" })).toBeVisible();
+    expect(screen.getByText("editorial copy")).toBeVisible();
+    expect(screen.getByRole("link", { name: "source" })).toHaveAttribute(
+      "rel",
+      "noopener noreferrer",
+    );
+    expect(screen.getByText("Revision 1 source Markdown")).not.toBeVisible();
+    expect(document.querySelector("script")).toBeNull();
+
+    fireEvent.click(screen.getByText("History & Audit"));
+    fireEvent.click(screen.getByText("Revision 1 source Markdown"));
+    expect(
+      screen.getByText(
+        (_, element) => element?.tagName === "PRE" && element.textContent === bodyMarkdown,
+      ),
+    ).toBeVisible();
+    expect(screen.getByText(articleIdentity)).toBeVisible();
+    expect(screen.getByText(revisionIdentity)).toBeVisible();
   });
 });

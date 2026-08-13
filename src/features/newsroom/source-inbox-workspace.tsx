@@ -32,9 +32,11 @@ type InboxState =
 
 export interface SourceInboxWorkspaceProps {
   readonly refreshVersion: number;
+  readonly focusedSourceId?: string | null;
   readonly stories: readonly StoryListItem[];
   readonly inboxRequests?: SourceInboxClient;
   readonly storyRequests?: StoryClient;
+  readonly onPendingCountChange?: (count: number | null) => void;
   readonly onStoryKnown: (story: Story, sourceCount: number) => void;
   readonly onStoryLoaded: (inspection: StoryInspection) => void;
 }
@@ -234,6 +236,12 @@ type Progress =
         readonly decision: "new_story" | "existing_story";
         readonly sourceCount: number;
       };
+    }
+  | {
+      readonly kind: "completed";
+      readonly decision: "new_story" | "existing_story" | "skip";
+      readonly message: string;
+      readonly inspection?: StoryInspection;
     };
 
 function TriageItem({
@@ -244,6 +252,7 @@ function TriageItem({
   onResolved,
   onStoryKnown,
   onStoryLoaded,
+  focusRequested,
 }: Readonly<{
   item: SourceInboxItem;
   stories: readonly StoryListItem[];
@@ -252,6 +261,7 @@ function TriageItem({
   onResolved: () => void;
   onStoryKnown: SourceInboxWorkspaceProps["onStoryKnown"];
   onStoryLoaded: SourceInboxWorkspaceProps["onStoryLoaded"];
+  focusRequested: boolean;
 }>) {
   const [action, setAction] = useState<Action>(null);
   const [title, setTitle] = useState(extractedTitle(item));
@@ -267,6 +277,11 @@ function TriageItem({
   const [preparationMessage, setPreparationMessage] = useState<string | null>(null);
   const pendingRef = useRef(false);
   const preparationPendingRef = useRef(false);
+  const itemRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (focusRequested) itemRef.current?.focus();
+  }, [focusRequested]);
 
   async function prepare(extractionId: SourceExtractionId) {
     if (preparationPendingRef.current) return;
@@ -317,12 +332,11 @@ function TriageItem({
     return Object.keys(next).length === 0;
   }
 
-  async function inspect(story: Story, knownSourceCount: number): Promise<boolean> {
+  async function inspect(story: Story, knownSourceCount: number): Promise<StoryInspection | null> {
     setProgress({ kind: "pending", stage: "Loading authoritative Story…" });
     const result = await storyRequests.inspectStory(story.id);
     if (result.kind === "completed") {
-      onStoryLoaded(result.value);
-      return true;
+      return result.value;
     } else {
       onStoryKnown(story, knownSourceCount);
       setProgress({
@@ -330,7 +344,7 @@ function TriageItem({
         story,
         message: "Triage is durable, but the authoritative Story inspection could not be loaded.",
       });
-      return false;
+      return null;
     }
   }
 
@@ -384,7 +398,14 @@ function TriageItem({
         });
         return;
       }
-      if (await inspect(story, 1)) onResolved();
+      const inspection = await inspect(story, 1);
+      if (inspection !== null)
+        setProgress({
+          kind: "completed",
+          decision: "new_story",
+          message: "Story created and Source attached.",
+          inspection,
+        });
     } finally {
       pendingRef.current = false;
     }
@@ -434,7 +455,14 @@ function TriageItem({
         });
         return;
       }
-      if (await inspect(selected.story, knownSourceCount)) onResolved();
+      const inspection = await inspect(selected.story, knownSourceCount);
+      if (inspection !== null)
+        setProgress({
+          kind: "completed",
+          decision: "existing_story",
+          message: "Source attached to Story.",
+          inspection,
+        });
     } finally {
       pendingRef.current = false;
     }
@@ -447,7 +475,12 @@ function TriageItem({
     setProgress({ kind: "pending", stage: "Recording skip decision…" });
     try {
       const result = await inboxRequests.recordTriageDecision(item.source.id, "skip", null, reason);
-      if (result.kind === "completed") onResolved();
+      if (result.kind === "completed")
+        setProgress({
+          kind: "completed",
+          decision: "skip",
+          message: "Skip decision recorded. This Source is no longer pending.",
+        });
       else
         setProgress({
           kind: "failure",
@@ -494,7 +527,17 @@ function TriageItem({
         });
         return;
       }
-      if (await inspect(story, knownSourceCount)) onResolved();
+      const inspection = await inspect(story, knownSourceCount);
+      if (inspection !== null)
+        setProgress({
+          kind: "completed",
+          decision,
+          message:
+            decision === "new_story"
+              ? "Story created and Source attached."
+              : "Source attached to Story.",
+          inspection,
+        });
     } finally {
       pendingRef.current = false;
     }
@@ -509,8 +552,45 @@ function TriageItem({
       </p>
     ) : null;
 
+  if (progress.kind === "completed")
+    return (
+      <article
+        className={`${styles.persistedSource} ${styles.triageCompleted}`}
+        ref={itemRef}
+        tabIndex={-1}
+        aria-labelledby={`triage-completed-${item.source.id}`}
+      >
+        <span className={styles.completionMark} aria-hidden="true">
+          ✓
+        </span>
+        <div>
+          <p className={styles.sectionKicker}>Decision completed</p>
+          <h3 id={`triage-completed-${item.source.id}`}>{progress.message}</h3>
+          <p>{extractedTitle(item) || item.source.canonicalUrl}</p>
+          <div className={styles.handoffActions}>
+            {progress.inspection ? (
+              <button
+                type="button"
+                className={styles.primaryAction}
+                onClick={() => {
+                  onResolved();
+                  onStoryLoaded(progress.inspection as StoryInspection);
+                }}
+              >
+                Open Story
+              </button>
+            ) : (
+              <button type="button" className={styles.primaryAction} onClick={onResolved}>
+                Continue triage
+              </button>
+            )}
+          </div>
+        </div>
+      </article>
+    );
+
   return (
-    <article className={styles.persistedSource}>
+    <article className={styles.persistedSource} ref={itemRef} tabIndex={-1}>
       <p className={styles.sectionKicker}>Pending Source</p>
       <h3>{extractedTitle(item) || item.source.canonicalUrl}</h3>
       <p>
@@ -673,9 +753,11 @@ function TriageItem({
 
 export function SourceInboxWorkspace({
   refreshVersion,
+  focusedSourceId = null,
   stories,
   inboxRequests = sourceInboxClient,
   storyRequests = storyClient,
+  onPendingCountChange,
   onStoryKnown,
   onStoryLoaded,
 }: SourceInboxWorkspaceProps) {
@@ -711,6 +793,12 @@ export function SourceInboxWorkspace({
     state.kind !== "loading" && state.refreshVersion !== refreshVersion
       ? ({ kind: "loading" } as const)
       : state;
+  const pendingCount =
+    state.kind === "loaded" && state.refreshVersion === refreshVersion ? state.items.length : null;
+
+  useEffect(() => {
+    onPendingCountChange?.(pendingCount);
+  }, [onPendingCountChange, pendingCount]);
 
   if (displayedState.kind === "loading")
     return (
@@ -747,27 +835,32 @@ export function SourceInboxWorkspace({
           <p>The pending inbox is clear.</p>
         </div>
       ) : (
-        displayedState.items.map((item) => (
-          <TriageItem
-            key={item.source.id}
-            item={item}
-            stories={stories}
-            inboxRequests={inboxRequests}
-            storyRequests={storyRequests}
-            onResolved={() =>
-              setState((current) =>
-                current.kind === "loaded"
-                  ? {
-                      ...current,
-                      items: current.items.filter(({ source }) => source.id !== item.source.id),
-                    }
-                  : current,
-              )
-            }
-            onStoryKnown={onStoryKnown}
-            onStoryLoaded={onStoryLoaded}
-          />
-        ))
+        [...displayedState.items]
+          .sort((left, right) =>
+            left.source.id === focusedSourceId ? -1 : right.source.id === focusedSourceId ? 1 : 0,
+          )
+          .map((item) => (
+            <TriageItem
+              key={item.source.id}
+              item={item}
+              stories={stories}
+              inboxRequests={inboxRequests}
+              storyRequests={storyRequests}
+              onResolved={() =>
+                setState((current) =>
+                  current.kind === "loaded"
+                    ? {
+                        ...current,
+                        items: current.items.filter(({ source }) => source.id !== item.source.id),
+                      }
+                    : current,
+                )
+              }
+              onStoryKnown={onStoryKnown}
+              onStoryLoaded={onStoryLoaded}
+              focusRequested={item.source.id === focusedSourceId}
+            />
+          ))
       )}
     </section>
   );

@@ -58,21 +58,40 @@ describe("SourceEvidenceWorkspace", () => {
   it("preserves the exact URL, renders durable receipts, and directs the operator to Source Inbox", async () => {
     const perform = request();
     const onSourceAvailable = vi.fn();
+    const onReviewInInbox = vi.fn();
     render(
       <SourceEvidenceWorkspace
         requestSourceEvidence={perform}
         onSourceAvailable={onSourceAvailable}
+        onReviewInInbox={onReviewInInbox}
       />,
     );
     const input = screen.getByRole("textbox", { name: "Source URL" });
     fireEvent.change(input, { target: { value: "  exact caller URL  " } });
     fireEvent.click(screen.getByRole("button", { name: "Preserve and extract" }));
 
-    expect(await screen.findByText("# Exact persisted evidence")).toBeVisible();
+    expect(await screen.findByText("Source preserved")).toBeVisible();
     expect(perform).toHaveBeenCalledWith("  exact caller URL  ");
     expect(screen.getByText(/available for editorial review in Source Inbox/i)).toBeVisible();
-    expect(onSourceAvailable).toHaveBeenCalledOnce();
+    expect(input).toHaveValue("");
+    expect(onSourceAvailable).toHaveBeenCalledWith(SOURCE.id);
+    expect(onReviewInInbox).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Review in Source Inbox" }));
+    expect(onReviewInInbox).toHaveBeenCalledWith(SOURCE.id);
     expect(screen.queryByText("Create Story from Source")).not.toBeInTheDocument();
+  });
+
+  it("returns to a clean intake form when the operator chooses Add another Source", async () => {
+    render(<SourceEvidenceWorkspace requestSourceEvidence={request()} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Source URL" }), {
+      target: { value: SOURCE.submittedUrl },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Preserve and extract" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add another Source" }));
+    expect(screen.getByRole("textbox", { name: "Source URL" })).toHaveValue("");
+    expect(
+      screen.queryByRole("button", { name: "Review in Source Inbox" }),
+    ).not.toBeInTheDocument();
   });
 
   it("refreshes authoritative inbox state for a duplicate without inventing a local pending item", async () => {

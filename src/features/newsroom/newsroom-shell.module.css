@@ -1188,3 +1188,838 @@
     padding-left: 0;
   }
 }
+
+/* Batch 0032 newsroom workbench */
+.shell {
+  grid-template-columns: clamp(23rem, 24vw, 25rem) minmax(0, 1fr);
+}
+
+.desk {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.deskNavigation {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  align-content: start;
+  gap: 1.5rem;
+  overflow-y: auto;
+  padding: 1.25rem;
+  scrollbar-color: #38594d transparent;
+  scrollbar-width: thin;
+}
+
+.deskNavigation section {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.deskNavigation .navigationLabel {
+  padding: 0 0.75rem 0.5rem;
+}
+
+.queueGroup {
+  display: grid;
+  min-width: 0;
+  gap: 0.4rem;
+}
+
+.queueGroup > .queueButton {
+  width: 100%;
+}
+
+.queueStories {
+  display: grid;
+  min-width: 0;
+  gap: 0.55rem;
+  margin: 0.1rem 0.3rem 0.65rem 0.75rem;
+  border-left: 1px solid #315044;
+  padding-left: 0.75rem;
+}
+
+.queueInlineStatus {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0 0.3rem 0.45rem 0.75rem;
+  border-left: 1px solid #315044;
+  padding: 0.45rem 0 0.45rem 0.75rem;
+  color: #81968c;
+  font-size: 0.72rem;
+}
+
+.queueInlineStatus button {
+  border: 0;
+  background: transparent;
+  padding: 0.25rem;
+  color: #9de0c5;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.navButton {
+  display: flex;
+  min-height: 2.55rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 0;
+  border-radius: 0.6rem;
+  background: transparent;
+  padding: 0.55rem 0.75rem;
+  color: #b8c6bf;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.84rem;
+  text-align: left;
+}
+
+.navButton:hover,
+.navButton[aria-current="page"] {
+  background: #173027;
+  color: #f4f8f5;
+}
+
+.navButton[aria-current="page"] {
+  box-shadow: inset 2px 0 #79d8b4;
+}
+
+.navButton:focus-visible,
+.primaryAction:focus-visible,
+.secondaryAction:focus-visible,
+.tertiaryAction:focus-visible,
+.secondaryPanel > summary:focus-visible {
+  outline: 3px solid #8ee4c2;
+  outline-offset: 3px;
+}
+
+.storyCard {
+  position: relative;
+  min-height: 4.75rem;
+  padding: 0.85rem;
+}
+
+.storyCardSelection {
+  justify-self: start;
+  color: #9de0c5;
+  font-size: 0.61rem;
+  font-weight: 750;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.storyCardSelection::before {
+  margin-right: 0.35rem;
+  content: "✓";
+}
+
+.storyWorkspace {
+  display: grid;
+  width: min(100%, 76rem);
+  gap: 2rem;
+  padding: clamp(2rem, 5vw, 4.5rem) clamp(1.25rem, 5vw, 4.5rem) 5rem;
+}
+
+.storyWorkspaceHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 2rem;
+}
+
+.storyWorkspaceHeader h1 {
+  max-width: 52rem;
+  margin: 0.65rem 0 0;
+  color: #f4f7f5;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(2.3rem, 4.6vw, 4.6rem);
+  font-weight: 500;
+  letter-spacing: -0.05em;
+  line-height: 0.98;
+}
+
+.storyWorkspaceHeaderCompact h1 {
+  max-width: 46rem;
+  font-size: clamp(1.8rem, 3vw, 3rem);
+  line-height: 1.05;
+}
+
+.storyMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin-top: 1rem;
+  color: #91a69c;
+  font-size: 0.78rem;
+}
+
+.workspaceNotice,
+.inlineAlert {
+  margin: 0;
+  border-left: 0.2rem solid #dfb867;
+  background: #252015;
+  padding: 0.8rem 1rem;
+  color: #e8d6ad;
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.currentTask {
+  min-width: 0;
+  animation: task-enter 180ms ease-out;
+}
+
+.readyCard,
+.proposalCard,
+.assignmentSummary,
+.progressCard,
+.assignmentEditorForm {
+  border: 1px solid #365c4d;
+  border-radius: 1rem;
+  background: linear-gradient(145deg, rgb(21 45 36 / 95%), rgb(11 24 19 / 98%));
+  box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 18%);
+  padding: clamp(1.4rem, 4vw, 2.5rem);
+}
+
+.currentTaskLabel {
+  margin: 0;
+  color: #82cfb2;
+  font-size: 0.67rem;
+  font-weight: 750;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.readyCard h2,
+.proposalLead h2,
+.assignmentSummary h2,
+.progressCard h2,
+.assignmentEditorForm h2 {
+  margin: 0.65rem 0 0;
+  color: #f4f7f5;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.8rem, 3.5vw, 3rem);
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  line-height: 1.05;
+}
+
+.readyCard > p:not(.currentTaskLabel),
+.progressCard p:last-child,
+.assignmentEditorForm > p {
+  max-width: 42rem;
+  color: #a9bab2;
+  line-height: 1.65;
+}
+
+.taskActions,
+.handoffActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 1.5rem;
+}
+
+.primaryAction,
+.secondaryAction,
+.tertiaryAction {
+  min-height: 2.8rem;
+  border-radius: 0.65rem;
+  padding: 0.65rem 1rem;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.primaryAction {
+  border: 1px solid #66b493;
+  background: #3b7d61;
+  color: #f6fbf8;
+}
+
+.primaryAction:hover:not(:disabled) {
+  background: #4b9474;
+}
+
+.secondaryAction {
+  border: 1px solid #41695a;
+  background: #10251e;
+  color: #dbe8e1;
+}
+
+.tertiaryAction {
+  border: 1px solid transparent;
+  background: transparent;
+  color: #9bcab7;
+}
+
+.primaryAction:disabled,
+.secondaryAction:disabled,
+.tertiaryAction:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.proposalLead,
+.assignmentEditorForm > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+
+.proposalLead {
+  margin-top: 1.25rem;
+}
+
+.proposalLead span:not(.profilePill) {
+  color: #8da299;
+  font-size: 0.72rem;
+}
+
+.profilePill {
+  flex: 0 0 auto;
+  border: 1px solid #47715f;
+  border-radius: 999px;
+  padding: 0.4rem 0.65rem;
+  color: #9de0c5;
+  font-size: 0.65rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.proposalFacts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 1.75rem 0 0;
+  border: 1px solid #315044;
+  background: #315044;
+}
+
+.proposalFacts > div {
+  min-width: 0;
+  background: #0d1c17;
+  padding: 1rem;
+}
+
+.proposalFacts dt,
+.auditGrid dt {
+  margin-bottom: 0.4rem;
+  color: #789087;
+  font-size: 0.63rem;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.proposalFacts dd,
+.auditGrid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #e1ebe5;
+  font-size: 0.86rem;
+  line-height: 1.6;
+}
+
+.proposalCard .inlineAlert,
+.assignmentSummary .inlineAlert {
+  margin-top: 1rem;
+}
+
+.assignmentEditorForm {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.assignmentEditorForm label {
+  color: #dce8e1;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.assignmentEditorForm input,
+.assignmentEditorForm textarea,
+.assignmentEditorForm select {
+  display: block;
+  width: 100%;
+  margin-top: 0.4rem;
+  border: 1px solid #41695a;
+  border-radius: 0.6rem;
+  background: #08110e;
+  padding: 0.75rem 0.85rem;
+  color: #eef5f0;
+  font: inherit;
+}
+
+.assignmentEditorForm textarea {
+  min-height: 7rem;
+  resize: vertical;
+}
+
+.assignmentEditorForm :focus-visible {
+  outline: 3px solid #8ee4c2;
+  outline-offset: 3px;
+}
+
+.progressCard {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.25rem;
+}
+
+.progressMark {
+  display: block;
+  width: 0.9rem;
+  height: 0.9rem;
+  flex: 0 0 auto;
+  margin-top: 0.3rem;
+  border: 2px solid #41695a;
+  border-top-color: #8ee4c2;
+  border-radius: 50%;
+  animation: progress-spin 900ms linear infinite;
+}
+
+.secondaryPanels {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.secondaryPanel {
+  min-width: 0;
+  border: 1px solid #29443a;
+  border-radius: 0.85rem;
+  background: rgb(12 25 20 / 78%);
+}
+
+.secondaryPanel > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 1rem 1.15rem;
+  color: #dce8e1;
+  cursor: pointer;
+  list-style: none;
+}
+
+.secondaryPanel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.secondaryPanel > summary > span:first-child {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.secondaryPanel > summary strong {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.secondaryPanel > summary small,
+.secondaryPanel > summary > span:last-child {
+  color: #7f958b;
+  font-size: 0.7rem;
+}
+
+.secondaryPanel > summary > span:last-child {
+  white-space: nowrap;
+}
+
+.secondaryPanel[open] > summary {
+  border-bottom: 1px solid #29443a;
+}
+
+.secondaryPanelContent {
+  display: grid;
+  gap: 1.5rem;
+  padding: 1.15rem;
+  animation: task-enter 140ms ease-out;
+}
+
+.secondaryPanelContent h4,
+.auditRecord h5 {
+  margin: 0;
+  color: #e5eee8;
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 500;
+}
+
+.secondaryPanelContent section + section {
+  border-top: 1px solid #29443a;
+  padding-top: 1.5rem;
+}
+
+.evidenceCard,
+.auditRecord {
+  min-width: 0;
+  border: 1px solid #2f4e42;
+  border-radius: 0.75rem;
+  background: #0a1612;
+  padding: 1rem;
+}
+
+.evidenceCard header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.evidenceCard h4 {
+  margin-top: 0.35rem;
+  overflow-wrap: anywhere;
+}
+
+.evidenceCard a,
+.articleBody a {
+  color: #9de0c5;
+  text-underline-offset: 0.16em;
+}
+
+.evidenceCard header > span {
+  color: #82cfb2;
+  font-size: 0.67rem;
+  text-transform: uppercase;
+}
+
+.evidenceDisclosure {
+  margin-top: 1rem;
+  border-top: 1px solid #29443a;
+  padding-top: 0.85rem;
+  color: #91a69c;
+  font-size: 0.78rem;
+}
+
+.evidenceDisclosure > summary {
+  cursor: pointer;
+  color: #bbcbc3;
+}
+
+.evidenceDisclosure .extractedContent {
+  margin-top: 1rem;
+}
+
+.auditGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 1rem 0 0;
+  border: 1px solid #29443a;
+  background: #29443a;
+}
+
+.auditGrid > div {
+  min-width: 0;
+  background: #091510;
+  padding: 0.85rem;
+}
+
+.auditRecord {
+  margin-top: 0.85rem;
+}
+
+.articleReader {
+  max-width: 58rem;
+  margin-inline: auto;
+  border: 1px solid #315044;
+  border-radius: 1rem;
+  background: #0e1b17;
+  box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 20%);
+  padding: clamp(1.5rem, 5vw, 4rem);
+}
+
+.articleHeader {
+  border-bottom: 1px solid #315044;
+  padding-bottom: 2rem;
+}
+
+.articleHeader h2 {
+  margin: 0.8rem 0 0;
+  color: #f5f5ee;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(2.4rem, 6vw, 5.5rem);
+  font-weight: 500;
+  letter-spacing: -0.055em;
+  line-height: 0.98;
+}
+
+.articleDek {
+  max-width: 46rem;
+  margin: 1.4rem 0 0;
+  color: #bdcbc4;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.1rem, 2vw, 1.4rem);
+  line-height: 1.55;
+}
+
+.articleByline {
+  margin: 1.2rem 0 0;
+  color: #789087;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.articleBody {
+  color: #dce5df;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.02rem, 1.4vw, 1.16rem);
+  line-height: 1.85;
+}
+
+.articleBody > *:first-child {
+  margin-top: 2.2rem;
+}
+
+.articleBody h2,
+.articleBody h3,
+.articleBody h4 {
+  margin: 2.2rem 0 0.7rem;
+  color: #f1f3ed;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.articleBody h2 {
+  font-size: 1.8rem;
+}
+.articleBody h3 {
+  font-size: 1.45rem;
+}
+.articleBody h4 {
+  font-size: 1.2rem;
+}
+
+.articleBody p,
+.articleBody ul,
+.articleBody ol,
+.articleBody blockquote {
+  margin: 1.2rem 0 0;
+}
+
+.articleBody li + li {
+  margin-top: 0.45rem;
+}
+
+.articleBody blockquote {
+  border-left: 0.2rem solid #65a88d;
+  padding-left: 1.2rem;
+  color: #b8cbc1;
+  font-style: italic;
+}
+
+.articleBody pre {
+  overflow-x: auto;
+  margin-top: 1.4rem;
+  border: 1px solid #29443a;
+  border-radius: 0.65rem;
+  background: #07100d;
+  padding: 1rem;
+  font:
+    0.8rem/1.6 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+}
+
+.articleBody code:not(pre code) {
+  border-radius: 0.25rem;
+  background: #152a22;
+  padding: 0.1rem 0.3rem;
+  font:
+    0.88em ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+}
+
+.articleBody hr {
+  margin: 2.5rem 0;
+  border: 0;
+  border-top: 1px solid #315044;
+}
+
+.handoffActions {
+  margin-top: 1rem;
+}
+
+.completionChecklist {
+  display: grid;
+  gap: 0.45rem;
+  margin: 1.25rem 0;
+  padding: 0;
+  color: #cde8dc;
+  list-style: none;
+}
+
+.completionChecklist li::before {
+  margin-right: 0.6rem;
+  color: #88d9b9;
+  content: "✓";
+}
+
+.triageCompleted {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  border-color: #4c896f;
+  background: linear-gradient(145deg, #153328, #0d1d17);
+  animation: task-enter 180ms ease-out;
+}
+
+.triageCompleted h3 {
+  margin: 0.45rem 0 0;
+  color: #f1f6f3;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.55rem;
+  font-weight: 500;
+}
+
+.completionMark {
+  display: grid;
+  width: 2.2rem;
+  height: 2.2rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid #66b493;
+  border-radius: 50%;
+  color: #99e2c5;
+}
+
+@keyframes task-enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.35rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes progress-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 68rem) {
+  .shell {
+    grid-template-columns: 18rem minmax(0, 1fr);
+  }
+  .proposalFacts,
+  .auditGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 52rem) {
+  .desk {
+    position: static;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+  }
+  .deskNavigation {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: start;
+    overflow: visible;
+  }
+  .deskNavigation section {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 40rem) {
+  .identity {
+    padding: 1.2rem 1.25rem;
+  }
+  .deskNavigation {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+    padding: 0.8rem;
+  }
+  .deskNavigation section:nth-child(2) {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .deskNavigation .navigationLabel {
+    padding-inline: 0.45rem;
+  }
+  .navButton,
+  .queueButton {
+    min-height: 2.3rem;
+    padding: 0.45rem;
+  }
+  .queueList {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+  }
+  .queueButton {
+    min-width: 0;
+  }
+  .queueGroup[data-expanded="true"] {
+    grid-column: 1 / -1;
+  }
+  .queueStories {
+    margin-right: 0;
+  }
+  .emptyQueue {
+    padding: 1rem;
+  }
+  .storyCard {
+    min-width: 0;
+  }
+  .storyWorkspaceHeader,
+  .proposalLead,
+  .assignmentEditorForm > header {
+    flex-direction: column;
+  }
+  .stateBadge {
+    align-self: flex-start;
+  }
+  .secondaryPanel > summary {
+    align-items: flex-start;
+  }
+  .secondaryPanel > summary > span:last-child {
+    display: none;
+  }
+  .taskActions,
+  .handoffActions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .taskActions button,
+  .handoffActions button {
+    width: 100%;
+  }
+  .articleReader {
+    border-right: 0;
+    border-left: 0;
+    border-radius: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .currentTask,
+  .secondaryPanelContent,
+  .triageCompleted,
+  .progressMark {
+    animation: none;
+  }
+
+  .disclosureChevron {
+    transition: none;
+  }
+}
