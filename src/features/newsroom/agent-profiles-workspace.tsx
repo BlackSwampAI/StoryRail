@@ -38,8 +38,10 @@ function roleLabel(profile: AgentProfile): string {
 
 export function AgentProfilesWorkspace({
   requests = agentProfileClient,
+  onProfileCreated,
 }: {
   readonly requests?: AgentProfileClient;
+  readonly onProfileCreated?: (profile: AgentProfile) => void;
 }) {
   const [state, setState] = useState<ProfileState>({ kind: "loading" });
   const [name, setName] = useState("");
@@ -116,6 +118,7 @@ export function AgentProfilesWorkspace({
           ]),
         };
       });
+      onProfileCreated?.(result.value);
       setName("");
       setInstructions("");
       setProvider("");
@@ -165,7 +168,7 @@ export function AgentProfilesWorkspace({
                   <dt>Model</dt>
                   <dd>
                     {profile.model === null
-                      ? "Not configured"
+                      ? "Newsroom default at execution"
                       : `${profile.model.provider} / ${profile.model.model}`}
                   </dd>
                 </div>

@@ -62,7 +62,8 @@ describe("AgentProfilesWorkspace", () => {
     expect(screen.getByRole("heading", { name: "General Writer" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Director" })).toBeVisible();
     expect(screen.getAllByText("Built-in")).toHaveLength(3);
-    expect(screen.getAllByText("Not configured")).toHaveLength(3);
+    expect(screen.getAllByText("Newsroom default at execution")).toHaveLength(3);
+    expect(screen.queryByText("Not configured")).not.toBeInTheDocument();
     expect(screen.getByText("provider / review-model")).toBeVisible();
     expect(screen.getByText("No agents are running")).toBeVisible();
   });
@@ -80,7 +81,13 @@ describe("AgentProfilesWorkspace", () => {
       kind: "completed",
       value: created,
     }));
-    render(<AgentProfilesWorkspace requests={client({ createWriterProfile })} />);
+    const onProfileCreated = vi.fn();
+    render(
+      <AgentProfilesWorkspace
+        requests={client({ createWriterProfile })}
+        onProfileCreated={onProfileCreated}
+      />,
+    );
     await screen.findByRole("heading", { name: "General Writer" });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Custom Writer" } });
     fireEvent.change(screen.getByLabelText("Instructions"), {
@@ -96,6 +103,8 @@ describe("AgentProfilesWorkspace", () => {
     });
     expect(screen.getByRole("heading", { name: "General Writer" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Custom Writer" })).toBeVisible();
+    expect(onProfileCreated).toHaveBeenCalledOnce();
+    expect(onProfileCreated).toHaveBeenCalledWith(created);
   });
 
   it("posts provider and model together", async () => {
