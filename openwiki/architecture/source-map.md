@@ -21,7 +21,7 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 | `eslint.config.mjs`                                    | next core-web-vitals + TypeScript configs; ignores build/cache output                                                |
 | `.prettierrc.json`, `.prettierignore`, `.editorconfig` | formatting                                                                                                           |
 | `.nvmrc`                                               | Node 24.18.0                                                                                                         |
-| `.env.example`                                         | Database, operator, Firecrawl, OpenRouter, evidence-preparation, assignment-editor, and writer model variable names                              |
+| `.env.example`                                         | Database, operator, Firecrawl, OpenRouter, evidence-preparation, assignment-editor, and writer model variable names  |
 | `.gitignore`                                           | env, node_modules, build output, caches                                                                              |
 | `AGENTS.md`, `CLAUDE.md`                               | agent operating instructions (do not edit during wiki runs)                                                          |
 

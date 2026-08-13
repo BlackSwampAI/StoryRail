@@ -31,20 +31,20 @@ The provider-neutral structured-model port is implemented with LangChain's `Chat
 
 All PostgreSQL adapters share a defensive pattern: they serialize the domain object to JSONB `payload`, store denormalized relational columns alongside it, and decode rows back into typed domain objects with strict shape validation (`hasExactKeys`, `isActor`, `isAgentRole`). Any row that fails the expected shape throws an `*InvariantError`, treating a corrupted payload as a programming error rather than returning malformed data.
 
-| Adapter                                              | Table(s)                                                | Port implemented                                    |
-| ---------------------------------------------------- | ------------------------------------------------------- | --------------------------------------------------- |
-| `postgres-source-repositories.ts`                    | `storyrail.url_sources`, `storyrail.source_extractions` | `UrlSourceRepository`, `SourceExtractionRepository` |
-| `postgres-story-repository.ts`                       | `storyrail.stories`                                     | `StoryRepository`                                   |
-| `postgres-story-source-attachment-repository.ts`     | `storyrail.story_source_attachments`                    | `StorySourceAttachmentRepository`                   |
-| `postgres-story-inspection-repository.ts`            | joins stories + attachments + sources + extractions     | `StoryInspectionRepository`                         |
-| `postgres-story-listing-repository.ts`               | `storyrail.stories` + attachment count                  | `StoryListingRepository`                            |
-| `postgres-source-inbox-repository.ts`                | sources + extractions left join triage                  | `SourceInboxRepository`                             |
-| `postgres-source-triage-decision-repository.ts`      | `storyrail.source_triage_decisions`                     | `SourceTriageDecisionRepository`                    |
-| `postgres-source-evidence-preparation-repository.ts` | `storyrail.source_evidence_preparations`                | `SourceEvidencePreparationRepository`               |
-| `postgres-agent-profile-repository.ts`               | `storyrail.agent_profiles`                               | `AgentProfileRepository`                             |
-| `postgres-assignment-persistence.ts`                 | `storyrail.story_assignments`, `storyrail.story_transition_receipts` | `AssignmentPersistence`                    |
-| `postgres-agent-run-repository.ts`                   | `storyrail.agent_runs`                                   | `AgentRunRepository`                                 |
-| `postgres-writer-draft-persistence.ts`               | `storyrail.articles`, `storyrail.article_revisions`     | `WriterDraftPersistence`                             |
+| Adapter                                              | Table(s)                                                             | Port implemented                                    |
+| ---------------------------------------------------- | -------------------------------------------------------------------- | --------------------------------------------------- |
+| `postgres-source-repositories.ts`                    | `storyrail.url_sources`, `storyrail.source_extractions`              | `UrlSourceRepository`, `SourceExtractionRepository` |
+| `postgres-story-repository.ts`                       | `storyrail.stories`                                                  | `StoryRepository`                                   |
+| `postgres-story-source-attachment-repository.ts`     | `storyrail.story_source_attachments`                                 | `StorySourceAttachmentRepository`                   |
+| `postgres-story-inspection-repository.ts`            | joins stories + attachments + sources + extractions                  | `StoryInspectionRepository`                         |
+| `postgres-story-listing-repository.ts`               | `storyrail.stories` + attachment count                               | `StoryListingRepository`                            |
+| `postgres-source-inbox-repository.ts`                | sources + extractions left join triage                               | `SourceInboxRepository`                             |
+| `postgres-source-triage-decision-repository.ts`      | `storyrail.source_triage_decisions`                                  | `SourceTriageDecisionRepository`                    |
+| `postgres-source-evidence-preparation-repository.ts` | `storyrail.source_evidence_preparations`                             | `SourceEvidencePreparationRepository`               |
+| `postgres-agent-profile-repository.ts`               | `storyrail.agent_profiles`                                           | `AgentProfileRepository`                            |
+| `postgres-assignment-persistence.ts`                 | `storyrail.story_assignments`, `storyrail.story_transition_receipts` | `AssignmentPersistence`                             |
+| `postgres-agent-run-repository.ts`                   | `storyrail.agent_runs`                                               | `AgentRunRepository`                                |
+| `postgres-writer-draft-persistence.ts`               | `storyrail.articles`, `storyrail.article_revisions`                  | `WriterDraftPersistence`                            |
 
 `postgres-source-extraction-decoder.ts` decodes a persisted extraction row back into the `SuccessfulSourceExtraction` / `FailedSourceExtraction` union and is shared by the inspection and inbox adapters. `postgres-assignment-decoder.ts`, `postgres-agent-run-decoder.ts`, and `postgres-article-decoder.ts` perform the same strict-shape decoding for their respective payloads; the AgentRun decoder must handle the discriminated `assignment_proposal` / `article_draft` union and its succeeded/failed variants.
 

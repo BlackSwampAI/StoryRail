@@ -29,13 +29,13 @@ It fetches Stories via `storyClient`, pending Sources via `sourceInboxRequests`,
 
 ## Workspaces and clients
 
-| Component                 | File                            | Backed by                                                                                                                                   |
-| ------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Component                 | File                            | Backed by                                                                                                                                          |
+| ------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `SourceEvidenceWorkspace` | `source-evidence-workspace.tsx` | `POST /api/source-evidence/url` via `source-evidence-url-client.ts`, then `POST /api/sources/[sourceId]/preparations` via `source-inbox-client.ts` |
-| `SourceInboxWorkspace`    | `source-inbox-workspace.tsx`    | `GET /api/source-inbox`, `POST /api/sources/[sourceId]/preparations`, and `PUT /api/sources/[sourceId]/triage` via `source-inbox-client.ts` |
-| `StoryWorkspace`          | `story-workspace.tsx`           | `GET /api/stories/[storyId]`, `POST .../assignment-proposals`, `POST .../assignments`, `POST .../writer-drafts` via `story-client.ts`       |
-| `AgentProfilesWorkspace`  | `agent-profiles-workspace.tsx`  | `GET/POST /api/agent-profiles` via `agent-profile-client.ts`                                                                                |
-| `ArticleReader`           | `article-reader.tsx`            | Renders an `ArticleRevision` through `SafeMarkdown`                                                                                         |
+| `SourceInboxWorkspace`    | `source-inbox-workspace.tsx`    | `GET /api/source-inbox`, `POST /api/sources/[sourceId]/preparations`, and `PUT /api/sources/[sourceId]/triage` via `source-inbox-client.ts`        |
+| `StoryWorkspace`          | `story-workspace.tsx`           | `GET /api/stories/[storyId]`, `POST .../assignment-proposals`, `POST .../assignments`, `POST .../writer-drafts` via `story-client.ts`              |
+| `AgentProfilesWorkspace`  | `agent-profiles-workspace.tsx`  | `GET/POST /api/agent-profiles` via `agent-profile-client.ts`                                                                                       |
+| `ArticleReader`           | `article-reader.tsx`            | Renders an `ArticleRevision` through `SafeMarkdown`                                                                                                |
 
 ### Source-evidence intake
 

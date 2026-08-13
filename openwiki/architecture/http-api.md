@@ -133,13 +133,13 @@ Always returns 200 on success or 500 on internal failure.
 - Provider: `storyRuntimeProvider`
 - Body: `{ "name": string, "instructions": string, "model": { "provider": string, "model": string } | null }` (exactly three properties). A null `model` means the Writer uses the runtime default.
 
-| Status | Condition                                                            |
-| ------ | -------------------------------------------------------------------- |
-| 201    | Profile created                                                      |
-| 409    | `AGENT_PROFILE_ID_CONFLICT`                                          |
-| 422    | `AGENT_PROFILE_ROLE_UNSUPPORTED`, `AGENT_PROFILE_NAME_REQUIRED`, `AGENT_PROFILE_INSTRUCTIONS_REQUIRED`, `AGENT_PROFILE_MODEL_*`, `AGENT_PROFILE_BUILT_IN_INVALID` |
-| 415/400 | Media type / JSON / shape errors                                    |
-| 500    | Internal server error                                                |
+| Status  | Condition                                                                                                                                                         |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 201     | Profile created                                                                                                                                                   |
+| 409     | `AGENT_PROFILE_ID_CONFLICT`                                                                                                                                       |
+| 422     | `AGENT_PROFILE_ROLE_UNSUPPORTED`, `AGENT_PROFILE_NAME_REQUIRED`, `AGENT_PROFILE_INSTRUCTIONS_REQUIRED`, `AGENT_PROFILE_MODEL_*`, `AGENT_PROFILE_BUILT_IN_INVALID` |
+| 415/400 | Media type / JSON / shape errors                                                                                                                                  |
+| 500     | Internal server error                                                                                                                                             |
 
 ## POST /api/stories/[storyId]/assignment-proposals — generate an Assignment Editor proposal
 
@@ -149,14 +149,14 @@ Always returns 200 on success or 500 on internal failure.
 - Body: `{}` (exactly an empty object). `STORYRAIL_OPERATOR_ID` must be configured or the handler returns 500.
 - Workflow: `generateAssignmentProposal`. Records one immutable `AgentRun` (succeeded proposal or safe failure). It does not create an Assignment or transition Story state; the operator reviews the suggestion in the manual Assignment form.
 
-| Status | Condition                                                                                       |
-| ------ | ----------------------------------------------------------------------------------------------- |
-| 201    | Proposal `AgentRun` recorded (succeeded or failed outcome)                                       |
-| 404    | `STORY_NOT_FOUND`                                                                               |
+| Status | Condition                                                                                         |
+| ------ | ------------------------------------------------------------------------------------------------- |
+| 201    | Proposal `AgentRun` recorded (succeeded or failed outcome)                                        |
+| 404    | `STORY_NOT_FOUND`                                                                                 |
 | 409    | `ASSIGNMENT_PROPOSAL_NOT_ALLOWED` (Story not Intake or already assigned), `AGENT_RUN_ID_CONFLICT` |
-| 422    | `ASSIGNMENT_EDITOR_EVIDENCE_REQUIRED`, `WRITER_PROFILE_REQUIRED`                                |
-| 500    | `ASSIGNMENT_EDITOR_PROFILE_UNAVAILABLE`, missing `STORYRAIL_OPERATOR_ID`, or internal error     |
-| 503    | Assignment-editor runtime not configured (`ASSIGNMENT_EDITOR_UNAVAILABLE`)                      |
+| 422    | `ASSIGNMENT_EDITOR_EVIDENCE_REQUIRED`, `WRITER_PROFILE_REQUIRED`                                  |
+| 500    | `ASSIGNMENT_EDITOR_PROFILE_UNAVAILABLE`, missing `STORYRAIL_OPERATOR_ID`, or internal error       |
+| 503    | Assignment-editor runtime not configured (`ASSIGNMENT_EDITOR_UNAVAILABLE`)                        |
 
 ## POST /api/stories/[storyId]/assignments — create a durable Assignment
 
@@ -166,14 +166,14 @@ Always returns 200 on success or 500 on internal failure.
 - Body: `{ "writerProfileId": string, "angle": string, "brief": string, "constraints": string | null, "reason": string }` (exactly five properties). The operator actor is derived from `STORYRAIL_OPERATOR_ID`.
 - Workflow: `assignStory`. Validates the Story and Writer Profile, snapshots every attached Source identity from the authoritative inspection, creates the Assignment, and atomically transitions the Story `intake` → `assigned` with a durable transition receipt.
 
-| Status | Condition                                                                                            |
-| ------ | ---------------------------------------------------------------------------------------------------- |
-| 201    | Assignment and transition persisted                                                                   |
-| 404    | `STORY_NOT_FOUND`, `AGENT_PROFILE_NOT_FOUND`                                                          |
-| 409    | `INVALID_TRANSITION` (Story not Intake), `STORY_ASSIGNMENT_CONFLICT` (Story already assigned)        |
-| 422    | `ASSIGNMENT_ANGLE_REQUIRED`, `ASSIGNMENT_BRIEF_REQUIRED`, `ASSIGNMENT_CONSTRAINTS_INVALID`, `ASSIGNMENT_WRITER_PROFILE_REQUIRED`, `ASSIGNMENT_ACTOR_NOT_ALLOWED`, `ASSIGNMENT_SOURCE_DUPLICATE`, `AGENT_PROFILE_NOT_WRITER` |
-| 415/400 | Media type / JSON / shape errors                                                                     |
-| 500    | Missing `STORYRAIL_OPERATOR_ID` or internal error                                                    |
+| Status  | Condition                                                                                                                                                                                                                   |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 201     | Assignment and transition persisted                                                                                                                                                                                         |
+| 404     | `STORY_NOT_FOUND`, `AGENT_PROFILE_NOT_FOUND`                                                                                                                                                                                |
+| 409     | `INVALID_TRANSITION` (Story not Intake), `STORY_ASSIGNMENT_CONFLICT` (Story already assigned)                                                                                                                               |
+| 422     | `ASSIGNMENT_ANGLE_REQUIRED`, `ASSIGNMENT_BRIEF_REQUIRED`, `ASSIGNMENT_CONSTRAINTS_INVALID`, `ASSIGNMENT_WRITER_PROFILE_REQUIRED`, `ASSIGNMENT_ACTOR_NOT_ALLOWED`, `ASSIGNMENT_SOURCE_DUPLICATE`, `AGENT_PROFILE_NOT_WRITER` |
+| 415/400 | Media type / JSON / shape errors                                                                                                                                                                                            |
+| 500     | Missing `STORYRAIL_OPERATOR_ID` or internal error                                                                                                                                                                           |
 
 ## POST /api/stories/[storyId]/writer-drafts — run the Writer and create the first Article
 
@@ -183,14 +183,14 @@ Always returns 200 on success or 500 on internal failure.
 - Body: `{}` (exactly an empty object). `STORYRAIL_OPERATOR_ID` must be configured or the handler returns 500.
 - Workflow: `createWriterDraft`. Validates the Story is Assigned with a durable Assignment and no existing Article, resolves the executable Writer model, runs the supervised Writer against the Assignment's evidence snapshot, records a Writer `AgentRun`, creates the first Article and immutable Revision 1, and atomically transitions the Story `assigned` → `in_progress`. A failed model invocation records a failed `AgentRun` and returns success with the failed run (no Article is created).
 
-| Status | Condition                                                                                                                       |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| 201    | Writer `AgentRun` recorded (succeeded with Article/Revision, or failed run)                                                     |
-| 404    | `STORY_NOT_FOUND`                                                                                                               |
+| Status | Condition                                                                                                                                          |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 201    | Writer `AgentRun` recorded (succeeded with Article/Revision, or failed run)                                                                        |
+| 404    | `STORY_NOT_FOUND`                                                                                                                                  |
 | 409    | `WRITER_DRAFT_NOT_ALLOWED` (Story not Assigned), `ASSIGNMENT_REQUIRED`, `ARTICLE_ALREADY_EXISTS`, `WRITER_DRAFT_CONFLICT`, `AGENT_RUN_ID_CONFLICT` |
-| 422    | `WRITER_EVIDENCE_REQUIRED`                                                                                                      |
-| 500    | `WRITER_MODEL_UNSUPPORTED`, `WRITER_PROFILE_UNAVAILABLE`, missing `STORYRAIL_OPERATOR_ID`, or internal error                    |
-| 503    | Writer runtime not configured (`WRITER_UNAVAILABLE`) or `WRITER_MODEL_UNAVAILABLE`                                              |
+| 422    | `WRITER_EVIDENCE_REQUIRED`                                                                                                                         |
+| 500    | `WRITER_MODEL_UNSUPPORTED`, `WRITER_PROFILE_UNAVAILABLE`, missing `STORYRAIL_OPERATOR_ID`, or internal error                                       |
+| 503    | Writer runtime not configured (`WRITER_UNAVAILABLE`) or `WRITER_MODEL_UNAVAILABLE`                                                                 |
 
 ## Handler conventions
 
