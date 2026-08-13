@@ -32,7 +32,11 @@ jobs:
           node-version: "22"
 
       - name: Install OpenWiki
-        run: npm install --global openwiki mermaid@11.16.0 jsdom@29.1.1
+        # Keep OpenWiki's LangChain peers on the last known-compatible release set.
+        run: npm install --global openwiki@0.3.2 langchain@1.5.6 @langchain/core@1.2.6 mermaid@11.16.0 jsdom@29.1.1
+
+      - name: Verify OpenWiki startup
+        run: openwiki --help
 
       - name: Run OpenWiki
         run: openwiki code --update --print
