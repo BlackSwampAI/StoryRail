@@ -15,10 +15,7 @@ import {
   type UrlSource,
 } from "@/domain/editorial";
 
-import {
-  SOURCE_INBOX_UNAVAILABLE_MESSAGE,
-  type SourceInboxClient,
-} from "./source-inbox-client";
+import { SOURCE_INBOX_UNAVAILABLE_MESSAGE, type SourceInboxClient } from "./source-inbox-client";
 import { SourceInboxWorkspace, type SourceInboxWorkspaceProps } from "./source-inbox-workspace";
 import type { StoryClient } from "./story-client";
 
