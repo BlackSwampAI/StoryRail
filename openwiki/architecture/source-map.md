@@ -42,10 +42,10 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `agent-profile-types.ts`, `agent-profile.ts` — `createAgentProfile`, built-in/custom Writer profiles
 - `assignment-types.ts`, `assignment.ts` — `createAssignment`
 - `assignment-proposal-types.ts`, `assignment-proposal.ts` — `createAssignmentProposal`
-- `agent-run-types.ts`, `agent-run.ts` — `recordAgentRun` (Assignment Editor, Writer, and Director run validation)
+- `agent-run-types.ts`, `agent-run.ts` — `recordAgentRun` (Assignment Editor, Writer draft/revision, and Director run validation)
 - `director-review-types.ts`, `director-review.ts` — `createDirectorReview` (advisory recommendation validation)
 - `review-decision-types.ts`, `review-decision.ts` — `createReviewDecision` (operator decision validation)
-- `article-types.ts`, `article.ts` — `createArticle`, `createFirstArticleRevision`
+- `article-types.ts`, `article.ts` — `createArticle`, `createFirstArticleRevision`, `createArticleRevision`
 - `index.ts` — barrel re-export
 
 ### `src/application` — use-case workflows + repository ports
@@ -68,6 +68,7 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `agent-runs/` — `agent-run-repository.ts` (port), `.contract.ts`
 - `assignment-proposals/` — `generate-assignment-proposal.ts`
 - `writer-drafts/` — `create-writer-draft.ts`, `writer-draft-persistence.ts`
+- `writer-revisions/` — `create-writer-revision.ts`, `writer-revision-persistence.ts`
 - `review-submissions/` — `submit-story-review.ts`, `review-submission-persistence.ts`
 - `director-reviews/` — `run-director-review.ts`
 - `review-decisions/` — `record-story-review-decision.ts`, `review-decision-persistence.ts`
@@ -84,7 +85,7 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `agent-profile-persistence/` — `postgres-agent-profile-repository.ts`, `postgres-agent-profile-decoder.ts`
 - `assignment-persistence/` — `postgres-assignment-persistence.ts`, `postgres-assignment-decoder.ts`
 - `agent-run-persistence/` — `postgres-agent-run-repository.ts`, `postgres-agent-run-decoder.ts`
-- `article-persistence/` — `postgres-writer-draft-persistence.ts`, `postgres-article-decoder.ts`
+- `article-persistence/` — `postgres-writer-draft-persistence.ts`, `postgres-writer-revision-persistence.ts`, `postgres-article-decoder.ts`
 - `review-persistence/` — `postgres-review-decision-persistence.ts`, `postgres-review-submission-persistence.ts`, `postgres-review-decision-decoder.ts`
 - `story-persistence/` — `postgres-story-repository.ts`
 - `story-source-persistence/` — `postgres-story-source-attachment-repository.ts`
@@ -99,7 +100,7 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `evidence-preparation-runtime.ts` and configuration — explicit OpenRouter preparation composition
 - `story-runtime.ts` — `createStoryRuntime` / `...FromEnvironment`
 - `assignment-editor-configuration.ts`, `assignment-editor-runtime.ts` — supervised Assignment Editor proposal runtime
-- `writer-configuration.ts`, `writer-runtime.ts` — supervised Writer draft runtime and model resolution
+- `writer-configuration.ts`, `writer-runtime.ts` — supervised Writer draft and revision runtime and model resolution
 - `director-configuration.ts`, `director-runtime.ts` — supervised advisory Director review runtime and model resolution
 - `index.ts` — barrel re-export
 
@@ -124,6 +125,7 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `generate-assignment-proposal-handler.ts`
 - `assign-story-handler.ts`
 - `create-writer-draft-handler.ts`
+- `create-writer-revision-handler.ts`
 - `submit-story-review-handler.ts`
 - `run-director-review-handler.ts`
 - `record-story-review-decision-handler.ts`
@@ -141,6 +143,7 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `api/stories/[storyId]/assignment-proposals/route.ts` (POST)
 - `api/stories/[storyId]/assignments/route.ts` (POST)
 - `api/stories/[storyId]/writer-drafts/route.ts` (POST)
+- `api/stories/[storyId]/writer-revisions/route.ts` (POST)
 - `api/stories/[storyId]/review-submissions/route.ts` (POST)
 - `api/stories/[storyId]/director-reviews/route.ts` (POST)
 - `api/stories/[storyId]/review-decisions/route.ts` (POST)
@@ -153,8 +156,9 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `newsroom-staff.tsx` — Agent Profile roster and Writer drag sources
 - `source-evidence-workspace.tsx`, `source-evidence-url-client.ts` — integrated intake → prepare → review flow
 - `source-inbox-workspace.tsx`, `source-inbox-client.ts`
-- `story-workspace.tsx` — Assignment, Writer execution, review submission, Director review, operator decision, and Article reading workspace
+- `story-workspace.tsx` — Assignment, Writer execution, Writer revision, review submission, Director review, operator decision, and Article reading workspace
 - `article-reader.tsx`, `safe-markdown.tsx` — dependency-free safe Markdown renderer for untrusted content
+- `editorial-task-pending.tsx` — shared accessible pending-status card for Writer, Assignment Editor, and Director tasks
 - `agent-profiles-workspace.tsx`, `agent-profile-client.ts`
 - `story-client.ts`
 
@@ -174,6 +178,7 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `0030-agent-runs.sql` — `agent_runs` with Assignment Editor proposal input/outcome constraints
 - `0031-articles-and-writer-drafts.sql` — extends `agent_runs` for Writer `article_draft` runs; creates `articles` and `article_revisions`
 - `0038-supervised-director-review.sql` — extends `agent_runs` for Director `article_review` runs; creates `review_decisions`; adds `director_review_is_valid` and uniqueness constraints
+- `0041-supervised-writer-revisions.sql` — extends `agent_runs` for Writer `article_revision` runs; broadens `article_revisions.revision_number` to 1–3; links revision runs to the authorizing `review_decisions` row via generated columns and a composite foreign key
 
 ## Documentation (`docs/`)
 

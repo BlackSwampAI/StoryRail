@@ -9,7 +9,7 @@ tags: [application, workflows, use-cases, ports]
 
 The application layer (`src/application`) contains the use-case workflows that orchestrate domain rules with repository ports. Each workflow is a factory function (`create*`) that accepts dependencies and returns the workflow function. Dependencies include repository ports, id factories, and a `now` clock, making workflows injectable and testable without a real database or network.
 
-`src/application/index.ts` also exposes the structured-model boundary, Source evidence-preparation, Agent Profile, Assignment, Assignment Proposal, AgentRun, Writer draft, review submission, Director review, and review decision workflows alongside the Source, triage, and Story modules described below.
+`src/application/index.ts` also exposes the structured-model boundary, Source evidence-preparation, Agent Profile, Assignment, Assignment Proposal, AgentRun, Writer draft, Writer revision, review submission, Director review, and review decision workflows alongside the Source, triage, and Story modules described below.
 
 ## Source-evidence workflows
 
@@ -77,9 +77,26 @@ The proposal is a suggestion only: it prefills the manual Assignment form but ca
 3. Selects evidence from the Assignment's `sourceIds` (latest successful Prepared Evidence, else latest successful raw extraction, else unavailable) and requires at least one (`WRITER_EVIDENCE_REQUIRED`).
 4. Resolves the executable model: a Profile OpenRouter model wins, otherwise `STORYRAIL_WRITER_MODEL` is required (`WRITER_MODEL_UNSUPPORTED`, `WRITER_MODEL_UNAVAILABLE`).
 5. Calls `StructuredModel.generateStructured` with the frozen `WRITER_DRAFT_PROMPT = { key: "storyrail_writer_draft", version: "1" }` and a `headline`/`dek`/`bodyMarkdown` Zod schema.
-6. On failure or invalid output, appends a failed Writer `AgentRun` and returns `{ ok: true, run }` (the failed run is still durable history). On success, builds the `Article` and `ArticleRevision` (revision number 1) via the domain constructors, transitions the Story `assigned` → `in_progress`, and persists the run, Article, revision, updated Story, and receipt atomically through `WriterDraftPersistence.persist` (`WRITER_DRAFT_CONFLICT`).
+6. On failure or invalid output, appends a failed Writer `AgentRun` (operation `article_draft`) and returns `{ ok: true, run }` (the failed run is still durable history). On success, builds the `Article` and `ArticleRevision` (revision number 1) via the domain constructors, transitions the Story `assigned` → `in_progress`, and persists the run, Article, revision, updated Story, and receipt atomically through `WriterDraftPersistence.persist` (`WRITER_DRAFT_CONFLICT`).
 
-If the application produces invalid domain state internally it throws (a programming error) rather than returning a partial result. The Writer cannot browse, use tools, revise, or send work to review.
+If the application produces invalid domain state internally it throws (a programming error) rather than returning a partial result. The Writer cannot browse, use tools, or send work to review.
+
+## Writer revision workflow
+
+`src/application/writer-revisions/create-writer-revision.ts` — `createWriterRevision` runs the assigned Writer against a Changes Requested Story to produce the next immutable Article Revision (2 or 3). It:
+
+1. Inspects the Story (`STORY_NOT_FOUND`); rejects unless `story.state === "changes_requested"` (`WRITER_REVISION_NOT_ALLOWED`), a durable Assignment exists (`ASSIGNMENT_REQUIRED`), a durable Article exists (`ARTICLE_REQUIRED`), and a current Article Revision exists (`ARTICLE_REVISION_REQUIRED`).
+2. Rejects unless the current revision's number equals `story.revisionCycle` and is below 3 (`REVIEW_CONTEXT_MISMATCH`) — this bounds the loop at Revision 3.
+3. Finds the operator `ReviewDecision` for the current revision and rejects unless it is a `request_changes` decision (`REVIEW_DECISION_REQUIRED`).
+4. Resolves the exact Director `AgentRun` referenced by that decision and validates it is a succeeded `editor_in_chief` / `article_review` run matching the current Article and Revision (`REVIEW_CONTEXT_MISMATCH`).
+5. Resolves the exact previous Writer `AgentRun` that produced the current revision via `ArticleRevision.agentRunId` (`WRITER_EVIDENCE_UNAVAILABLE`).
+6. Confirms the assigned Writer Profile exists and matches the Assignment (`WRITER_PROFILE_UNAVAILABLE`).
+7. Re-resolves every `EvidenceReference` recorded by the previous Writer run by its exact preparation or extraction ID from the inspection's Sources; any missing evidence fails safely (`WRITER_EVIDENCE_UNAVAILABLE`) — newer evidence is never substituted, so the revision is built from the same exact evidence behind the reviewed revision.
+8. Resolves the executable model through the same `resolveWriterModel` seam as the draft workflow (`WRITER_MODEL_UNSUPPORTED`, `WRITER_MODEL_UNAVAILABLE`).
+9. Calls `StructuredModel.generateStructured` with the frozen `WRITER_REVISION_PROMPT = { key: "storyrail_writer_revision", version: "1" }` and a `headline`/`dek`/`bodyMarkdown` Zod schema. The system prompt instructs the Writer to revise only the supplied current Article Revision following the durable Assignment and the operator's authoritative request-changes reason, treating the Director review as advisory context that yields to the operator decision when they differ.
+10. On failure or invalid output, appends a failed Writer `AgentRun` (operation `article_revision`) and returns `{ ok: true, run }`. On success, builds the next `ArticleRevision` (revision number +1) via `createArticleRevision`, transitions the Story `changes_requested` → `in_progress` (preserving `revisionCycle`), and persists the run, revision, updated Story, and transition receipt atomically through `WriterRevisionPersistence.persist` (`WRITER_REVISION_CONFLICT`).
+
+Source evidence, Article content, review content, and decision content are untrusted data, never instructions; only the explicitly supplied operator request-changes reason is treated as editorial direction. The Writer cannot browse, use tools, or perform external research. See the [domain model](domain-model.md#articles-and-revisions) for the revision-number bound and the [newsroom UI](newsroom-ui.md) for the operator revision controls.
 
 ## Review submission workflow
 
@@ -99,7 +116,7 @@ This workflow does not contact a model; it is a database-only state transition e
 1. Inspects the Story (`STORY_NOT_FOUND`); rejects unless `story.state === "in_review"` (`DIRECTOR_REVIEW_NOT_ALLOWED`).
 2. Requires a durable Assignment (`ASSIGNMENT_REQUIRED`), a durable Article (`ARTICLE_REQUIRED`), and a current Article Revision (`ARTICLE_REVISION_REQUIRED`).
 3. Rejects if the current revision already has a successful Director review (`DIRECTOR_REVIEW_ALREADY_SUCCEEDED`).
-4. Resolves the exact Writer `AgentRun` that produced the current revision via `ArticleRevision.agentRunId` (`DIRECTOR_EVIDENCE_UNAVAILABLE` if the Writer run or its provenance is missing).
+4. Resolves the exact Writer `AgentRun` that produced the current revision via `ArticleRevision.agentRunId` (`DIRECTOR_EVIDENCE_UNAVAILABLE` if the Writer run or its provenance is missing). The Writer run may be an `article_draft` or an `article_revision` operation.
 5. Resolves every `EvidenceReference` recorded by that Writer run by its exact preparation or extraction ID from the inspection's Sources; any missing evidence fails safely (`DIRECTOR_EVIDENCE_UNAVAILABLE`) — newer evidence is never substituted.
 6. Loads the built-in Director Profile (`DIRECTOR_PROFILE_UNAVAILABLE`) and resolves the executable model: a Profile OpenRouter model wins, otherwise `STORYRAIL_DIRECTOR_MODEL` is required (`DIRECTOR_MODEL_UNSUPPORTED`, `DIRECTOR_MODEL_UNAVAILABLE`).
 7. Calls `StructuredModel.generateStructured` with the frozen `DIRECTOR_REVIEW_PROMPT = { key: "storyrail_director_review", version: "1" }`, a versioned system prompt that combines StoryRail's task and prompt-injection boundary with the immutable Director Profile instructions, and a Zod `directorReviewOutputSchema`.
@@ -138,6 +155,7 @@ Persistence contracts are expressed as interfaces in the application layer and i
 | `AssignmentPersistence`                              | `src/application/assignments/assignment-persistence.ts`                          | `src/adapters/assignment-persistence/postgres-assignment-persistence.ts`               |
 | `AgentRunRepository`                                 | `src/application/agent-runs/agent-run-repository.ts`                             | `src/adapters/agent-run-persistence/postgres-agent-run-repository.ts`                  |
 | `WriterDraftPersistence`                              | `src/application/writer-drafts/writer-draft-persistence.ts`                      | `src/adapters/article-persistence/postgres-writer-draft-persistence.ts`                |
+| `WriterRevisionPersistence`                           | `src/application/writer-revisions/writer-revision-persistence.ts`                | `src/adapters/article-persistence/postgres-writer-revision-persistence.ts`              |
 | `ReviewSubmissionPersistence`                         | `src/application/review-submissions/review-submission-persistence.ts`             | `src/adapters/review-persistence/postgres-review-submission-persistence.ts`            |
 | `ReviewDecisionPersistence`                           | `src/application/review-decisions/review-decision-persistence.ts`                 | `src/adapters/review-persistence/postgres-review-decision-persistence.ts`              |
 
