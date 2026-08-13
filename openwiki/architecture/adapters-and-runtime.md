@@ -9,7 +9,7 @@ tags: [adapters, postgresql, firecrawl, runtime, composition]
 
 ## Adapters (`src/adapters`)
 
-Adapters implement the application-layer repository ports against external systems. `src/adapters/index.ts` re-exports the source-extraction, source-persistence, story-persistence, story-inspection, story-listing, story-source-persistence, agent-profile-persistence, agent-run-persistence, assignment-persistence, and article-persistence adapters (source-inbox, source-triage-persistence, and story-persistence are consumed directly by the runtimes).
+Adapters implement the application-layer repository ports against external systems. `src/adapters/index.ts` re-exports the source-extraction, source-persistence, story-persistence, story-inspection, story-listing, story-source-persistence, agent-profile-persistence, agent-run-persistence, assignment-persistence, article-persistence, and review-persistence adapters (source-inbox, source-triage-persistence, and story-persistence are consumed directly by the runtimes).
 
 ### Source extraction: Firecrawl
 
@@ -45,12 +45,14 @@ All PostgreSQL adapters share a defensive pattern: they serialize the domain obj
 | `postgres-assignment-persistence.ts`                 | `storyrail.story_assignments`, `storyrail.story_transition_receipts` | `AssignmentPersistence`                             |
 | `postgres-agent-run-repository.ts`                   | `storyrail.agent_runs`                                               | `AgentRunRepository`                                |
 | `postgres-writer-draft-persistence.ts`               | `storyrail.articles`, `storyrail.article_revisions`                  | `WriterDraftPersistence`                            |
+| `postgres-review-decision-persistence.ts`             | `storyrail.review_decisions`, `storyrail.stories`, `storyrail.story_transition_receipts` | `ReviewDecisionPersistence`                  |
+| `postgres-review-submission-persistence.ts`           | `storyrail.stories`, `storyrail.story_transition_receipts`           | `ReviewSubmissionPersistence`                        |
 
-`postgres-source-extraction-decoder.ts` decodes a persisted extraction row back into the `SuccessfulSourceExtraction` / `FailedSourceExtraction` union and is shared by the inspection and inbox adapters. `postgres-assignment-decoder.ts`, `postgres-agent-run-decoder.ts`, and `postgres-article-decoder.ts` perform the same strict-shape decoding for their respective payloads; the AgentRun decoder must handle the discriminated `assignment_proposal` / `article_draft` union and its succeeded/failed variants.
+`postgres-source-extraction-decoder.ts` decodes a persisted extraction row back into the `SuccessfulSourceExtraction` / `FailedSourceExtraction` union and is shared by the inspection and inbox adapters. `postgres-assignment-decoder.ts`, `postgres-agent-run-decoder.ts`, `postgres-article-decoder.ts`, and `postgres-review-decision-decoder.ts` perform the same strict-shape decoding for their respective payloads; the AgentRun decoder must handle the discriminated `assignment_proposal` / `article_draft` / `article_review` union and its succeeded/failed variants, and the review-decision decoder re-validates the payload through the domain `createReviewDecision`. The review persistence adapters are transactional: both lock and recheck the expected Story under `FOR UPDATE` before persisting the transition, and the decision adapter verifies the current Article Revision matches and that no decision exists for that revision before inserting.
 
 ## Runtime composition (`src/runtime`)
 
-`src/runtime/index.ts` exports the Source-evidence, evidence-preparation, Story, Assignment-editor, and Writer runtime factories and their configuration loaders.
+`src/runtime/index.ts` exports the Source-evidence, evidence-preparation, Story, Assignment-editor, Writer, and Director runtime factories and their configuration loaders.
 
 ### Source-evidence runtime
 
@@ -70,8 +72,8 @@ All PostgreSQL adapters share a defensive pattern: they serialize the domain obj
 `src/runtime/story-runtime.ts`:
 
 - Requires only `STORYRAIL_DATABASE_URL`; throws `StoryRuntimeConfigurationError` (`STORYRAIL_DATABASE_URL_REQUIRED`) when missing/blank.
-- `createStoryRuntime(options)` builds one `pg.Pool` and constructs the story, attachment, inspection, listing, source-inbox, source-triage, agent-profile, and assignment-persistence repositories. It wires `createStory`, `attachSourceToStory`, `inspectStory`, `listStories`, `listPendingSources`, `recordSourceTriageDecision`, `createCustomWriterProfile`, `listAgentProfiles`, and `assignStory`.
-- Returns a frozen `StoryRuntime` exposing those nine operations plus an idempotent `close()`.
+- `createStoryRuntime(options)` builds one `pg.Pool` and constructs the story, attachment, inspection, listing, source-inbox, source-triage, agent-profile, assignment-persistence, review-submission-persistence, and review-decision-persistence repositories. It wires `createStory`, `attachSourceToStory`, `inspectStory`, `listStories`, `listPendingSources`, `recordSourceTriageDecision`, `createCustomWriterProfile`, `listAgentProfiles`, `assignStory`, `submitStoryReview`, and `recordStoryReviewDecision`.
+- Returns a frozen `StoryRuntime` exposing those eleven operations plus an idempotent `close()`.
 - `createStoryRuntimeFromEnvironment(options)` reads `STORYRAIL_DATABASE_URL` from `process.env` (or an injected environment).
 
 ### Assignment-editor runtime
@@ -82,10 +84,14 @@ All PostgreSQL adapters share a defensive pattern: they serialize the domain obj
 
 `src/runtime/writer-runtime.ts` requires `STORYRAIL_DATABASE_URL` and `OPENROUTER_API_KEY`; `STORYRAIL_WRITER_MODEL` is an optional default (`writer-configuration.ts`). It composes the story-inspection, agent-run, and writer-draft PostgreSQL repositories and resolves the executable model per run via `resolveWriterModel`: a Profile OpenRouter model wins, otherwise `STORYRAIL_WRITER_MODEL` is required; non-OpenRouter providers are rejected (`WRITER_MODEL_UNSUPPORTED`). It owns one `pg.Pool` and exposes a frozen `WriterRuntime` with `createWriterDraft` plus an idempotent `close()`. Missing configuration surfaces as `WriterRuntimeConfigurationError`, which the HTTP handler maps to `503 WRITER_UNAVAILABLE`.
 
+### Director runtime
+
+`src/runtime/director-runtime.ts` requires `STORYRAIL_DATABASE_URL` and `OPENROUTER_API_KEY`; `STORYRAIL_DIRECTOR_MODEL` is an optional default (`director-configuration.ts`). It composes the story-inspection, agent-profile, and agent-run PostgreSQL repositories with an OpenRouter `StructuredModel` into `runDirectorReview`. It resolves the executable model per run via `resolveDirectorModel`: the built-in Director Profile's OpenRouter model wins, otherwise `STORYRAIL_DIRECTOR_MODEL` is required; non-OpenRouter providers are rejected (`DIRECTOR_MODEL_UNSUPPORTED`). The built-in Director Profile has a `null` model, so `STORYRAIL_DIRECTOR_MODEL` is the normal configuration. It owns one `pg.Pool` and exposes a frozen `DirectorRuntime` with `runDirectorReview` plus an idempotent `close()`. Missing configuration surfaces as `DirectorRuntimeConfigurationError`, which the HTTP handler maps to `503 DIRECTOR_UNAVAILABLE`.
+
 ## Injectable seams
 
-Both runtimes accept optional `createPool`, `fetch`, `createUuid`, and `now` overrides. All five runtime unit tests (`source-evidence-runtime.test.ts`, `story-runtime.test.ts`, `assignment-editor-runtime.test.ts`, `writer-runtime.test.ts`, and `evidence-preparation-runtime.test.ts`) inject Pool, fetch, UUID, and clock substitutes, so they require no real PostgreSQL or Firecrawl access. The PostgreSQL integration tests (`src/adapters/source-persistence/postgres-source-repositories.test.ts`) run the contracts against real PostgreSQL 18.4.
+All six runtimes accept optional `createPool`, `createUuid`, and `now` overrides (the Source-evidence and Writer runtimes also accept `fetch`/model adapters where applicable). All six runtime unit tests (`source-evidence-runtime.test.ts`, `story-runtime.test.ts`, `assignment-editor-runtime.test.ts`, `writer-runtime.test.ts`, `evidence-preparation-runtime.test.ts`, and `director-configuration.test.ts`) inject Pool, fetch, UUID, and clock substitutes, so they require no real PostgreSQL or Firecrawl access. The PostgreSQL integration tests (`src/adapters/source-persistence/postgres-source-repositories.test.ts`) run the contracts against real PostgreSQL 18.4.
 
 ## Server providers (`src/server`)
 
-`src/server/*-runtime-provider.ts` are lazy singletons: `get()` builds the runtime from environment on first call and caches it. Next.js route handlers receive `getRuntime: provider.get`, so the pool is created only when a request first needs it. Providers exist for the Source-evidence, evidence-preparation, Story, Assignment-editor (`assignment-editor-runtime-provider.ts`), and Writer (`writer-runtime-provider.ts`) runtimes.
+`src/server/*-runtime-provider.ts` are lazy singletons: `get()` builds the runtime from environment on first call and caches it. Next.js route handlers receive `getRuntime: provider.get`, so the pool is created only when a request first needs it. Providers exist for the Source-evidence, evidence-preparation, Story, Assignment-editor (`assignment-editor-runtime-provider.ts`), Writer (`writer-runtime-provider.ts`), and Director (`director-runtime-provider.ts`) runtimes.

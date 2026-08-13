@@ -54,15 +54,16 @@ flowchart TD
 | Next.js routes   | `src/app/api`           | Thin Next.js route handlers binding HTTP handlers to providers.                                                                                                             |
 | Newsroom UI      | `src/features/newsroom` | React client shell with Story desk, Source-evidence intake, Source inbox, Agent Profiles, and a Story workspace covering assignment, Writer execution, and Article reading. |
 
-## Five composed runtimes
+## Six composed runtimes
 
-StoryRail composes five independent runtimes rather than one global container:
+StoryRail composes six independent runtimes rather than one global container:
 
 1. **Source-evidence runtime** (`src/runtime/source-evidence-runtime.ts`) — requires `STORYRAIL_DATABASE_URL` and `FIRECRAWL_API_KEY`. Owns one `pg.Pool`. Exposes `preserveUrlSource`, `extractPersistedSource`, and the combined `preserveAndExtractUrlSource`.
 2. **Evidence-preparation runtime** (`src/runtime/evidence-preparation-runtime.ts`) — requires `STORYRAIL_DATABASE_URL`, `OPENROUTER_API_KEY`, and `STORYRAIL_EVIDENCE_PREPARATION_MODEL`. Uses LangChain's OpenRouter adapter to create one immutable Prepared Evidence attempt from a successful raw extraction.
-3. **Story runtime** (`src/runtime/story-runtime.ts`) — requires only `STORYRAIL_DATABASE_URL`. Owns a separate `pg.Pool`. Exposes Story creation, Source attachment, Story inspection, Story listing, pending Source inbox listing, Source triage decision recording, Agent Profile listing and custom Writer creation, and manual `assignStory`.
+3. **Story runtime** (`src/runtime/story-runtime.ts`) — requires only `STORYRAIL_DATABASE_URL`. Owns a separate `pg.Pool`. Exposes Story creation, Source attachment, Story inspection, Story listing, pending Source inbox listing, Source triage decision recording, Agent Profile listing and custom Writer creation, manual `assignStory`, `submitStoryReview` (`in_progress` → `in_review`), and `recordStoryReviewDecision` (`in_review` → `approved`/`changes_requested`).
 4. **Assignment-editor runtime** (`src/runtime/assignment-editor-runtime.ts`) — requires `STORYRAIL_DATABASE_URL`, `OPENROUTER_API_KEY`, and `STORYRAIL_ASSIGNMENT_EDITOR_MODEL`. Generates one supervised Assignment Editor proposal `AgentRun` for an Intake Story; it records the run but cannot create an Assignment or transition Story state.
 5. **Writer runtime** (`src/runtime/writer-runtime.ts`) — requires `STORYRAIL_DATABASE_URL` and `OPENROUTER_API_KEY`, plus either the assigned Writer Profile's OpenRouter model or `STORYRAIL_WRITER_MODEL` as a default. Runs the assigned Writer against an Assigned Story to create the first Article and immutable Revision 1 and atomically transition the Story to `in_progress`.
+6. **Director runtime** (`src/runtime/director-runtime.ts`) — requires `STORYRAIL_DATABASE_URL` and `OPENROUTER_API_KEY`, plus either the built-in Director Profile's OpenRouter model or `STORYRAIL_DIRECTOR_MODEL` as a default. Runs the supervised advisory Director review against an In Review Story and records a Director `AgentRun` (succeeded recommendation or safe failure). The Director cannot mutate the Article or Story state; only the operator's [review decision](application-workflows.md) transitions the Story.
 
 Each runtime owns and closes only the `Pool` it creates. The integration test suite and a composed server runtime each own their own pools independently.
 
@@ -84,12 +85,16 @@ flowchart LR
     STORY --> ASSIGN
     ASSIGN -->|intake to assigned| WRITER[Supervised Writer execution]
     WRITER -->|assigned to in_progress| DRAFT[Article Revision 1]
-    DRAFT --> REVIEW[Review and revision loop]
-    REVIEW --> APPROVE[Approve or reject]
-    APPROVE --> PUBLISH[Publish or export]
+    DRAFT -->|operator submits| SUBMIT[In Review]
+    SUBMIT --> DIRECTOR[Advisory Director review]
+    DIRECTOR --> OPERATOR{Operator decision}
+    OPERATOR -->|Approve| APPROVED[Approved]
+    OPERATOR -->|Request changes| CHANGES[Changes requested]
+    CHANGES -->|revision loop| WRITER
+    APPROVED --> PUBLISH[Publish or export]
 ```
 
-The implemented vertical slice currently covers URL Source preservation and Firecrawl extraction, optional model-backed Prepared Evidence, durable Story creation, Story-Source attachment, Story inspection/listing read models, a pending Source inbox, manual Source triage decisions, durable Agent Profiles (built-in Assignment Editor, General Writer, and Director plus custom Writer creation), durable manual Assignments with the first `intake` → `assigned` Story transition and durable transition receipts, supervised Assignment Editor proposals recorded as `AgentRun`s, supervised Writer execution that creates the first Article and immutable Revision 1 with the `assigned` → `in_progress` transition, and the newsroom workbench that ties intake, inbox, staff, assignment, and writing together. Revision, Director review, approval, rejection, Article, and publishing workflows beyond the first draft remain planned. See the [domain model](domain-model.md) and [HTTP API](http-api.md) for what is actually implemented.
+The implemented vertical slice currently covers URL Source preservation and Firecrawl extraction, optional model-backed Prepared Evidence, durable Story creation, Story-Source attachment, Story inspection/listing read models, a pending Source inbox, manual Source triage decisions, durable Agent Profiles (built-in Assignment Editor, General Writer, and Director plus custom Writer creation), durable manual Assignments with the first `intake` → `assigned` Story transition and durable transition receipts, supervised Assignment Editor proposals recorded as `AgentRun`s, supervised Writer execution that creates the first Article and immutable Revision 1 with the `assigned` → `in_progress` transition, operator review submission (`in_progress` → `in_review`), supervised advisory Director review recorded as a Director `AgentRun`, operator-owned [review decisions](application-workflows.md) that atomically transition the Story to `approved` or `changes_requested`, and the newsroom workbench that ties intake, inbox, staff, assignment, writing, review, and decisions together. Writer Revision 2, a rejection UI, and publishing workflows remain planned. See the [domain model](domain-model.md) and [HTTP API](http-api.md) for what is actually implemented.
 
 ## Core principles
 

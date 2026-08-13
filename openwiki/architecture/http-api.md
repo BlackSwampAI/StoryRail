@@ -16,6 +16,7 @@ Three lazy server providers back the routes:
 - `storyRuntimeProvider` (`src/server/story-runtime-provider.ts`) — builds the Story runtime on first use.
 - `assignmentEditorRuntimeProvider` (`src/server/assignment-editor-runtime-provider.ts`) — builds the Assignment-editor runtime on first use.
 - `writerRuntimeProvider` (`src/server/writer-runtime-provider.ts`) — builds the Writer runtime on first use.
+- `directorRuntimeProvider` (`src/server/director-runtime-provider.ts`) — builds the Director runtime on first use.
 
 ## POST /api/sources/[sourceId]/preparations — prepare evidence
 
@@ -75,7 +76,7 @@ Always returns 200 on success or 500 on internal failure.
 - Provider: `storyRuntimeProvider`
 - Response: the full `InspectStoryResult` (`{ ok: true, inspection: StoryInspection }` on 200, or `{ ok: false, error: { code: "STORY_NOT_FOUND" } }` on 404).
 
-`StoryInspection` (from `src/application/story-inspection/story-inspection-repository.ts`) assembles the Story with its attached Sources, the optional `{ assignment, writerProfile }` pair, the `StoryTransitionReceipt[]` history, the `AgentRun[]` history, and the optional `{ article, revisions }` pair. Each Source entry contains `{ attachment, source, extractions, preparations }`, preserving both raw extraction attempts and derived preparation attempts.
+`StoryInspection` (from `src/application/story-inspection/story-inspection-repository.ts`) assembles the Story with its attached Sources, the optional `{ assignment, writerProfile }` pair, the `StoryTransitionReceipt[]` history, the `AgentRun[]` history (including Director runs), the optional `{ article, revisions }` pair, and the `ReviewDecision[]` history. Each Source entry contains `{ attachment, source, extractions, preparations }`, preserving both raw extraction attempts and derived preparation attempts.
 
 ## POST /api/stories/[storyId]/sources — attach a Source to a Story
 
@@ -191,6 +192,57 @@ Always returns 200 on success or 500 on internal failure.
 | 422    | `WRITER_EVIDENCE_REQUIRED`                                                                                                                         |
 | 500    | `WRITER_MODEL_UNSUPPORTED`, `WRITER_PROFILE_UNAVAILABLE`, missing `STORYRAIL_OPERATOR_ID`, or internal error                                       |
 | 503    | Writer runtime not configured (`WRITER_UNAVAILABLE`) or `WRITER_MODEL_UNAVAILABLE`                                                                 |
+
+## POST /api/stories/[storyId]/review-submissions — submit an Article for review
+
+- Route: `src/app/api/stories/[storyId]/review-submissions/route.ts`
+- Handler: `src/interfaces/http/submit-story-review-handler.ts`
+- Provider: `storyRuntimeProvider`
+- Body: `{}` (exactly an empty object). `STORYRAIL_OPERATOR_ID` must be configured or the handler returns 500.
+- Workflow: `submitStoryReview`. Validates the Story is In Progress with a durable Assignment and Article (at least one Revision), then atomically transitions the Story `in_progress` → `in_review` with a durable transition receipt. This is a database-only operation; it does not contact a model.
+
+| Status | Condition                                                                                                                       |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| 201    | Review submission persisted (Story now In Review)                                                                                |
+| 404    | `STORY_NOT_FOUND`                                                                                                               |
+| 409    | `REVIEW_SUBMISSION_NOT_ALLOWED` (Story not In Progress), `REVIEW_SUBMISSION_CONFLICT`, `INVALID_TRANSITION`                     |
+| 422    | `ASSIGNMENT_REQUIRED`, `ARTICLE_REQUIRED`, `ARTICLE_REVISION_REQUIRED`                                                         |
+| 415/400| Media type / JSON / shape errors                                                                                                |
+| 500    | Missing `STORYRAIL_OPERATOR_ID` or internal error                                                                              |
+
+## POST /api/stories/[storyId]/director-reviews — run the Director review
+
+- Route: `src/app/api/stories/[storyId]/director-reviews/route.ts`
+- Handler: `src/interfaces/http/run-director-review-handler.ts`
+- Provider: `directorRuntimeProvider`
+- Body: `{}` (exactly an empty object). `STORYRAIL_OPERATOR_ID` must be configured or the handler returns 500.
+- Workflow: `runDirectorReview`. Validates the Story is In Review with a durable Assignment, Article, and current Revision, resolves the exact Writer run and its historical evidence, loads the built-in Director Profile, resolves the executable model, and records one advisory Director `AgentRun` (succeeded recommendation or safe failure). The Director never mutates the Article or Story; the Story remains In Review.
+
+| Status | Condition                                                                                                                                                |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 201    | Director `AgentRun` recorded (succeeded recommendation or failed run)                                                                                   |
+| 404    | `STORY_NOT_FOUND`                                                                                                                                        |
+| 409    | `DIRECTOR_REVIEW_NOT_ALLOWED` (Story not In Review), `DIRECTOR_REVIEW_ALREADY_SUCCEEDED` (current revision already has a successful review), `AGENT_RUN_ID_CONFLICT` |
+| 422    | `ASSIGNMENT_REQUIRED`, `ARTICLE_REQUIRED`, `ARTICLE_REVISION_REQUIRED`, `DIRECTOR_EVIDENCE_UNAVAILABLE`                                                   |
+| 500    | `DIRECTOR_PROFILE_UNAVAILABLE`, `DIRECTOR_MODEL_UNSUPPORTED`, missing `STORYRAIL_OPERATOR_ID`, or internal error                                          |
+| 503    | Director runtime not configured (`DIRECTOR_UNAVAILABLE`) or `DIRECTOR_MODEL_UNAVAILABLE`                                                                  |
+
+## POST /api/stories/[storyId]/review-decisions — record an operator review decision
+
+- Route: `src/app/api/stories/[storyId]/review-decisions/route.ts`
+- Handler: `src/interfaces/http/record-story-review-decision-handler.ts`
+- Provider: `storyRuntimeProvider`
+- Body: `{ "directorRunId": string, "decision": "approve" | "request_changes", "reason": string }` (exactly three properties). `STORYRAIL_OPERATOR_ID` must be configured or the handler returns 500.
+- Workflow: `recordStoryReviewDecision`. Validates the Story is In Review, the current Revision has no existing decision, and the referenced Director run is a successful review matching the current Article and Revision. Records the operator-owned `ReviewDecision`, transitions the Story to `approved` or `changes_requested` (bounded by `MAX_REVISION_CYCLES`), and persists the decision, updated Story, and transition receipt atomically. The operator may override the Director's recommendation.
+
+| Status | Condition                                                                                                                                                                              |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 201    | Decision, Story transition, and receipt persisted                                                                                                                                     |
+| 404    | `STORY_NOT_FOUND`                                                                                                                                                                     |
+| 409    | `REVIEW_DECISION_NOT_ALLOWED` (Story not In Review), `DIRECTOR_REVIEW_REQUIRED`, `DIRECTOR_REVIEW_MISMATCH`, `REVIEW_DECISION_ALREADY_EXISTS`, `REVIEW_DECISION_ID_CONFLICT`, `REVIEW_DECISION_CONFLICT`, `INVALID_TRANSITION`, `REVISION_LIMIT_REACHED` |
+| 422    | `ARTICLE_REQUIRED`, `ARTICLE_REVISION_REQUIRED`, `REVIEW_DECISION_REASON_REQUIRED`                                                                                                    |
+| 415/400| Media type / JSON / shape errors                                                                                                                                                      |
+| 500    | Missing `STORYRAIL_OPERATOR_ID` or internal error                                                                                                                                     |
 
 ## Handler conventions
 

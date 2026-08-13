@@ -9,7 +9,7 @@ tags: [application, workflows, use-cases, ports]
 
 The application layer (`src/application`) contains the use-case workflows that orchestrate domain rules with repository ports. Each workflow is a factory function (`create*`) that accepts dependencies and returns the workflow function. Dependencies include repository ports, id factories, and a `now` clock, making workflows injectable and testable without a real database or network.
 
-`src/application/index.ts` also exposes the structured-model boundary, Source evidence-preparation, Agent Profile, Assignment, Assignment Proposal, AgentRun, and Writer draft workflows alongside the Source, triage, and Story modules described below.
+`src/application/index.ts` also exposes the structured-model boundary, Source evidence-preparation, Agent Profile, Assignment, Assignment Proposal, AgentRun, Writer draft, review submission, Director review, and review decision workflows alongside the Source, triage, and Story modules described below.
 
 ## Source-evidence workflows
 
@@ -32,7 +32,7 @@ The application layer (`src/application`) contains the use-case workflows that o
 
 ## Story read models
 
-- **`story-inspection`** (`src/application/story-inspection/`) — defines the `StoryInspectionRepository.inspect` port returning `InspectStoryResult`. `StoryInspection` assembles a `Story` with its `StoryInspectionSource[]` (each containing the attachment, the `UrlSource`, and the Source's extraction and preparation attempts), the optional `{ assignment, writerProfile }` pair, the `StoryTransitionReceipt[]` history, the `AgentRun[]` history, and the optional `{ article, revisions }` pair. Inspection is the read model the Assignment and Writer workflows use to snapshot evidence and check preconditions.
+- **`story-inspection`** (`src/application/story-inspection/`) — defines the `StoryInspectionRepository.inspect` port returning `InspectStoryResult`. `StoryInspection` assembles a `Story` with its `StoryInspectionSource[]` (each containing the attachment, the `UrlSource`, and the Source's extraction and preparation attempts), the optional `{ assignment, writerProfile }` pair, the `StoryTransitionReceipt[]` history, the `AgentRun[]` history (including Director runs), the optional `{ article, revisions }` pair, and the `ReviewDecision[]` history in append order. Inspection is the read model the Assignment, Writer, and review workflows use to snapshot evidence and check preconditions.
 - **`story-listing`** (`src/application/story-listing/`) — defines the `StoryListingRepository.list` port returning `readonly StoryListItem[]` where each item is `{ story, sourceCount }`.
 - **`source-inbox`** (`src/application/source-inbox/`) — defines the `SourceInboxRepository.listPending` port returning `readonly SourceInboxItem[]` where each item is `{ source, extractions }`.
 
@@ -81,6 +81,46 @@ The proposal is a suggestion only: it prefills the manual Assignment form but ca
 
 If the application produces invalid domain state internally it throws (a programming error) rather than returning a partial result. The Writer cannot browse, use tools, revise, or send work to review.
 
+## Review submission workflow
+
+`src/application/review-submissions/submit-story-review.ts` — `createSubmitStoryReview` is the operator action that sends an In Progress Story to the Director review stage. It:
+
+1. Inspects the Story (`STORY_NOT_FOUND`); rejects unless `story.state === "in_progress"` (`REVIEW_SUBMISSION_NOT_ALLOWED`).
+2. Requires a durable Assignment (`ASSIGNMENT_REQUIRED`), a durable Article (`ARTICLE_REQUIRED`), and at least one Article Revision (`ARTICLE_REVISION_REQUIRED`).
+3. Calls `transitionStory` to move `in_progress` → `in_review` with the operator actor and a fixed reason.
+4. Persists the updated Story and transition receipt atomically through `ReviewSubmissionPersistence.persist` (`REVIEW_SUBMISSION_CONFLICT` if the Story or Article changed concurrently).
+
+This workflow does not contact a model; it is a database-only state transition exposed on the Story runtime.
+
+## Director review workflow
+
+`src/application/director-reviews/run-director-review.ts` — `createRunDirectorReview` produces one supervised advisory `DirectorArticleReviewAgentRun` for an In Review Story. It:
+
+1. Inspects the Story (`STORY_NOT_FOUND`); rejects unless `story.state === "in_review"` (`DIRECTOR_REVIEW_NOT_ALLOWED`).
+2. Requires a durable Assignment (`ASSIGNMENT_REQUIRED`), a durable Article (`ARTICLE_REQUIRED`), and a current Article Revision (`ARTICLE_REVISION_REQUIRED`).
+3. Rejects if the current revision already has a successful Director review (`DIRECTOR_REVIEW_ALREADY_SUCCEEDED`).
+4. Resolves the exact Writer `AgentRun` that produced the current revision via `ArticleRevision.agentRunId` (`DIRECTOR_EVIDENCE_UNAVAILABLE` if the Writer run or its provenance is missing).
+5. Resolves every `EvidenceReference` recorded by that Writer run by its exact preparation or extraction ID from the inspection's Sources; any missing evidence fails safely (`DIRECTOR_EVIDENCE_UNAVAILABLE`) — newer evidence is never substituted.
+6. Loads the built-in Director Profile (`DIRECTOR_PROFILE_UNAVAILABLE`) and resolves the executable model: a Profile OpenRouter model wins, otherwise `STORYRAIL_DIRECTOR_MODEL` is required (`DIRECTOR_MODEL_UNSUPPORTED`, `DIRECTOR_MODEL_UNAVAILABLE`).
+7. Calls `StructuredModel.generateStructured` with the frozen `DIRECTOR_REVIEW_PROMPT = { key: "storyrail_director_review", version: "1" }`, a versioned system prompt that combines StoryRail's task and prompt-injection boundary with the immutable Director Profile instructions, and a Zod `directorReviewOutputSchema`.
+8. Builds a candidate Director `AgentRun` (succeeded with the validated `DirectorReviewRecommendation`, or failed with `MODEL_OUTPUT_INVALID` / the model failure) and appends it via `AgentRunRepository.append` (`DIRECTOR_REVIEW_ALREADY_SUCCEEDED` if a concurrent successful review for the same revision won the uniqueness race; `AGENT_RUN_ID_CONFLICT` for a duplicate id).
+
+The Director is advisory: it records a recommendation, summary, five checks, and optional revision instructions but never mutates the Article or Story. The input snapshot records the exact Assignment, Article, Revision, and evidence references used. Source text and Article content are supplied as untrusted data; the Director cannot browse, use tools, rewrite, or approve durably. See the [domain model](domain-model.md#director-review) for the recommendation validation rules.
+
+## Review decision workflow
+
+`src/application/review-decisions/record-story-review-decision.ts` — `createRecordStoryReviewDecision` is the authoritative operator action that records an approval or request-changes decision and atomically transitions the Story. It:
+
+1. Inspects the Story (`STORY_NOT_FOUND`); rejects unless `story.state === "in_review"` (`REVIEW_DECISION_NOT_ALLOWED`).
+2. Requires a durable Article (`ARTICLE_REQUIRED`) and current Article Revision (`ARTICLE_REVISION_REQUIRED`).
+3. Rejects if the current revision already has an operator decision (`REVIEW_DECISION_ALREADY_EXISTS`).
+4. Finds the referenced Director `AgentRun` by id (`DIRECTOR_REVIEW_REQUIRED`) and validates it is a successful `editor_in_chief` / `article_review` run matching the current Article and Revision (`DIRECTOR_REVIEW_MISMATCH`).
+5. Calls the domain `createReviewDecision` to validate the operator-owned decision and reason.
+6. Calls `transitionStory`: `approve` → `approved`; `request_changes` → `changes_requested` (incrementing `revisionCycle`, bounded by `MAX_REVISION_CYCLES` — `REVISION_LIMIT_REACHED` if exceeded). Only an operator can make this transition.
+7. Persists the ReviewDecision, updated Story, and transition receipt atomically through `ReviewDecisionPersistence.persist` (`REVIEW_DECISION_ALREADY_EXISTS`, `REVIEW_DECISION_ID_CONFLICT`, `REVIEW_DECISION_CONFLICT`).
+
+The operator may override the Director's recommendation (e.g., approve despite a `request_changes` recommendation); the workflow surfaces no error for a disagreement. See the [domain model](domain-model.md#reviewdecision) for the decision validation rules and the [newsroom UI](newsroom-ui.md) for the operator decision controls.
+
 ## Repository ports
 
 Persistence contracts are expressed as interfaces in the application layer and implemented by PostgreSQL adapters:
@@ -97,6 +137,8 @@ Persistence contracts are expressed as interfaces in the application layer and i
 | `AgentProfileRepository`                             | `src/application/agent-profiles/agent-profile-repository.ts`                     | `src/adapters/agent-profile-persistence/postgres-agent-profile-repository.ts`          |
 | `AssignmentPersistence`                              | `src/application/assignments/assignment-persistence.ts`                          | `src/adapters/assignment-persistence/postgres-assignment-persistence.ts`               |
 | `AgentRunRepository`                                 | `src/application/agent-runs/agent-run-repository.ts`                             | `src/adapters/agent-run-persistence/postgres-agent-run-repository.ts`                  |
-| `WriterDraftPersistence`                             | `src/application/writer-drafts/writer-draft-persistence.ts`                      | `src/adapters/article-persistence/postgres-writer-draft-persistence.ts`                |
+| `WriterDraftPersistence`                              | `src/application/writer-drafts/writer-draft-persistence.ts`                      | `src/adapters/article-persistence/postgres-writer-draft-persistence.ts`                |
+| `ReviewSubmissionPersistence`                         | `src/application/review-submissions/review-submission-persistence.ts`             | `src/adapters/review-persistence/postgres-review-submission-persistence.ts`            |
+| `ReviewDecisionPersistence`                           | `src/application/review-decisions/review-decision-persistence.ts`                 | `src/adapters/review-persistence/postgres-review-decision-persistence.ts`              |
 
 The `*.contract.ts` files alongside several ports (`source-repositories.contract.ts`, `story-inspection-repository.contract.ts`, `agent-run-repository.contract.ts`, etc.) are shared harnesses that verify any repository implementation satisfies the same behavior contract. The PostgreSQL adapter tests run these contracts against real PostgreSQL in the integration suite.
