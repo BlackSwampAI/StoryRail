@@ -193,6 +193,24 @@ Always returns 200 on success or 500 on internal failure.
 | 500    | `WRITER_MODEL_UNSUPPORTED`, `WRITER_PROFILE_UNAVAILABLE`, missing `STORYRAIL_OPERATOR_ID`, or internal error                                       |
 | 503    | Writer runtime not configured (`WRITER_UNAVAILABLE`) or `WRITER_MODEL_UNAVAILABLE`                                                                 |
 
+## POST /api/stories/[storyId]/writer-revisions — run the Writer revision
+
+- Route: `src/app/api/stories/[storyId]/writer-revisions/route.ts`
+- Handler: `src/interfaces/http/create-writer-revision-handler.ts`
+- Provider: `writerRuntimeProvider`
+- Body: `{}` (exactly an empty object). `STORYRAIL_OPERATOR_ID` must be configured or the handler returns 500.
+- Workflow: `createWriterRevision`. Validates the Story is Changes Requested with a durable Assignment, Article, and current Revision that matches the Story's `revisionCycle` and is below 3, resolves the operator `request_changes` ReviewDecision and the matching succeeded Director run, re-resolves the exact historical evidence recorded by the previous Writer run, runs the supervised Writer to produce the next immutable Article Revision, and atomically transitions the Story `changes_requested` → `in_progress`. A failed model invocation records a failed `AgentRun` and returns success with the failed run (no Revision is created).
+
+| Status | Condition                                                                                                                                          |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 201    | Writer `AgentRun` recorded (succeeded with next Revision, or failed run)                                                                           |
+| 404    | `STORY_NOT_FOUND`                                                                                                                                  |
+| 409    | `WRITER_REVISION_NOT_ALLOWED` (Story not Changes Requested), `ASSIGNMENT_REQUIRED`, `ARTICLE_REQUIRED`, `ARTICLE_REVISION_REQUIRED`, `REVIEW_DECISION_REQUIRED`, `REVIEW_CONTEXT_MISMATCH`, `WRITER_REVISION_CONFLICT`, `AGENT_RUN_ID_CONFLICT` |
+| 422    | `WRITER_EVIDENCE_UNAVAILABLE`                                                                                                                      |
+| 415/400 | Media type / JSON / shape errors                                                                                                                  |
+| 500    | `WRITER_MODEL_UNSUPPORTED`, `WRITER_PROFILE_UNAVAILABLE`, missing `STORYRAIL_OPERATOR_ID`, or internal error                                       |
+| 503    | Writer runtime not configured (`WRITER_UNAVAILABLE`) or `WRITER_MODEL_UNAVAILABLE`                                                                 |
+
 ## POST /api/stories/[storyId]/review-submissions — submit an Article for review
 
 - Route: `src/app/api/stories/[storyId]/review-submissions/route.ts`
