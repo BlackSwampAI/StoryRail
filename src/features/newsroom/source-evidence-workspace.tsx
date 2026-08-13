@@ -181,9 +181,13 @@ function BasicResult({ result }: Readonly<{ result: SourceEvidenceUrlResult }>) 
         <p className={styles.sectionKicker}>Source preserved</p>
         <h2>{failed ? "Extraction failed" : "Source extraction completed"}</h2>
         <ul className={styles.completionChecklist}>
-          <li>Source preserved</li>
-          <li>{failed ? "Extraction failed" : "Article extracted"}</li>
-          <li>{failed ? "Evidence preparation not attempted" : "Evidence preparation pending"}</li>
+          <li data-stage="completed">Source preserved</li>
+          <li data-stage={failed ? "failed" : "completed"}>
+            {failed ? "Extraction failed" : "Article extracted"}
+          </li>
+          <li data-stage={failed ? "skipped" : "active"}>
+            {failed ? "Evidence preparation not attempted" : "Evidence preparation pending"}
+          </li>
         </ul>
         {result.extraction.outcome === "failed" ? (
           <div className={styles.extractionFailure} role="alert">
@@ -216,9 +220,9 @@ function BasicResult({ result }: Readonly<{ result: SourceEvidenceUrlResult }>) 
         <p className={styles.sectionKicker}>Source preserved</p>
         <h2>Extraction could not complete</h2>
         <ul className={styles.completionChecklist}>
-          <li>Source preserved</li>
-          <li>Extraction application failure</li>
-          <li>Evidence preparation not attempted</li>
+          <li data-stage="completed">Source preserved</li>
+          <li data-stage="failed">Extraction application failure</li>
+          <li data-stage="skipped">Evidence preparation not attempted</li>
         </ul>
         <ErrorFacts error={result.error} />
         <details className={styles.secondaryPanel}>
@@ -315,9 +319,11 @@ function EvidenceReview({
       <p className={styles.sectionKicker}>{primary ? "Source ready" : "Source preserved"}</p>
       <h2>{primary ? "Prepared Evidence" : "Evidence preparation failed"}</h2>
       <ul className={styles.completionChecklist}>
-        <li>Source preserved</li>
-        <li>Article extracted</li>
-        <li>{primary ? "Evidence prepared" : "Evidence preparation failed"}</li>
+        <li data-stage="completed">Source preserved</li>
+        <li data-stage="completed">Article extracted</li>
+        <li data-stage={primary ? "completed" : "failed"}>
+          {primary ? "Evidence prepared" : "Evidence preparation failed"}
+        </li>
       </ul>
 
       {primary ? (

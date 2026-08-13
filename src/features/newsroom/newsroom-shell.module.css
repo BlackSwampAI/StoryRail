@@ -2289,9 +2289,30 @@
 }
 
 .completionChecklist li::before {
+  display: inline-block;
+  width: 1rem;
   margin-right: 0.6rem;
+  text-align: center;
+}
+
+.completionChecklist li[data-stage="completed"]::before {
   color: #88d9b9;
   content: "✓";
+}
+
+.completionChecklist li[data-stage="failed"]::before {
+  color: #dfb867;
+  content: "⚠";
+}
+
+.completionChecklist li[data-stage="skipped"]::before {
+  color: #91a69c;
+  content: "—";
+}
+
+.completionChecklist li[data-stage="active"]:not(.preparationActiveStage)::before {
+  color: #a3e6cc;
+  content: "◌";
 }
 
 .triageCompleted {

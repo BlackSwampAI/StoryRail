@@ -13,7 +13,7 @@ The domain lives in `src/domain/editorial` and is the pure, I/O-free core of Sto
 
 `src/domain/editorial/types.ts` declares a branded `Identifier<Name>` type and constructors. All entity and run identifiers are opaque string brands, not raw strings:
 
-- `SourceId`, `SourceExtractionId`, `SourceEvidencePreparationId`, `StoryId`, `ArticleId`, `AgentRunId`, `OperatorId`, `TransitionId`
+- `SourceId`, `SourceExtractionId`, `SourceEvidencePreparationId`, `StoryId`, `ArticleId`, `ArticleRevisionId`, `AgentRunId`, `AgentProfileId`, `AssignmentId`, `OperatorId`, `TransitionId`
 
 Constructors (`sourceId(value)`, `storyId(value)`, etc.) cast a `string` to the branded type at the system boundary.
 
@@ -84,7 +84,9 @@ Transition rules enforced by `transitionStory`:
 3. **Operator-only states** — only an `operator` actor can transition to `approved`, `rejected`, or `published` (`OPERATOR_REQUIRED`).
 4. **Revision limit** — at most `MAX_REVISION_CYCLES = 2` returns from `in_review` to `changes_requested` (`REVISION_LIMIT_REACHED`). Each such transition increments `revisionCycle`; all other transitions preserve it.
 
-A successful transition returns the updated `Story` and a `StoryTransitionReceipt` recording the transition id, story id, previous/next states, actor, reason, occurredAt, and resulting revision cycle. Receipts are the durable audit record of state changes.
+A successful transition returns the updated `Story` and a `StoryTransitionReceipt` recording the transition id, story id, previous/next states, actor, reason, occurredAt, and resulting revision cycle. Receipts are the durable audit record of state changes and are persisted in `storyrail.story_transition_receipts` (see [database schema](database-schema.md)).
+
+The first two transitions are exercised by the application layer: `assignStory` performs `intake` → `assigned` atomically with the durable Assignment and its receipt, and `createWriterDraft` performs `assigned` → `in_progress` atomically with the first Article, Revision 1, the Writer `AgentRun`, and its receipt. Both transitions and their receipts are committed in a single database transaction by the corresponding persistence adapter.
 
 ## Source intake and canonical URLs
 
@@ -131,6 +133,53 @@ A `SourceTriageDecision` records the sourceId, decision, optional storyId, trimm
 
 Both functions copy the actor defensively (`copyActor`) so returned objects do not share actor references with the caller's input.
 
+## Agent Profiles
+
+`agent-profile-types.ts` and `agent-profile.ts` model an immutable configuration snapshot for a bounded editorial persona. `AGENT_PROFILE_ROLES` are `assignment_editor`, `writer`, `editor_in_chief` — a strict subset of `AGENT_ROLES` (profiles do not configure `fact_checker`). An `AgentProfile` carries `id`, `role`, trimmed `name` and `instructions`, an optional `ModelDescriptor | null`, and a `builtIn` flag.
+
+`createAgentProfile` validates:
+
+- A supported role (`AGENT_PROFILE_ROLE_UNSUPPORTED`).
+- Non-empty trimmed `name` and `instructions` (`AGENT_PROFILE_NAME_REQUIRED`, `AGENT_PROFILE_INSTRUCTIONS_REQUIRED`).
+- A boolean `builtIn` (`AGENT_PROFILE_BUILT_IN_INVALID`).
+- When `model` is non-null, exactly `{ provider, model }` with non-empty trimmed strings (`AGENT_PROFILE_MODEL_INVALID`, `..._PROVIDER_REQUIRED`, `..._IDENTIFIER_REQUIRED`).
+
+Profiles are configuration, not execution: they do not invoke models or carry credentials. Migration `0027` seeds three built-in profiles (`storyrail-assignment-editor-v1`, `storyrail-general-writer-v1`, `storyrail-director-v1`) and enforces that a non-built-in profile must be a `writer` (custom profiles can only be Writers).
+
+## Assignments
+
+`assignment-types.ts` and `assignment.ts` model an immutable, operator-created brief that selects one Writer Profile and snapshots every attached Source identity. An `Assignment` carries `id`, `storyId`, `writerProfileId`, a readonly `sourceIds` snapshot, trimmed `angle`, `brief`, optional `constraints: string | null`, `assignedBy`, and `assignedAt`.
+
+`createAssignment` validates:
+
+- Non-empty trimmed `angle` and `brief` (`ASSIGNMENT_ANGLE_REQUIRED`, `ASSIGNMENT_BRIEF_REQUIRED`).
+- `constraints` is `null` or a non-empty trimmed string (`ASSIGNMENT_CONSTRAINTS_INVALID`).
+- Non-empty `writerProfileId` (`ASSIGNMENT_WRITER_PROFILE_REQUIRED`).
+- The `assignedBy` actor is an `operator` or an `assignment_editor` agent (`ASSIGNMENT_ACTOR_NOT_ALLOWED`) — Writers, fact-checkers, and the Director may not create Assignments.
+- No duplicate `sourceIds` (`ASSIGNMENT_SOURCE_DUPLICATE`).
+
+The `sourceIds` snapshot is taken server-side by `assignStory` from the authoritative Story inspection, not submitted by the client. One Story has at most one Assignment (enforced by a unique `story_id` in `storyrail.story_assignments`).
+
+## Assignment Proposals
+
+`assignment-proposal-types.ts` and `assignment-proposal.ts` model a supervised Assignment Editor suggestion that prefills the manual Assignment form. An `AssignmentProposal` carries `writerProfileId`, trimmed `angle`, `brief`, optional `constraints`, and a trimmed `reason`. `createAssignmentProposal` validates the same non-empty/trim rules as `createAssignment` (minus the actor and source snapshot) plus a non-empty `reason` (`ASSIGNMENT_PROPOSAL_REASON_REQUIRED`). A proposal never creates an Assignment or transitions a Story; the operator reviews or edits it before the manual `assignStory` call.
+
+## AgentRuns
+
+`agent-run-types.ts` and `agent-run.ts` model one immutable, attributable execution record. An `AgentRun` is a discriminated union over two supported role/operation pairs:
+
+- `assignment_editor` + `assignment_proposal` — succeeds with an `AssignmentProposal` or fails with a `ModelFailureCode`/`retryable` pair.
+- `writer` + `article_draft` — succeeds with `articleId`/`revisionId` references or fails with the same failure shape.
+
+Both carry a frozen `input` snapshot of the Story metadata, an `EvidenceReference[]` (each `{ sourceId, relevance, evidenceKind: "prepared" | "raw", evidenceId }`), `unavailableSourceIds`, and role-specific fields (Writer candidates for the editor; the full Assignment for the writer). `recordAgentRun` validates identities, the role/operation pairing, model and prompt descriptors, the input snapshot, evidence uniqueness and disjointness (selected evidence and unavailable Sources must not overlap), timestamps, and the outcome shape. For successful editor runs it re-validates the embedded proposal through `createAssignmentProposal` and requires the chosen Writer to be in `input.writerProfileIds`; for successful writer runs it requires the Assignment's Source snapshot to exactly partition into selected evidence plus unavailable Sources. The DB schema (migration `0030`, extended by `0031`) mirrors these invariants in SQL.
+
+## Articles and Revisions
+
+`article-types.ts` and `article.ts` model the durable editorial work product. An `Article` is a thin shell (`id`, `storyId`, `assignmentId`, `createdAt`); one Story has at most one Article. An `ArticleRevision` carries `id`, `articleId`, `revisionNumber` (typed as the literal `1`), `writerProfileId`, `agentRunId`, trimmed `headline`, nullable trimmed `dek`, trimmed `bodyMarkdown`, `createdBy`, and `createdAt`.
+
+- `createArticle` validates non-empty identities and `createdAt` (`ARTICLE_IDENTITY_INVALID`).
+- `createFirstArticleRevision` additionally requires `revisionNumber === 1` (`ARTICLE_REVISION_NUMBER_INVALID`), non-empty `headline`/`bodyMarkdown` and a `null` or non-empty `dek` (`ARTICLE_REVISION_CONTENT_INVALID`), and that `createdBy` is the Writer agent of `agentRunId` (`ARTICLE_REVISION_AUTHOR_INVALID`). Only the first revision is implemented; subsequent revisions remain planned.
+
 ## Re-export barrel
 
-`src/domain/editorial/index.ts` re-exports every module in the domain, and `src/application/index.ts` re-exports the application layer's domain-facing types so callers import from a single barrel.
+`src/domain/editorial/index.ts` re-exports every module in the domain — Source intake/extraction/triage/preparation, Story creation and attachment, the state machine, Agent Profiles, Assignments, Assignment Proposals, AgentRuns, and Articles — and `src/application/index.ts` re-exports the application layer's domain-facing types so callers import from a single barrel.

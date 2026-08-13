@@ -136,6 +136,24 @@ describe("SourceEvidenceWorkspace", () => {
     expect(inboxRequests.prepareEvidence).toHaveBeenCalledOnce();
     expect(inboxRequests.prepareEvidence).toHaveBeenCalledWith(SOURCE.id, EXTRACTION.id);
     expect(screen.getByRole("heading", { name: "Prepared title" })).toBeVisible();
+    const completedChecklist = screen
+      .getByRole("heading", { name: "Prepared Evidence" })
+      .closest("article");
+    expect(
+      within(completedChecklist as HTMLElement).getByText("Source preserved", {
+        selector: 'li[data-stage="completed"]',
+      }),
+    ).toBeVisible();
+    expect(
+      within(completedChecklist as HTMLElement).getByText("Article extracted", {
+        selector: 'li[data-stage="completed"]',
+      }),
+    ).toBeVisible();
+    expect(
+      within(completedChecklist as HTMLElement).getByText("Evidence prepared", {
+        selector: 'li[data-stage="completed"]',
+      }),
+    ).toBeVisible();
     expect(screen.getByText("evidence")).toHaveProperty("tagName", "STRONG");
     expect(screen.getByRole("link", { name: "source" })).toHaveAttribute(
       "href",
@@ -215,6 +233,11 @@ describe("SourceEvidenceWorkspace", () => {
     ).toBeVisible();
     expect(screen.getAllByText("Source preserved").length).toBeGreaterThan(0);
     expect(screen.getByText("Article extracted")).toBeVisible();
+    const failedStage = screen.getByText("Evidence preparation failed", {
+      selector: "li",
+    });
+    expect(failedStage).toHaveAttribute("data-stage", "failed");
+    expect(failedStage).not.toHaveAttribute("data-stage", "completed");
     const latestFailure = screen
       .getByRole("heading", { name: "Latest preparation attempt failed" })
       .closest("div");
@@ -293,7 +316,14 @@ describe("SourceEvidenceWorkspace", () => {
     submit();
 
     expect(await screen.findByRole("heading", { name: "Extraction failed" })).toBeVisible();
-    expect(screen.getByText("Evidence preparation not attempted")).toBeVisible();
+    const extractionFailedStage = screen.getByText("Extraction failed", { selector: "li" });
+    expect(extractionFailedStage).toHaveAttribute("data-stage", "failed");
+    expect(extractionFailedStage).not.toHaveAttribute("data-stage", "completed");
+    const skippedStage = screen.getByText("Evidence preparation not attempted", {
+      selector: "li",
+    });
+    expect(skippedStage).toHaveAttribute("data-stage", "skipped");
+    expect(skippedStage).not.toHaveAttribute("data-stage", "completed");
     const extractionFailure = screen
       .getByRole("heading", { name: "Extraction failure recorded" })
       .closest("div");
