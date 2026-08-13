@@ -325,8 +325,8 @@ describe("NewsroomShell", () => {
     fireEvent.change(screen.getByLabelText("Brief"), { target: { value: "Brief" } });
     fireEvent.change(screen.getByLabelText("Assignment reason"), { target: { value: "Ready" } });
     fireEvent.click(screen.getByRole("button", { name: "Create Assignment" }));
-    expect(await screen.findByRole("heading", { name: "Assignment ready" })).toBeVisible();
-    expect(screen.getByText("General Writer")).toBeVisible();
+    const activeAssignment = await screen.findByRole("region", { name: "Assignment ready" });
+    expect(within(activeAssignment).getByText("General Writer")).toBeVisible();
     expect(screen.getByRole("button", { name: "Assigned, 1 story" })).toHaveAttribute(
       "aria-current",
       "page",
@@ -527,21 +527,33 @@ describe("NewsroomShell", () => {
   it("refreshes the authoritative Source Inbox after successful intake without creating a Story", async () => {
     const stories = storyRequests();
     const inbox = inboxRequests();
+    const source = {
+      id: sourceId("source-new"),
+      type: "url" as const,
+      submittedUrl: "https://example.com/new",
+      canonicalUrl: "https://example.com/new" as never,
+      submittedBy: { type: "operator" as const, operatorId: operatorId("operator-24") },
+      receivedAt: "received",
+    };
     const requestSourceEvidence = vi.fn(async () => ({
-      kind: "partial-completion" as const,
-      stage: "extraction" as const,
-      source: {
-        id: sourceId("source-new"),
-        type: "url" as const,
-        submittedUrl: "https://example.com/new",
-        canonicalUrl: "https://example.com/new" as never,
-        submittedBy: { type: "operator" as const, operatorId: operatorId("operator-24") },
-        receivedAt: "received",
-      },
-      error: {
-        code: "SOURCE_NOT_FOUND" as const,
-        message: "Controlled.",
-        sourceId: sourceId("source-new"),
+      kind: "completed" as const,
+      source,
+      extraction: {
+        id: sourceExtractionId("extraction-new"),
+        sourceId: source.id,
+        extractor: { key: "controlled", version: "1" },
+        requestedBy: source.submittedBy,
+        startedAt: "started",
+        completedAt: "completed",
+        outcome: "succeeded" as const,
+        document: {
+          format: "markdown" as const,
+          content: "# Extracted",
+          title: null,
+          byline: null,
+          publishedAt: null,
+          language: null,
+        },
       },
     }));
     render(
@@ -555,10 +567,48 @@ describe("NewsroomShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Preserve and extract" }));
     await waitFor(() => expect(inbox.listPendingSources).toHaveBeenCalledTimes(2));
     expect(stories.createStory).not.toHaveBeenCalled();
+    expect(screen.getByText("Source preserved and extraction completed")).toBeVisible();
     expect(screen.getByRole("button", { name: "Review in Source Inbox" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Add another Source" })).toBeVisible();
     expect(screen.getByText("No Sources await triage")).not.toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Review in Source Inbox" }));
     expect(await screen.findByText("No Sources await triage")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Add Source" }));
+    expect(screen.getByRole("textbox", { name: "Source URL" })).toHaveValue("");
+    expect(screen.queryByText("Source preserved and extraction completed")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Review in Source Inbox" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("clears a duplicate Source receipt after leaving and reopening Source Intake", async () => {
+    const requestSourceEvidence = vi.fn(async () => ({
+      kind: "preservation-conflict" as const,
+      error: {
+        code: "DUPLICATE_SOURCE" as const,
+        message: "Already exists.",
+        existingSourceId: sourceId("source-duplicate"),
+        canonicalUrl: "https://example.com/duplicate" as never,
+      },
+    }));
+    render(
+      <NewsroomShell
+        storyRequests={storyRequests()}
+        sourceInboxRequests={inboxRequests()}
+        requestSourceEvidence={requestSourceEvidence}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add Source" }));
+    fireEvent.click(screen.getByRole("button", { name: "Preserve and extract" }));
+    expect(await screen.findByText("Source already exists and can be reused")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Review in Source Inbox" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Inbox" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Source" }));
+    expect(screen.getByRole("textbox", { name: "Source URL" })).toHaveValue("");
+    expect(screen.queryByText("Source already exists and can be reused")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Review in Source Inbox" }),
+    ).not.toBeInTheDocument();
   });
 
   it("runs only the assigned Writer and keeps retry available after a durable failure", async () => {

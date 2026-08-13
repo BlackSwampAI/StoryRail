@@ -1194,6 +1194,57 @@
   grid-template-columns: clamp(23rem, 24vw, 25rem) minmax(0, 1fr);
 }
 
+/* Batch 0033 interactive Desk */
+.shell[data-layout="stacked"] {
+  display: block;
+}
+
+.resizableShell {
+  min-height: 100vh;
+}
+
+.resizableShell [data-panel] {
+  min-width: 0;
+}
+
+.deskSeparator {
+  position: relative;
+  z-index: 2;
+  width: 0.7rem;
+  margin-inline: -0.35rem;
+  cursor: col-resize;
+}
+
+.deskSeparator::before {
+  position: absolute;
+  inset: 0 0.3rem;
+  background: #29433a;
+  content: "";
+  transition: background 140ms ease;
+}
+
+.deskSeparator > span {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0.28rem;
+  height: 2.8rem;
+  border: 1px solid #47715f;
+  border-radius: 999px;
+  background: #142a23;
+  transform: translate(-50%, -50%);
+}
+
+.deskSeparator:hover::before,
+.deskSeparator[data-separator="active"]::before {
+  background: #79d8b4;
+}
+
+.deskSeparator:focus-visible {
+  outline: 3px solid #8ee4c2;
+  outline-offset: 2px;
+}
+
 .desk {
   position: sticky;
   top: 0;
@@ -1216,6 +1267,230 @@
 .deskNavigation section {
   display: grid;
   gap: 0.25rem;
+}
+
+.staffSection {
+  border-top: 1px solid #20382f;
+  padding-top: 1.25rem;
+}
+
+.staffSectionHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.staffSectionHeading > span {
+  padding-right: 0.75rem;
+  color: #789087;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.staffList {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.staffCard {
+  min-width: 0;
+  border: 1px solid #2d4a3f;
+  border-radius: 0.75rem;
+  background: #0e1d18;
+  padding: 0.8rem;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.staffCard:hover {
+  border-color: #41695a;
+  background: #11231d;
+}
+
+.staffCard[data-dragging="true"] {
+  opacity: 0.42;
+  transform: scale(0.985);
+}
+
+.staffCardHeader {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+
+.staffCardHeader > div {
+  min-width: 0;
+}
+
+.staffCardHeader h3,
+.staffCardHeader p,
+.staffModel {
+  margin: 0;
+}
+
+.staffCardHeader h3 {
+  overflow: hidden;
+  color: #eef5f0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 0.98rem;
+  font-weight: 500;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.staffCardHeader p {
+  margin-top: 0.2rem;
+  color: #82a898;
+  font-size: 0.63rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.dragHandle,
+.staffRoleMark {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid #38594d;
+  border-radius: 0.5rem;
+  background: #0a1612;
+  color: #9bcab7;
+}
+
+.dragHandle {
+  cursor: grab;
+  font: inherit;
+  touch-action: none;
+}
+
+.dragHandle:active {
+  cursor: grabbing;
+}
+
+.dragHandle:focus-visible,
+.staffDisclosure summary:focus-visible,
+.staffManageAction:focus-visible {
+  outline: 3px solid #8ee4c2;
+  outline-offset: 2px;
+}
+
+.staffModel {
+  margin: 0.65rem 0 0 2.65rem;
+  color: #aebdb6;
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+}
+
+.staffDisclosure {
+  margin: 0.7rem 0 0 2.65rem;
+  border-top: 1px solid #29443a;
+  padding-top: 0.65rem;
+}
+
+.staffDisclosure summary {
+  color: #9bcab7;
+  cursor: pointer;
+  font-size: 0.69rem;
+  font-weight: 700;
+}
+
+.staffDisclosure dl {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0.85rem 0 0;
+}
+
+.staffDisclosure dt {
+  color: #71877d;
+  font-size: 0.58rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.staffDisclosure dd {
+  margin: 0.2rem 0 0;
+  color: #cbd8d1;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.staffInstructions {
+  white-space: pre-wrap;
+}
+
+.staffTechnical {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.64rem !important;
+}
+
+.staffManageAction,
+.staffStatus button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: #9de0c5;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.staffManageAction {
+  margin-top: 0.85rem;
+}
+
+.staffStatus {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0;
+  border: 1px dashed #304c41;
+  border-radius: 0.65rem;
+  padding: 0.8rem;
+  color: #91a69c;
+  font-size: 0.72rem;
+}
+
+.writerDragOverlay > div {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.1rem 0.6rem;
+  min-width: 13rem;
+  border: 1px solid #79d8b4;
+  border-radius: 0.75rem;
+  background: #142d24;
+  box-shadow: 0 1rem 3rem rgb(0 0 0 / 38%);
+  padding: 0.8rem;
+  color: #eef5f0;
+}
+
+.writerDragOverlay > div > span {
+  grid-row: 1 / 3;
+  align-self: center;
+  color: #9de0c5;
+}
+
+.writerDragOverlay strong {
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 500;
+}
+
+.writerDragOverlay small {
+  color: #91a69c;
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .deskNavigation .navigationLabel {
@@ -1372,7 +1647,35 @@
 
 .currentTask {
   min-width: 0;
+  border-radius: 1.1rem;
   animation: task-enter 180ms ease-out;
+  transition:
+    background 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.currentTask[data-writer-drop-eligible="true"] {
+  background: rgb(83 143 119 / 10%);
+  box-shadow: 0 0 0 1px #41695a;
+}
+
+.currentTask[data-writer-drop-over="true"] {
+  background: rgb(96 170 139 / 18%);
+  box-shadow:
+    0 0 0 2px #79d8b4,
+    0 1rem 3rem rgb(0 0 0 / 18%);
+}
+
+.assignmentDropCue {
+  margin-bottom: 0.65rem;
+  border: 1px dashed #5b9d83;
+  border-radius: 0.7rem;
+  background: #10251e;
+  padding: 0.7rem 1rem;
+  color: #b7ebd7;
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-align: center;
 }
 
 .readyCard,
@@ -1416,6 +1719,17 @@
   max-width: 42rem;
   color: #a9bab2;
   line-height: 1.65;
+}
+
+.assignmentEditorForm .writerOverrideNotice {
+  max-width: none;
+  margin: 0;
+  border-left: 0.2rem solid #dfb867;
+  background: #252015;
+  padding: 0.75rem 0.9rem;
+  color: #e8d6ad;
+  font-size: 0.76rem;
+  line-height: 1.55;
 }
 
 .taskActions,
@@ -1939,6 +2253,12 @@
   .deskNavigation section {
     min-width: 0;
   }
+  .deskNavigation .staffSection {
+    grid-column: 1 / -1;
+  }
+  .staffList {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 40rem) {
@@ -1953,6 +2273,9 @@
   .deskNavigation section:nth-child(2) {
     grid-column: 1 / -1;
     grid-row: 2;
+  }
+  .staffList {
+    grid-template-columns: 1fr;
   }
   .deskNavigation .navigationLabel {
     padding-inline: 0.45rem;
@@ -2020,6 +2343,12 @@
   }
 
   .disclosureChevron {
+    transition: none;
+  }
+
+  .deskSeparator::before,
+  .staffCard,
+  .currentTask {
     transition: none;
   }
 }
