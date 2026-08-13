@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useDragDropMonitor, useDragOperation, useDroppable } from "@dnd-kit/react";
+import { useMemo, useState } from "react";
 
 import type { StoryInspection } from "@/application/story-inspection";
 import {
@@ -11,9 +12,9 @@ import {
   type StoryTransitionReceipt,
 } from "@/domain/editorial";
 
-import { agentProfileClient, type AgentProfileClient } from "./agent-profile-client";
 import { ArticleReader } from "./article-reader";
 import { STORY_STATE_LABELS } from "./newsroom-state";
+import { WRITER_ASSIGNMENT_DROP_ID, WRITER_DRAG_TYPE, type StaffState } from "./newsroom-staff";
 import styles from "./newsroom-shell.module.css";
 import type { StoryClient } from "./story-client";
 
@@ -526,7 +527,7 @@ export interface StoryWorkspaceProps {
   readonly inspection: StoryInspection;
   readonly notice?: string;
   readonly requests: StoryClient;
-  readonly profileRequests?: AgentProfileClient;
+  readonly staff: StaffState;
   readonly onAssigned: (
     facts: {
       readonly assignment: Assignment;
@@ -538,11 +539,41 @@ export interface StoryWorkspaceProps {
   readonly onWriterCompleted: (inspection: StoryInspection) => void;
 }
 
+export function isWriterDropEligible(
+  inspection: Pick<StoryInspection, "story" | "assignment">,
+): boolean {
+  return inspection.story.state === "intake" && inspection.assignment === null;
+}
+
+export function resolveWriterDropSelection(input: {
+  readonly canceled: boolean;
+  readonly targetId: string | number | null;
+  readonly profile: unknown;
+  readonly eligible: boolean;
+  readonly proposalWriterProfileId?: string;
+}): { readonly profile: AgentProfile; readonly recommendationChanged: boolean } | null {
+  if (
+    input.canceled ||
+    input.targetId !== WRITER_ASSIGNMENT_DROP_ID ||
+    !input.eligible ||
+    typeof input.profile !== "object" ||
+    input.profile === null ||
+    Reflect.get(input.profile, "role") !== "writer"
+  )
+    return null;
+  const profile = input.profile as AgentProfile;
+  return {
+    profile,
+    recommendationChanged:
+      input.proposalWriterProfileId !== undefined && input.proposalWriterProfileId !== profile.id,
+  };
+}
+
 export function StoryWorkspace({
   inspection,
   notice,
   requests,
-  profileRequests = agentProfileClient,
+  staff,
   onAssigned,
   onWriterCompleted,
 }: StoryWorkspaceProps) {
@@ -557,8 +588,12 @@ export function StoryWorkspace({
         { readonly role: "assignment_editor"; readonly outcome: "succeeded" }
       > => run.role === "assignment_editor" && run.outcome === "succeeded",
     );
-  const [profiles, setProfiles] = useState<readonly AgentProfile[]>([]);
-  const [profilesUnavailable, setProfilesUnavailable] = useState(false);
+  const profiles = useMemo(
+    () =>
+      staff.kind === "loaded" ? staff.profiles.filter((profile) => profile.role === "writer") : [],
+    [staff],
+  );
+  const profilesUnavailable = staff.kind === "unavailable";
   const [assignmentPending, setAssignmentPending] = useState(false);
   const [proposalPending, setProposalPending] = useState(false);
   const [writerPending, setWriterPending] = useState(false);
@@ -568,37 +603,6 @@ export function StoryWorkspace({
   const [proposalStatus, setProposalStatus] = useState<string | null>(null);
   const [writerStatus, setWriterStatus] = useState<string | null>(null);
   const [runs, setRuns] = useState<readonly AgentRun[]>(agentRuns);
-  const [writerProfileId, setWriterProfileId] = useState(
-    durableProposal?.proposal.writerProfileId ?? "",
-  );
-  const [angle, setAngle] = useState(durableProposal?.proposal.angle ?? "");
-  const [brief, setBrief] = useState(durableProposal?.proposal.brief ?? "");
-  const [constraints, setConstraints] = useState(durableProposal?.proposal.constraints ?? "");
-  const [reason, setReason] = useState(durableProposal?.proposal.reason ?? "");
-
-  useEffect(() => {
-    if (story.state !== "intake" || assignment !== null) return;
-    let active = true;
-    void profileRequests
-      .listProfiles()
-      .then((result) => {
-        if (!active) return;
-        if (result.kind !== "completed") {
-          setProfilesUnavailable(true);
-          return;
-        }
-        const writers = result.value.filter((profile) => profile.role === "writer");
-        setProfiles(writers);
-        setWriterProfileId((current) => current || writers[0]?.id || "");
-      })
-      .catch(() => {
-        if (active) setProfilesUnavailable(true);
-      });
-    return () => {
-      active = false;
-    };
-  }, [assignment, profileRequests, story.id, story.state]);
-
   const latestProposal = [...runs]
     .reverse()
     .find(
@@ -609,7 +613,42 @@ export function StoryWorkspace({
         { readonly role: "assignment_editor"; readonly outcome: "succeeded" }
       > => run.role === "assignment_editor" && run.outcome === "succeeded",
     );
-  const proposedWriter = profiles.find((profile) => profile.id === writerProfileId);
+  const [writerProfileId, setWriterProfileId] = useState(
+    durableProposal?.proposal.writerProfileId ?? "",
+  );
+  const [angle, setAngle] = useState(durableProposal?.proposal.angle ?? "");
+  const [brief, setBrief] = useState(durableProposal?.proposal.brief ?? "");
+  const [constraints, setConstraints] = useState(durableProposal?.proposal.constraints ?? "");
+  const [reason, setReason] = useState(durableProposal?.proposal.reason ?? "");
+  const [writerOverridden, setWriterOverridden] = useState(false);
+  const assignmentEligible = isWriterDropEligible(inspection);
+  const { ref: assignmentDropRef, isDropTarget } = useDroppable({
+    id: WRITER_ASSIGNMENT_DROP_ID,
+    type: "writer-assignment",
+    accept: WRITER_DRAG_TYPE,
+    disabled: !assignmentEligible,
+  });
+  const dragOperation = useDragOperation();
+  const writerDragging = assignmentEligible && dragOperation.source?.type === WRITER_DRAG_TYPE;
+  const selectedWriterProfileId = writerProfileId || profiles[0]?.id || "";
+
+  useDragDropMonitor({
+    onDragEnd(event) {
+      const selection = resolveWriterDropSelection({
+        canceled: event.canceled,
+        targetId: event.operation.target?.id ?? null,
+        profile: event.operation.source?.data.profile,
+        eligible: assignmentEligible,
+        proposalWriterProfileId: latestProposal?.proposal.writerProfileId,
+      });
+      if (selection === null) return;
+      setWriterProfileId(selection.profile.id);
+      setEditingAssignment(true);
+      setWriterOverridden(selection.recommendationChanged);
+    },
+  });
+
+  const proposedWriter = profiles.find((profile) => profile.id === selectedWriterProfileId);
   const currentSourceIds = new Set(sources.map(({ source }) => source.id));
   const proposalSourceIds = new Set(
     latestProposal === undefined
@@ -652,6 +691,7 @@ export function StoryWorkspace({
       setBrief(result.value.proposal.brief);
       setConstraints(result.value.proposal.constraints ?? "");
       setReason(result.value.proposal.reason);
+      setWriterOverridden(false);
       setProposalReady(true);
       setEditingAssignment(false);
       setProposalStatus("Assignment Editor suggestion ready for review.");
@@ -668,7 +708,7 @@ export function StoryWorkspace({
     setSubmissionError(null);
     try {
       const result = await requests.assignStory(story.id, {
-        writerProfileId,
+        writerProfileId: selectedWriterProfileId,
         angle,
         brief,
         constraints: constraints.trim().length === 0 ? null : constraints,
@@ -680,7 +720,7 @@ export function StoryWorkspace({
         );
         return;
       }
-      const writer = profiles.find((profile) => profile.id === writerProfileId);
+      const writer = profiles.find((profile) => profile.id === selectedWriterProfileId);
       if (!writer) {
         setSubmissionError("The selected Writer Profile is no longer available.");
         return;
@@ -749,10 +789,20 @@ export function StoryWorkspace({
       ) : null}
 
       <section
+        ref={assignmentEligible ? assignmentDropRef : undefined}
         className={styles.currentTask}
         aria-labelledby="current-task-heading"
         aria-live="polite"
+        data-writer-drop-eligible={writerDragging || undefined}
+        data-writer-drop-over={isDropTarget || undefined}
       >
+        {writerDragging ? (
+          <div className={styles.assignmentDropCue} role="status">
+            {isDropTarget
+              ? "Release to choose this Writer"
+              : "Drop a Writer here to start a manual Assignment"}
+          </div>
+        ) : null}
         {article !== null && latestRevision !== undefined ? (
           <ArticleReader
             revision={latestRevision}
@@ -814,7 +864,7 @@ export function StoryWorkspace({
                   <button
                     type="button"
                     className={styles.primaryAction}
-                    disabled={assignmentPending || writerProfileId.length === 0}
+                    disabled={assignmentPending || selectedWriterProfileId.length === 0}
                     onClick={() => void submitAssignment()}
                   >
                     {assignmentPending ? "Creating Assignment…" : "Create Assignment"}
@@ -857,7 +907,11 @@ export function StoryWorkspace({
                     <button
                       type="button"
                       className={styles.tertiaryAction}
-                      onClick={() => setEditingAssignment(false)}
+                      onClick={() => {
+                        setEditingAssignment(false);
+                        setWriterOverridden(false);
+                        setWriterProfileId(latestProposal.proposal.writerProfileId);
+                      }}
                     >
                       Back to suggestion
                     </button>
@@ -872,12 +926,24 @@ export function StoryWorkspace({
                     </button>
                   )}
                 </header>
+                {writerOverridden ? (
+                  <p className={styles.writerOverrideNotice} role="status">
+                    Writer recommendation changed locally. The Assignment Editor suggestion and its
+                    editorial fields remain unchanged until you create the Assignment.
+                  </p>
+                ) : null}
                 <p>Assignment will snapshot all currently attached Sources: {sources.length}</p>
                 <label>
                   Writer
                   <select
-                    value={writerProfileId}
-                    onChange={(event) => setWriterProfileId(event.target.value)}
+                    value={selectedWriterProfileId}
+                    onChange={(event) => {
+                      setWriterProfileId(event.target.value);
+                      setWriterOverridden(
+                        latestProposal !== undefined &&
+                          latestProposal.proposal.writerProfileId !== event.target.value,
+                      );
+                    }}
                     disabled={assignmentPending || profilesUnavailable}
                     required
                   >
@@ -927,7 +993,7 @@ export function StoryWorkspace({
                 <button
                   type="submit"
                   className={styles.primaryAction}
-                  disabled={assignmentPending || writerProfileId.length === 0}
+                  disabled={assignmentPending || selectedWriterProfileId.length === 0}
                 >
                   {assignmentPending ? "Creating Assignment…" : "Create Assignment"}
                 </button>

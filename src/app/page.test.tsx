@@ -17,6 +17,9 @@ describe("HomePage", () => {
       if (path === "/api/source-inbox") {
         return new Response(JSON.stringify({ ok: true, sources: [] }), { status: 200 });
       }
+      if (path === "/api/agent-profiles") {
+        return new Response(JSON.stringify({ ok: true, profiles: [] }), { status: 200 });
+      }
       throw new Error(`Unexpected HomePage request: ${path}`);
     });
     vi.stubGlobal("fetch", fetch);
@@ -27,12 +30,16 @@ describe("HomePage", () => {
     expect(screen.getByRole("navigation", { name: "Newsroom navigation" })).toBeVisible();
     expect(screen.getByRole("main")).toBeVisible();
     expect(await screen.findByRole("button", { name: "Intake, 0 stories" })).toBeVisible();
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(3);
     expect(fetch).toHaveBeenCalledWith("/api/stories", {
       method: "GET",
       headers: { Accept: "application/json" },
     });
     expect(fetch).toHaveBeenCalledWith("/api/source-inbox", {
+      method: "GET",
+      headers: { Accept: "application/json" },
+    });
+    expect(fetch).toHaveBeenCalledWith("/api/agent-profiles", {
       method: "GET",
       headers: { Accept: "application/json" },
     });
