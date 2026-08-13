@@ -1,29 +1,31 @@
 import type {
   AgentRun,
-  Article,
   ArticleRevision,
   Story,
   StoryId,
   StoryTransitionReceipt,
 } from "@/domain/editorial";
 
-export interface PersistWriterDraftCommand {
+export interface PersistWriterRevisionCommand {
   readonly expectedStory: Story;
+  readonly expectedRevision: ArticleRevision;
   readonly run: Extract<
     AgentRun,
-    { readonly role: "writer"; readonly operation: "article_draft"; readonly outcome: "succeeded" }
+    {
+      readonly role: "writer";
+      readonly operation: "article_revision";
+      readonly outcome: "succeeded";
+    }
   >;
-  readonly article: Article;
   readonly revision: ArticleRevision;
   readonly story: Story;
   readonly transitionReceipt: StoryTransitionReceipt;
 }
 
-export type PersistWriterDraftResult =
+export type PersistWriterRevisionResult =
   | {
       readonly ok: true;
-      readonly run: PersistWriterDraftCommand["run"];
-      readonly article: Article;
+      readonly run: PersistWriterRevisionCommand["run"];
       readonly revision: ArticleRevision;
       readonly story: Story;
       readonly transitionReceipt: StoryTransitionReceipt;
@@ -31,12 +33,12 @@ export type PersistWriterDraftResult =
   | {
       readonly ok: false;
       readonly error: {
-        readonly code: "WRITER_DRAFT_CONFLICT";
+        readonly code: "WRITER_REVISION_CONFLICT";
         readonly message: string;
         readonly storyId: StoryId;
       };
     };
 
-export interface WriterDraftPersistence {
-  persist(command: PersistWriterDraftCommand): Promise<PersistWriterDraftResult>;
+export interface WriterRevisionPersistence {
+  persist(command: PersistWriterRevisionCommand): Promise<PersistWriterRevisionResult>;
 }

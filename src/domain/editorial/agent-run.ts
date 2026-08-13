@@ -40,7 +40,8 @@ export function recordAgentRun(candidate: AgentRun): RecordAgentRunResult {
   }
   if (!(
     (candidate.role === "assignment_editor" && candidate.operation === "assignment_proposal") ||
-    (candidate.role === "writer" && candidate.operation === "article_draft") ||
+    (candidate.role === "writer" &&
+      (candidate.operation === "article_draft" || candidate.operation === "article_revision")) ||
     (candidate.role === "editor_in_chief" && candidate.operation === "article_review")
   )) {
     return invalid(
@@ -102,6 +103,40 @@ export function recordAgentRun(candidate: AgentRun): RecordAgentRunResult {
     ) {
       return invalid("AGENT_RUN_INPUT_INVALID", "Writer AgentRun Assignment input is invalid.");
     }
+    if (candidate.operation === "article_draft" && input.story.state !== "assigned") {
+      return invalid("AGENT_RUN_INPUT_INVALID", "Writer draft input Story state is invalid.");
+    }
+    if (candidate.operation === "article_revision") {
+      const { article, revision, directorReview, reviewDecision } = candidate.input;
+      const review = createDirectorReview(directorReview);
+      if (
+        input.story.state !== "changes_requested" ||
+        input.story.revisionCycle < 1 ||
+        article.assignmentId !== assignment.id ||
+        !nonEmpty(article.id) ||
+        revision.articleId !== article.id ||
+        revision.revisionNumber !== input.story.revisionCycle ||
+        revision.writerProfileId !== assignment.writerProfileId ||
+        !nonEmpty(revision.id) ||
+        !nonEmpty(revision.agentRunId) ||
+        !nonEmpty(revision.headline) ||
+        (revision.dek !== null && !nonEmpty(revision.dek)) ||
+        !nonEmpty(revision.bodyMarkdown) ||
+        !review.ok ||
+        !nonEmpty(reviewDecision.id) ||
+        reviewDecision.storyId !== candidate.storyId ||
+        reviewDecision.articleId !== article.id ||
+        reviewDecision.revisionId !== revision.id ||
+        !nonEmpty(reviewDecision.directorRunId) ||
+        reviewDecision.decision !== "request_changes" ||
+        !nonEmpty(reviewDecision.reason) ||
+        reviewDecision.decidedBy.type !== "operator" ||
+        !nonEmpty(reviewDecision.decidedBy.operatorId) ||
+        !nonEmpty(reviewDecision.decidedAt)
+      ) {
+        return invalid("AGENT_RUN_INPUT_INVALID", "Writer revision input is invalid.");
+      }
+    }
     if (candidate.outcome === "succeeded") {
       if (!nonEmpty(candidate.articleId) || !nonEmpty(candidate.revisionId)) {
         return invalid(
@@ -148,7 +183,9 @@ export function recordAgentRun(candidate: AgentRun): RecordAgentRunResult {
       article.assignmentId !== assignment.id ||
       !nonEmpty(article.id) ||
       revision.articleId !== article.id ||
-      revision.revisionNumber !== 1 ||
+      !Number.isInteger(revision.revisionNumber) ||
+      revision.revisionNumber < 1 ||
+      revision.revisionNumber > 3 ||
       revision.writerProfileId !== assignment.writerProfileId ||
       !nonEmpty(revision.id) ||
       !nonEmpty(revision.writerProfileId) ||

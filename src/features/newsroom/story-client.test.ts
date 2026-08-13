@@ -564,7 +564,7 @@ describe("story-client", () => {
     );
   });
 
-  it("uses the three focused supervised-review endpoints with exact request bodies", async () => {
+  it("uses the focused supervised-review and revision endpoints with exact request bodies", async () => {
     const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
       response(500, { ok: false, error: { code: "INTERNAL_SERVER_ERROR", message: "Safe." } }),
     );
@@ -577,6 +577,7 @@ describe("story-client", () => {
       decision: "request_changes",
       reason: "Support the timeline.",
     });
+    await client.createWriterRevision(STORY.id);
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
@@ -593,6 +594,11 @@ describe("story-client", () => {
       decision: "request_changes",
       reason: "Support the timeline.",
     });
+    expect(fetch).toHaveBeenNthCalledWith(
+      4,
+      `/api/stories/${STORY.id}/writer-revisions`,
+      expect.objectContaining({ method: "POST", body: "{}" }),
+    );
   });
 
   it("exports only the focused browser client surface", async () => {

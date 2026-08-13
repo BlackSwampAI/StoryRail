@@ -164,7 +164,7 @@ export function createRunDirectorReview(dependencies: {
       (run): run is Extract<AgentRun, { readonly role: "writer"; readonly outcome: "succeeded" }> =>
         run.id === revision.agentRunId &&
         run.role === "writer" &&
-        run.operation === "article_draft" &&
+        (run.operation === "article_draft" || run.operation === "article_revision") &&
         run.outcome === "succeeded",
     );
     if (

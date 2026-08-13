@@ -1,5 +1,6 @@
 import type { AssignmentProposal } from "./assignment-proposal-types";
 import type { DirectorReviewRecommendation } from "./director-review-types";
+import type { ReviewDecision } from "./review-decision-types";
 import type { ModelDescriptor, ModelFailureCode } from "./source-evidence-preparation-types";
 import type {
   AgentProfileId,
@@ -99,6 +100,43 @@ export type WriterArticleDraftAgentRun = WriterArticleDraftAgentRunCommon &
       }
   );
 
+export interface WriterArticleRevisionAgentRunInput extends WriterArticleDraftAgentRunInput {
+  readonly article: {
+    readonly id: ArticleId;
+    readonly assignmentId: AssignmentId;
+  };
+  readonly revision: DirectorArticleReviewAgentRunInput["revision"];
+  readonly directorReview: DirectorReviewRecommendation;
+  readonly reviewDecision: ReviewDecision;
+}
+
+interface WriterArticleRevisionAgentRunCommon {
+  readonly id: AgentRunId;
+  readonly storyId: StoryId;
+  readonly profileId: AgentProfileId;
+  readonly role: "writer";
+  readonly operation: "article_revision";
+  readonly model: ModelDescriptor;
+  readonly prompt: { readonly key: string; readonly version: string };
+  readonly requestedBy: EditorialActor;
+  readonly startedAt: string;
+  readonly completedAt: string;
+  readonly input: WriterArticleRevisionAgentRunInput;
+}
+
+export type WriterArticleRevisionAgentRun = WriterArticleRevisionAgentRunCommon &
+  (
+    | {
+        readonly outcome: "succeeded";
+        readonly articleId: ArticleId;
+        readonly revisionId: ArticleRevisionId;
+      }
+    | {
+        readonly outcome: "failed";
+        readonly failure: { readonly code: ModelFailureCode; readonly retryable: boolean };
+      }
+  );
+
 export interface DirectorArticleReviewAgentRunInput {
   readonly story: AssignmentProposalAgentRunInput["story"];
   readonly assignment: WriterArticleDraftAgentRunInput["assignment"];
@@ -109,7 +147,7 @@ export interface DirectorArticleReviewAgentRunInput {
   readonly revision: {
     readonly id: ArticleRevisionId;
     readonly articleId: ArticleId;
-    readonly revisionNumber: 1;
+    readonly revisionNumber: 1 | 2 | 3;
     readonly writerProfileId: AgentProfileId;
     readonly agentRunId: AgentRunId;
     readonly headline: string;
@@ -144,7 +182,10 @@ export type DirectorArticleReviewAgentRun = DirectorArticleReviewAgentRunCommon 
   );
 
 export type AgentRun =
-  AssignmentProposalAgentRun | WriterArticleDraftAgentRun | DirectorArticleReviewAgentRun;
+  | AssignmentProposalAgentRun
+  | WriterArticleDraftAgentRun
+  | WriterArticleRevisionAgentRun
+  | DirectorArticleReviewAgentRun;
 
 export type AgentRunValidationCode =
   | "AGENT_RUN_IDENTITY_INVALID"

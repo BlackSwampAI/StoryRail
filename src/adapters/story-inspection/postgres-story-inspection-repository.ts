@@ -554,7 +554,9 @@ export function createPostgresStoryInspectionRepository(
         article !== null &&
         (assignment === null ||
           article.article.assignmentId !== assignment.assignment.id ||
-          article.revisions.length !== 1)
+          article.revisions.length < 1 ||
+          article.revisions.length > 3 ||
+          article.revisions.some((revision, index) => revision.revisionNumber !== index + 1))
       )
         throw invariantError();
       if (
@@ -562,7 +564,12 @@ export function createPostgresStoryInspectionRepository(
           const run = agentRuns.find(({ id }) => id === revision.agentRunId);
           return (
             run?.role !== "writer" ||
+            (run.operation !== "article_draft" && run.operation !== "article_revision") ||
             run.outcome !== "succeeded" ||
+            (revision.revisionNumber === 1
+              ? run.operation !== "article_draft"
+              : run.operation !== "article_revision" ||
+                run.input.revision.id !== article.revisions[revision.revisionNumber - 2]?.id) ||
             run.profileId !== revision.writerProfileId ||
             run.articleId !== article.article.id ||
             run.revisionId !== revision.id

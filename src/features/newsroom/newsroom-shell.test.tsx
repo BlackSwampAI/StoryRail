@@ -74,6 +74,10 @@ function storyRequests(): StoryClient {
       kind: "unavailable",
       message: "The Story request could not be completed.",
     })),
+    createWriterRevision: vi.fn<StoryClient["createWriterRevision"]>(async () => ({
+      kind: "unavailable",
+      message: "The Story request could not be completed.",
+    })),
     submitReview: vi.fn<StoryClient["submitReview"]>(async () => ({
       kind: "unavailable",
       message: "The Story request could not be completed.",

@@ -53,6 +53,32 @@ export function createFirstArticleRevision(
       "The first Article Revision number must be 1.",
     );
   }
+  return createArticleRevision(candidate);
+}
+
+export function createArticleRevision(candidate: ArticleRevision): CreateArticleRevisionResult {
+  if (
+    !nonEmpty(candidate.id) ||
+    !nonEmpty(candidate.articleId) ||
+    !nonEmpty(candidate.writerProfileId) ||
+    !nonEmpty(candidate.agentRunId) ||
+    !nonEmpty(candidate.createdAt)
+  ) {
+    return invalid(
+      "ARTICLE_IDENTITY_INVALID",
+      "Article Revision identities and creation time must be non-empty.",
+    );
+  }
+  if (
+    !Number.isInteger(candidate.revisionNumber) ||
+    candidate.revisionNumber < 1 ||
+    candidate.revisionNumber > 3
+  ) {
+    return invalid(
+      "ARTICLE_REVISION_NUMBER_INVALID",
+      "Article Revision number must be between 1 and 3.",
+    );
+  }
   if (
     !nonEmpty(candidate.headline) ||
     (candidate.dek !== null && !nonEmpty(candidate.dek)) ||
@@ -70,7 +96,7 @@ export function createFirstArticleRevision(
   ) {
     return invalid(
       "ARTICLE_REVISION_AUTHOR_INVALID",
-      "The first Article Revision must be authored by its Writer AgentRun.",
+      "An Article Revision must be authored by its Writer AgentRun.",
     );
   }
   return {

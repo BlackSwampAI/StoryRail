@@ -4,7 +4,7 @@ The first vertical slice uses Marvel Cinematic Universe (MCU) coverage to exerci
 
 ## Target workflow
 
-The flow through supervised Director review is implemented today: Assignment Editor proposal, operator-approved durable Assignment, first durable Article Revision, explicit review submission, advisory Director recommendation, and an operator-owned approval or request-changes decision. Writer Revision 2, rejection UI, and publishing remain planned.
+The bounded flow through supervised Writer revision is implemented today: Assignment Editor proposal, operator-approved durable Assignment, immutable Article revisions, explicit review submission, advisory Director recommendation, and operator-owned approval or request-changes decisions. A request changes decision can return the same assigned Writer through Revision 2 and Revision 3; rejection UI and publishing remain planned.
 
 Durable Agent Profiles configure the Assignment Editor, Writer, and Director roles. PostgreSQL seeds three immutable built-in profiles, and operators may create additional immutable Writer profiles with an optional provider-neutral model descriptor. The built-in Assignment Editor can execute in supervised proposal mode. It reads one authoritative unassigned Intake Story, selects durable successful evidence and available Writer Profiles, and records a structured suggestion or model failure as an append-only AgentRun. The operator remains responsible for reviewing, editing, and submitting the existing durable Assignment form.
 

@@ -18,7 +18,7 @@ export interface Article {
 export interface ArticleRevision {
   readonly id: ArticleRevisionId;
   readonly articleId: ArticleId;
-  readonly revisionNumber: 1;
+  readonly revisionNumber: 1 | 2 | 3;
   readonly writerProfileId: AgentProfileId;
   readonly agentRunId: AgentRunId;
   readonly headline: string;

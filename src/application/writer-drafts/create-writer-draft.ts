@@ -52,7 +52,10 @@ export type WriterModelResolution =
 export type CreateWriterDraftResult =
   | {
       readonly ok: true;
-      readonly run: Extract<AgentRun, { readonly role: "writer" }>;
+      readonly run: Extract<
+        AgentRun,
+        { readonly role: "writer"; readonly operation: "article_draft" }
+      >;
       readonly article?: import("@/domain/editorial").Article;
       readonly revision?: import("@/domain/editorial").ArticleRevision;
       readonly story?: import("@/domain/editorial").Story;
@@ -265,7 +268,7 @@ export function createWriterDraft(dependencies: {
           };
         throw new Error("A non-Director AgentRun received a Director uniqueness conflict.");
       }
-      if (appended.run.role !== "writer")
+      if (appended.run.role !== "writer" || appended.run.operation !== "article_draft")
         throw new Error("The durable AgentRun role changed unexpectedly.");
       return { ok: true, run: appended.run };
     }
@@ -301,7 +304,12 @@ export function createWriterDraft(dependencies: {
     if (!articleResult.ok || !revisionResult.ok || !transition.ok)
       throw new Error("The application produced invalid Writer draft state.");
     const runResult = recordAgentRun({ ...common, outcome: "succeeded", articleId, revisionId });
-    if (!runResult.ok || runResult.run.role !== "writer" || runResult.run.outcome !== "succeeded")
+    if (
+      !runResult.ok ||
+      runResult.run.role !== "writer" ||
+      runResult.run.operation !== "article_draft" ||
+      runResult.run.outcome !== "succeeded"
+    )
       throw new Error("The application produced an invalid successful Writer AgentRun.");
     return dependencies.persistence.persist({
       expectedStory: story,
