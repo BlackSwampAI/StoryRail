@@ -429,6 +429,7 @@ export function NewsroomShell({
               {workspaceMode === "source-intake" ? (
                 <SourceEvidenceWorkspace
                   requestSourceEvidence={requestSourceEvidence}
+                  inboxRequests={sourceInboxRequests}
                   onSourceAvailable={() => setSourceInboxRefreshVersion((current) => current + 1)}
                   onReviewInInbox={(sourceId) => {
                     setFocusedSourceId(sourceId);

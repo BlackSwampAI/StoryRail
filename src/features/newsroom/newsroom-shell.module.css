@@ -560,6 +560,55 @@
   border-left-color: #d27a70;
 }
 
+.preparationActive {
+  border-left-color: #82cfb2;
+  background: radial-gradient(circle at 90% 10%, rgb(72 140 113 / 10%), transparent 36%), #0e1d18;
+}
+
+.preparationWaitCopy {
+  max-width: 42rem;
+  margin: 1rem 0 0;
+  color: #a9bab2;
+  line-height: 1.65;
+}
+
+.preparationChecklist .preparationActiveStage {
+  color: #e0f4ec;
+  font-weight: 700;
+}
+
+.preparationChecklist .preparationActiveStage::before {
+  display: inline-block;
+  width: 0.72rem;
+  height: 0.72rem;
+  margin-right: 0.6rem;
+  border: 2px solid #477a66;
+  border-top-color: #a3e6cc;
+  border-radius: 50%;
+  animation: progress-spin 850ms linear infinite;
+  content: "";
+  vertical-align: -0.08rem;
+}
+
+.preparationActivity {
+  position: relative;
+  height: 0.25rem;
+  overflow: hidden;
+  margin-top: 1.4rem;
+  border-radius: 999px;
+  background: #203c31;
+}
+
+.preparationActivity span {
+  position: absolute;
+  inset-block: 0;
+  left: -32%;
+  width: 32%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, #8ee4c2 45%, #d1f5e7 60%, transparent);
+  animation: preparation-sweep 1.6s ease-in-out infinite;
+}
+
 .receipt h2 {
   font-size: clamp(1.6rem, 3vw, 2.4rem);
 }
@@ -639,6 +688,60 @@
   padding-top: 1.5rem;
 }
 
+.persistedEvidence > h4 {
+  margin: 0;
+  color: #e8f0eb;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.35rem;
+  font-weight: 500;
+}
+
+.persistedEvidence > button {
+  margin-top: 1rem;
+}
+
+.preparedEvidence {
+  max-width: 58rem;
+  margin-top: 1rem;
+  border: 1px solid #315044;
+  border-radius: 0.85rem;
+  background: #0e1b17;
+  padding: clamp(1.25rem, 4vw, 2.75rem);
+}
+
+.preparedEvidence > header {
+  border-bottom: 1px solid #315044;
+  padding-bottom: 1.25rem;
+}
+
+.preparedEvidence > header h3,
+.preparedEvidence > header h5 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #f5f5ee;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.65rem, 4vw, 2.8rem);
+  font-weight: 500;
+  letter-spacing: -0.04em;
+  line-height: 1.08;
+}
+
+.preparedEvidence > header p {
+  margin: 0.8rem 0 0;
+  color: #91a69c;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  line-height: 1.5;
+}
+
+.preparedEvidence .articleBody > *:first-child {
+  margin-top: 1.5rem;
+}
+
+.preparedEvidence .articleBody {
+  overflow-wrap: anywhere;
+}
+
 .persistedEvidence > h5,
 .persistedExtraction h5,
 .persistedExtraction h6 {
@@ -698,6 +801,14 @@
 
 .extractionFailure h6 {
   margin-top: 0;
+}
+
+.extractionFailure h3,
+.extractionFailure h5 {
+  margin: 0;
+  color: #f0d2ca;
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 500;
 }
 
 .extractionAudit {
@@ -2228,6 +2339,12 @@
   }
 }
 
+@keyframes preparation-sweep {
+  to {
+    transform: translateX(415%);
+  }
+}
+
 @media (max-width: 68rem) {
   .shell {
     grid-template-columns: 18rem minmax(0, 1fr);
@@ -2338,8 +2455,20 @@
   .currentTask,
   .secondaryPanelContent,
   .triageCompleted,
-  .progressMark {
+  .progressMark,
+  .preparationActiveStage::before,
+  .preparationActivity span {
     animation: none;
+  }
+
+  .preparationActiveStage::before {
+    border-style: dotted;
+    border-color: #a3e6cc;
+  }
+
+  .preparationActivity span {
+    left: 34%;
+    background: #8ee4c2;
   }
 
   .disclosureChevron {

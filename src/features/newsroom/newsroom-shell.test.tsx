@@ -564,10 +564,11 @@ describe("NewsroomShell", () => {
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Add Source" }));
-    fireEvent.click(screen.getByRole("button", { name: "Preserve and extract" }));
+    fireEvent.click(screen.getByRole("button", { name: "Bring into newsroom" }));
     await waitFor(() => expect(inbox.listPendingSources).toHaveBeenCalledTimes(2));
     expect(stories.createStory).not.toHaveBeenCalled();
-    expect(screen.getByText("Source preserved and extraction completed")).toBeVisible();
+    expect(inbox.prepareEvidence).toHaveBeenCalledWith(source.id, "extraction-new");
+    expect(screen.getByText(/Source and extraction are safe/)).toBeVisible();
     expect(screen.getByRole("button", { name: "Review in Source Inbox" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Add another Source" })).toBeVisible();
     expect(screen.getByText("No Sources await triage")).not.toBeVisible();
@@ -575,7 +576,7 @@ describe("NewsroomShell", () => {
     expect(await screen.findByText("No Sources await triage")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Add Source" }));
     expect(screen.getByRole("textbox", { name: "Source URL" })).toHaveValue("");
-    expect(screen.queryByText("Source preserved and extraction completed")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Source and extraction are safe/)).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Review in Source Inbox" }),
     ).not.toBeInTheDocument();
@@ -599,13 +600,13 @@ describe("NewsroomShell", () => {
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Add Source" }));
-    fireEvent.click(screen.getByRole("button", { name: "Preserve and extract" }));
-    expect(await screen.findByText("Source already exists and can be reused")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Bring into newsroom" }));
+    expect(await screen.findByText("Source already exists")).toBeVisible();
     expect(screen.getByRole("button", { name: "Review in Source Inbox" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Inbox" }));
     fireEvent.click(screen.getByRole("button", { name: "Add Source" }));
     expect(screen.getByRole("textbox", { name: "Source URL" })).toHaveValue("");
-    expect(screen.queryByText("Source already exists and can be reused")).not.toBeInTheDocument();
+    expect(screen.queryByText("Source already exists")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Review in Source Inbox" }),
     ).not.toBeInTheDocument();
