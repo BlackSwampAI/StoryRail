@@ -139,12 +139,13 @@ function MarkdownBody({ markdown }: Readonly<{ markdown: string }>) {
 export function ArticleReader({
   revision,
   writerName,
-}: Readonly<{ revision: ArticleRevision; writerName: string }>) {
+  headingId,
+}: Readonly<{ revision: ArticleRevision; writerName: string; headingId: string }>) {
   return (
-    <article className={styles.articleReader} aria-labelledby={`article-${revision.id}`}>
+    <article className={styles.articleReader} aria-labelledby={headingId}>
       <header className={styles.articleHeader}>
         <p className={styles.currentTaskLabel}>Current article</p>
-        <h2 id={`article-${revision.id}`}>{revision.headline}</h2>
+        <h2 id={headingId}>{revision.headline}</h2>
         {revision.dek ? <p className={styles.articleDek}>{revision.dek}</p> : null}
         <p className={styles.articleByline}>
           Revision {revision.revisionNumber} · {writerName}

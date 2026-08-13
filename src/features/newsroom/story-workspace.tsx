@@ -757,6 +757,7 @@ export function StoryWorkspace({
           <ArticleReader
             revision={latestRevision}
             writerName={assignment?.writerProfile.name ?? "Writer"}
+            headingId="current-task-heading"
           />
         ) : story.state === "intake" && assignment === null ? (
           <>

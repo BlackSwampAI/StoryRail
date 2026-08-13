@@ -15,7 +15,10 @@ import {
   type UrlSource,
 } from "@/domain/editorial";
 
-import type { SourceInboxClient } from "./source-inbox-client";
+import {
+  SOURCE_INBOX_UNAVAILABLE_MESSAGE,
+  type SourceInboxClient,
+} from "./source-inbox-client";
 import { SourceInboxWorkspace, type SourceInboxWorkspaceProps } from "./source-inbox-workspace";
 import type { StoryClient } from "./story-client";
 
@@ -152,6 +155,7 @@ function renderInbox(
     readonly sourceCount?: number;
     readonly onStoryKnown?: SourceInboxWorkspaceProps["onStoryKnown"];
     readonly onStoryLoaded?: SourceInboxWorkspaceProps["onStoryLoaded"];
+    readonly onPendingCountChange?: SourceInboxWorkspaceProps["onPendingCountChange"];
   } = {},
 ) {
   return render(
@@ -160,6 +164,7 @@ function renderInbox(
       stories={[{ story, sourceCount: options.sourceCount ?? 0 }]}
       inboxRequests={inbox}
       storyRequests={stories}
+      onPendingCountChange={options.onPendingCountChange}
       onStoryKnown={options.onStoryKnown ?? vi.fn()}
       onStoryLoaded={options.onStoryLoaded ?? vi.fn()}
     />,
@@ -244,7 +249,10 @@ describe("SourceInboxWorkspace", () => {
   it("shows a completed new-Story handoff and opens the Story only on explicit request", async () => {
     const { inbox, stories } = clients();
     const onStoryLoaded = vi.fn<SourceInboxWorkspaceProps["onStoryLoaded"]>();
-    renderInbox(inbox, stories, { onStoryLoaded });
+    const onPendingCountChange =
+      vi.fn<NonNullable<SourceInboxWorkspaceProps["onPendingCountChange"]>>();
+    renderInbox(inbox, stories, { onStoryLoaded, onPendingCountChange });
+    await waitFor(() => expect(onPendingCountChange).toHaveBeenLastCalledWith(1));
     fireEvent.click(await screen.findByRole("button", { name: "Create new Story" }));
     fireEvent.change(screen.getByLabelText("Source relevance"), { target: { value: "Relevant" } });
     fireEvent.change(screen.getByLabelText("Editorial decision reason"), {
@@ -261,6 +269,7 @@ describe("SourceInboxWorkspace", () => {
       "New subject",
     );
     expect(await screen.findByText("Story created and Source attached.")).toBeVisible();
+    expect(onPendingCountChange).toHaveBeenLastCalledWith(0);
     expect(screen.getByRole("button", { name: "Open Story" })).toBeVisible();
     expect(onStoryLoaded).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Open Story" }));
@@ -271,7 +280,10 @@ describe("SourceInboxWorkspace", () => {
 
   it("attaches to an existing Story without creating another Story", async () => {
     const { inbox, stories } = clients();
-    renderInbox(inbox, stories);
+    const onPendingCountChange =
+      vi.fn<NonNullable<SourceInboxWorkspaceProps["onPendingCountChange"]>>();
+    renderInbox(inbox, stories, { onPendingCountChange });
+    await waitFor(() => expect(onPendingCountChange).toHaveBeenLastCalledWith(1));
     fireEvent.click(await screen.findByRole("button", { name: "Attach to existing Story" }));
     fireEvent.change(screen.getByLabelText("Source relevance"), {
       target: { value: "Additional facts" },
@@ -290,12 +302,16 @@ describe("SourceInboxWorkspace", () => {
       "Same subject",
     );
     expect(await screen.findByText("Source attached to Story.")).toBeVisible();
+    expect(onPendingCountChange).toHaveBeenLastCalledWith(0);
     expect(screen.getByRole("button", { name: "Open Story" })).toBeVisible();
   });
 
   it("records skip without mutating Stories", async () => {
     const { inbox, stories } = clients();
-    renderInbox(inbox, stories);
+    const onPendingCountChange =
+      vi.fn<NonNullable<SourceInboxWorkspaceProps["onPendingCountChange"]>>();
+    renderInbox(inbox, stories, { onPendingCountChange });
+    await waitFor(() => expect(onPendingCountChange).toHaveBeenLastCalledWith(1));
     fireEvent.click(await screen.findByRole("button", { name: "Skip" }));
     fireEvent.change(screen.getByLabelText("Editorial decision reason"), {
       target: { value: "No material facts" },
@@ -313,7 +329,66 @@ describe("SourceInboxWorkspace", () => {
     expect(stories.attachSource).not.toHaveBeenCalled();
     expect(stories.inspectStory).not.toHaveBeenCalled();
     expect(await screen.findByText(/Skip decision recorded/)).toBeVisible();
+    expect(onPendingCountChange).toHaveBeenLastCalledWith(0);
     expect(screen.getByRole("button", { name: "Continue triage" })).toBeVisible();
+  });
+
+  it("keeps pending and failed decisions counted", async () => {
+    const { inbox, stories } = clients();
+    let finishDecision:
+      | ((result: Awaited<ReturnType<SourceInboxClient["recordTriageDecision"]>>) => void)
+      | undefined;
+    const controlledInbox: SourceInboxClient = {
+      ...inbox,
+      recordTriageDecision: vi.fn<SourceInboxClient["recordTriageDecision"]>(
+        () =>
+          new Promise((resolve) => {
+            finishDecision = resolve;
+          }),
+      ),
+    };
+    const onPendingCountChange =
+      vi.fn<NonNullable<SourceInboxWorkspaceProps["onPendingCountChange"]>>();
+    renderInbox(controlledInbox, stories, { onPendingCountChange });
+    await waitFor(() => expect(onPendingCountChange).toHaveBeenLastCalledWith(1));
+    fireEvent.click(await screen.findByRole("button", { name: "Skip" }));
+    fireEvent.change(screen.getByLabelText("Editorial decision reason"), {
+      target: { value: "No material facts" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Record skip decision" }));
+    expect(await screen.findByText("Recording skip decision…")).toBeVisible();
+    expect(onPendingCountChange).toHaveBeenLastCalledWith(1);
+    finishDecision?.({ kind: "unavailable", message: SOURCE_INBOX_UNAVAILABLE_MESSAGE });
+    expect(await screen.findByRole("alert")).toBeVisible();
+    expect(onPendingCountChange).toHaveBeenLastCalledWith(1);
+  });
+
+  it("replaces local completion tracking with authoritative refresh data", async () => {
+    const { inbox, stories } = clients();
+    const onPendingCountChange =
+      vi.fn<NonNullable<SourceInboxWorkspaceProps["onPendingCountChange"]>>();
+    const props = {
+      stories: [{ story, sourceCount: 0 }],
+      inboxRequests: inbox,
+      storyRequests: stories,
+      onPendingCountChange,
+      onStoryKnown: vi.fn(),
+      onStoryLoaded: vi.fn(),
+    };
+    const view = render(<SourceInboxWorkspace refreshVersion={0} {...props} />);
+    await waitFor(() => expect(onPendingCountChange).toHaveBeenLastCalledWith(1));
+    fireEvent.click(await screen.findByRole("button", { name: "Skip" }));
+    fireEvent.change(screen.getByLabelText("Editorial decision reason"), {
+      target: { value: "No material facts" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Record skip decision" }));
+    expect(await screen.findByText(/Skip decision recorded/)).toBeVisible();
+    expect(onPendingCountChange).toHaveBeenLastCalledWith(0);
+
+    view.rerender(<SourceInboxWorkspace refreshVersion={1} {...props} />);
+    await waitFor(() => expect(inbox.listPendingSources).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(onPendingCountChange).toHaveBeenLastCalledWith(1));
+    expect(screen.getByRole("button", { name: "Skip" })).toBeVisible();
   });
 
   it("preserves a known count of one when new Story inspection fails", async () => {

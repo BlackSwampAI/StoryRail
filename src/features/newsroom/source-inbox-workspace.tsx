@@ -250,6 +250,7 @@ function TriageItem({
   inboxRequests,
   storyRequests,
   onResolved,
+  onDecisionCompleted,
   onStoryKnown,
   onStoryLoaded,
   focusRequested,
@@ -259,6 +260,7 @@ function TriageItem({
   inboxRequests: SourceInboxClient;
   storyRequests: StoryClient;
   onResolved: () => void;
+  onDecisionCompleted: () => void;
   onStoryKnown: SourceInboxWorkspaceProps["onStoryKnown"];
   onStoryLoaded: SourceInboxWorkspaceProps["onStoryLoaded"];
   focusRequested: boolean;
@@ -398,6 +400,7 @@ function TriageItem({
         });
         return;
       }
+      onDecisionCompleted();
       const inspection = await inspect(story, 1);
       if (inspection !== null)
         setProgress({
@@ -455,6 +458,7 @@ function TriageItem({
         });
         return;
       }
+      onDecisionCompleted();
       const inspection = await inspect(selected.story, knownSourceCount);
       if (inspection !== null)
         setProgress({
@@ -475,13 +479,14 @@ function TriageItem({
     setProgress({ kind: "pending", stage: "Recording skip decision…" });
     try {
       const result = await inboxRequests.recordTriageDecision(item.source.id, "skip", null, reason);
-      if (result.kind === "completed")
+      if (result.kind === "completed") {
+        onDecisionCompleted();
         setProgress({
           kind: "completed",
           decision: "skip",
           message: "Skip decision recorded. This Source is no longer pending.",
         });
-      else
+      } else
         setProgress({
           kind: "failure",
           message:
@@ -527,6 +532,7 @@ function TriageItem({
         });
         return;
       }
+      onDecisionCompleted();
       const inspection = await inspect(story, knownSourceCount);
       if (inspection !== null)
         setProgress({
@@ -762,10 +768,14 @@ export function SourceInboxWorkspace({
   onStoryLoaded,
 }: SourceInboxWorkspaceProps) {
   const [state, setState] = useState<InboxState>({ kind: "loading" });
+  const [locallyCompletedSourceIds, setLocallyCompletedSourceIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
 
   const load = useCallback(async () => {
     setState({ kind: "loading" });
     const result = await inboxRequests.listPendingSources();
+    if (result.kind === "completed") setLocallyCompletedSourceIds(new Set());
     setState(
       result.kind === "completed"
         ? { kind: "loaded", refreshVersion, items: result.value }
@@ -778,6 +788,7 @@ export function SourceInboxWorkspace({
     void (async () => {
       const result = await inboxRequests.listPendingSources();
       if (!active) return;
+      if (result.kind === "completed") setLocallyCompletedSourceIds(new Set());
       setState(
         result.kind === "completed"
           ? { kind: "loaded", refreshVersion, items: result.value }
@@ -794,7 +805,9 @@ export function SourceInboxWorkspace({
       ? ({ kind: "loading" } as const)
       : state;
   const pendingCount =
-    state.kind === "loaded" && state.refreshVersion === refreshVersion ? state.items.length : null;
+    state.kind === "loaded" && state.refreshVersion === refreshVersion
+      ? state.items.filter(({ source }) => !locallyCompletedSourceIds.has(source.id)).length
+      : null;
 
   useEffect(() => {
     onPendingCountChange?.(pendingCount);
@@ -841,7 +854,7 @@ export function SourceInboxWorkspace({
           )
           .map((item) => (
             <TriageItem
-              key={item.source.id}
+              key={`${displayedState.refreshVersion}:${item.source.id}`}
               item={item}
               stories={stories}
               inboxRequests={inboxRequests}
@@ -855,6 +868,13 @@ export function SourceInboxWorkspace({
                       }
                     : current,
                 )
+              }
+              onDecisionCompleted={() =>
+                setLocallyCompletedSourceIds((current) => {
+                  const next = new Set(current);
+                  next.add(item.source.id);
+                  return next;
+                })
               }
               onStoryKnown={onStoryKnown}
               onStoryLoaded={onStoryLoaded}

@@ -864,6 +864,8 @@ describe("NewsroomShell", () => {
     expect(
       await screen.findByRole("heading", { name: "A readable newsroom headline" }),
     ).toBeVisible();
+    expect(screen.getByRole("region", { name: "A readable newsroom headline" })).toBeVisible();
+    expect(document.querySelectorAll("#current-task-heading")).toHaveLength(1);
     expect(screen.getByRole("heading", { name: "What happened" })).toBeVisible();
     expect(screen.getByText("editorial copy")).toBeVisible();
     expect(screen.getByRole("link", { name: "source" })).toHaveAttribute(
