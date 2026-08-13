@@ -1205,20 +1205,28 @@ export function StoryWorkspace({
                         >
                           Approve
                         </button>
-                        <button
-                          type="button"
-                          className={styles.secondaryAction}
-                          aria-pressed={operatorDecision === "request_changes"}
-                          onClick={() => {
-                            setOperatorDecision("request_changes");
-                            setDecisionReason(
-                              successfulDirectorRun.review.revisionInstructions ?? "",
-                            );
-                          }}
-                        >
-                          Request changes
-                        </button>
+                        {story.revisionCycle < 2 ? (
+                          <button
+                            type="button"
+                            className={styles.secondaryAction}
+                            aria-pressed={operatorDecision === "request_changes"}
+                            onClick={() => {
+                              setOperatorDecision("request_changes");
+                              setDecisionReason(
+                                successfulDirectorRun.review.revisionInstructions ?? "",
+                              );
+                            }}
+                          >
+                            Request changes
+                          </button>
+                        ) : null}
                       </div>
+                      {story.revisionCycle >= 2 ? (
+                        <p className={styles.inlineAlert}>
+                          Both revision cycles have been used. Request changes is no longer
+                          available for this Article revision.
+                        </p>
+                      ) : null}
                     </fieldset>
                     {operatorDecision &&
                     operatorDecision !== successfulDirectorRun.review.recommendation ? (

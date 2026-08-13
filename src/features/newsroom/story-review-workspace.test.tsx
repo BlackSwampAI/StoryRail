@@ -172,6 +172,66 @@ describe("Director review workspace", () => {
     expect(screen.getByRole("button", { name: "Record decision" })).toBeVisible();
   });
 
+  it("keeps approval available without offering request changes after both revision cycles", () => {
+    const reviewed = inspection();
+    const revision = reviewed.article!.revisions[0]!;
+    const directorRun = reviewed.agentRuns[0]! as Extract<
+      StoryInspection["agentRuns"][number],
+      { readonly role: "editor_in_chief" }
+    >;
+    const finalRevision = {
+      ...revision,
+      id: "revision-38-3",
+      revisionNumber: 3 as const,
+      agentRunId: "writer-run-38-3",
+    };
+    const finalReview = {
+      ...reviewed,
+      story: { ...reviewed.story, revisionCycle: 2 },
+      article: {
+        article: reviewed.article!.article,
+        revisions: [finalRevision],
+      },
+      agentRuns: [
+        {
+          ...directorRun,
+          input: {
+            ...directorRun.input,
+            story: { ...directorRun.input.story, revisionCycle: 2 },
+            revision: {
+              ...directorRun.input.revision,
+              id: finalRevision.id,
+              revisionNumber: finalRevision.revisionNumber,
+              agentRunId: finalRevision.agentRunId,
+            },
+          },
+        },
+      ],
+    } as unknown as StoryInspection;
+
+    render(
+      <DragDropProvider>
+        <StoryWorkspace
+          inspection={finalReview}
+          requests={requests}
+          staff={{ kind: "loaded", profiles: [] }}
+          onAssigned={vi.fn()}
+          onWriterCompleted={vi.fn()}
+          onReviewStateChanged={vi.fn()}
+        />
+      </DragDropProvider>,
+    );
+
+    expect(screen.getByRole("heading", { name: "Request changes" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Request changes" })).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Both revision cycles have been used. Request changes is no longer available for this Article revision.",
+      ),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeVisible();
+  });
+
   it("offers the bounded Writer revision after an operator requests changes", async () => {
     const reviewed = inspection();
     const revisionRequested = {

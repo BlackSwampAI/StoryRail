@@ -38,16 +38,16 @@ flowchart LR
     FC --> RAW[Immutable raw evidence]
     RAW -->|successful extraction| PREP[Automatic Prepared Evidence]
     RAW -->|failed extraction| INBOX[Source Inbox]
-    PREP --> REVIEW[Evidence review]
-    REVIEW --> INBOX
+    PREP --> EVIDENCE_REVIEW[Evidence review]
+    EVIDENCE_REVIEW --> INBOX
     INBOX --> DECIDE{Editorial decision}
     DECIDE -->|New Story| NEW[Persisted Story + Source]
     DECIDE -->|Existing Story| EXISTING[Attach Source to Story]
     DECIDE -->|Skip| SKIP[Durable skip decision]
     NEW --> PROPOSE[Optional supervised Assignment Editor suggestion]
     EXISTING --> PROPOSE
-    PROPOSE --> REVIEW[Operator review and editing]
-    REVIEW --> ASSIGN[Durable Assignment + intake-to-assigned transition]
+    PROPOSE --> ASSIGNMENT_REVIEW[Operator review and editing]
+    ASSIGNMENT_REVIEW --> ASSIGN[Durable Assignment + intake-to-assigned transition]
     ASSIGN --> WRITE[Supervised Writer + Article Revision 1]
     WRITE --> SUBMIT[Operator sends Article to review]
     SUBMIT --> DIRECTOR[Advisory Director review]
