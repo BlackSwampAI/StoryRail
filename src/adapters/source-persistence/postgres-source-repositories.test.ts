@@ -12,6 +12,7 @@ import {
   articleRevisionId,
   intakeUrlSource,
   operatorId,
+  reviewDecisionId,
   sourceEvidencePreparationId,
   sourceExtractionId,
   sourceId,
@@ -52,6 +53,10 @@ import { createPostgresAgentProfileRepository } from "../agent-profile-persisten
 import { createPostgresAssignmentPersistence } from "../assignment-persistence/postgres-assignment-persistence";
 import { createPostgresAgentRunRepository } from "../agent-run-persistence/postgres-agent-run-repository";
 import { createPostgresWriterDraftPersistence } from "../article-persistence/postgres-writer-draft-persistence";
+import {
+  createPostgresReviewDecisionPersistence,
+  createPostgresReviewSubmissionPersistence,
+} from "../review-persistence";
 
 const databaseUrl = process.env.STORYRAIL_TEST_DATABASE_URL;
 const describePostgres = databaseUrl ? describe : describe.skip;
@@ -84,6 +89,10 @@ const agentRunMigrationPath = resolve(process.cwd(), "database/migrations/0030-a
 const writerDraftMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0031-articles-and-writer-drafts.sql",
+);
+const directorReviewMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0038-supervised-director-review.sql",
 );
 
 const OPERATOR: OperatorActor = {
@@ -293,6 +302,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let assignmentMigrationSql: string;
   let agentRunMigrationSql: string;
   let writerDraftMigrationSql: string;
+  let directorReviewMigrationSql: string;
   let destructiveSetupAllowed = false;
 
   beforeAll(async () => {
@@ -305,6 +315,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     assignmentMigrationSql = await readFile(assignmentMigrationPath, "utf8");
     agentRunMigrationSql = await readFile(agentRunMigrationPath, "utf8");
     writerDraftMigrationSql = await readFile(writerDraftMigrationPath, "utf8");
+    directorReviewMigrationSql = await readFile(directorReviewMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -330,6 +341,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await client.query(assignmentMigrationSql);
       await client.query(agentRunMigrationSql);
       await client.query(writerDraftMigrationSql);
+      await client.query(directorReviewMigrationSql);
     } finally {
       client.release();
     }
@@ -341,7 +353,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     }
 
     await pool.query(
-      "TRUNCATE storyrail.article_revisions, storyrail.articles, storyrail.agent_runs, storyrail.story_transition_receipts, storyrail.story_assignments, storyrail.source_evidence_preparations, storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.stories RESTART IDENTITY",
+      "TRUNCATE storyrail.review_decisions, storyrail.article_revisions, storyrail.articles, storyrail.agent_runs, storyrail.story_transition_receipts, storyrail.story_assignments, storyrail.source_evidence_preparations, storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.stories RESTART IDENTITY",
     );
     await pool.query("DELETE FROM storyrail.agent_profiles WHERE built_in = false");
   });
@@ -803,6 +815,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         inspection: {
           story: { state: "in_progress" },
           agentRuns: [run],
+          reviewDecisions: [],
           article: { article, revisions: [revision] },
         },
       });
@@ -830,6 +843,144 @@ describePostgres("PostgreSQL persistence repositories", () => {
           },
         }),
       ).resolves.toMatchObject({ ok: false, error: { code: "WRITER_DRAFT_CONFLICT" } });
+
+      const reviewStartedAt = "review-started";
+      const reviewStory = { ...story, state: "in_review" as const, updatedAt: reviewStartedAt };
+      const reviewReceipt = {
+        transitionId: transitionId("transition-review-submission"),
+        storyId: story.id,
+        previousState: "in_progress" as const,
+        nextState: "in_review" as const,
+        actor: OPERATOR,
+        reason: "Operator submitted the current Article revision for editorial review.",
+        occurredAt: reviewStartedAt,
+        revisionCycle: 0,
+      };
+      await expect(
+        createPostgresReviewSubmissionPersistence({ pool }).persist({
+          expectedStory: story,
+          story: reviewStory,
+          transitionReceipt: reviewReceipt,
+        }),
+      ).resolves.toEqual({ ok: true, story: reviewStory, transitionReceipt: reviewReceipt });
+
+      const directorRun = {
+        id: agentRunId("run-director-review"),
+        storyId: story.id,
+        profileId: agentProfileId("storyrail-director-v1"),
+        role: "editor_in_chief" as const,
+        operation: "article_review" as const,
+        model: { provider: "openrouter", model: "director-model" },
+        prompt: { key: "storyrail_director_review", version: "1" },
+        requestedBy: OPERATOR,
+        startedAt: "director-started",
+        completedAt: "director-completed",
+        input: {
+          story: {
+            id: reviewStory.id,
+            title: reviewStory.title,
+            state: "in_review" as const,
+            revisionCycle: 0,
+          },
+          assignment: run.input.assignment,
+          article: { id: article.id, assignmentId: article.assignmentId },
+          revision: {
+            id: revision.id,
+            articleId: revision.articleId,
+            revisionNumber: revision.revisionNumber,
+            writerProfileId: revision.writerProfileId,
+            agentRunId: revision.agentRunId,
+            headline: revision.headline,
+            dek: revision.dek,
+            bodyMarkdown: revision.bodyMarkdown,
+          },
+          evidence: run.input.evidence,
+          unavailableSourceIds: run.input.unavailableSourceIds,
+        },
+        outcome: "succeeded" as const,
+        review: {
+          recommendation: "approve" as const,
+          summary: "The Article is ready.",
+          checks: {
+            assignment: { status: "pass" as const, note: "Aligned." },
+            accuracy: { status: "pass" as const, note: "Supported." },
+            headline: { status: "pass" as const, note: "Supported." },
+            structure: { status: "pass" as const, note: "Coherent." },
+            style: { status: "pass" as const, note: "Clear." },
+          },
+          revisionInstructions: null,
+        },
+      };
+      await expect(createPostgresAgentRunRepository({ pool }).append(directorRun)).resolves.toEqual(
+        {
+          ok: true,
+          run: directorRun,
+        },
+      );
+      await expect(
+        createPostgresAgentRunRepository({ pool }).append({
+          ...directorRun,
+          id: agentRunId("duplicate-director-review"),
+        }),
+      ).resolves.toMatchObject({
+        ok: false,
+        error: { code: "DIRECTOR_REVIEW_ALREADY_SUCCEEDED" },
+      });
+
+      const decidedAt = "review-decided";
+      const decision = {
+        id: reviewDecisionId("decision-director-review"),
+        storyId: story.id,
+        articleId: article.id,
+        revisionId: revision.id,
+        directorRunId: directorRun.id,
+        decision: "approve" as const,
+        reason: "Operator approved the current Article revision.",
+        decidedBy: OPERATOR,
+        decidedAt,
+      };
+      const approvedStory = { ...reviewStory, state: "approved" as const, updatedAt: decidedAt };
+      const decisionReceipt = {
+        transitionId: transitionId("transition-review-decision"),
+        storyId: story.id,
+        previousState: "in_review" as const,
+        nextState: "approved" as const,
+        actor: OPERATOR,
+        reason: decision.reason,
+        occurredAt: decidedAt,
+        revisionCycle: 0,
+      };
+      await expect(
+        createPostgresReviewDecisionPersistence({ pool }).persist({
+          expectedStory: reviewStory,
+          decision,
+          story: approvedStory,
+          transitionReceipt: decisionReceipt,
+        }),
+      ).resolves.toEqual({
+        ok: true,
+        decision,
+        story: approvedStory,
+        transitionReceipt: decisionReceipt,
+      });
+      await expect(
+        createPostgresStoryInspectionRepository({ pool }).inspect(story.id),
+      ).resolves.toMatchObject({
+        ok: true,
+        inspection: {
+          story: { state: "approved" },
+          agentRuns: [run, directorRun],
+          reviewDecisions: [decision],
+        },
+      });
+      await expect(
+        createPostgresReviewDecisionPersistence({ pool }).persist({
+          expectedStory: reviewStory,
+          decision: { ...decision, id: reviewDecisionId("duplicate-decision") },
+          story: approvedStory,
+          transitionReceipt: decisionReceipt,
+        }),
+      ).resolves.toMatchObject({ ok: false });
     });
   });
 
@@ -1168,6 +1319,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         "agent_runs",
         "article_revisions",
         "articles",
+        "review_decisions",
         "source_evidence_preparations",
         "source_extractions",
         "source_triage_decisions",
@@ -1230,6 +1382,51 @@ describePostgres("PostgreSQL persistence repositories", () => {
           },
           {
             table_name: "agent_runs",
+            column_name: "append_position",
+            data_type: "bigint",
+            is_nullable: "NO",
+            is_identity: "YES",
+          },
+          {
+            table_name: "agent_runs",
+            column_name: "review_article_id",
+            data_type: "text",
+            is_nullable: "YES",
+            is_identity: "NO",
+          },
+          {
+            table_name: "agent_runs",
+            column_name: "review_revision_id",
+            data_type: "text",
+            is_nullable: "YES",
+            is_identity: "NO",
+          },
+          ...[
+            "decision_id",
+            "story_id",
+            "article_id",
+            "revision_id",
+            "director_run_id",
+            "director_role",
+            "director_operation",
+            "director_outcome",
+            "decision",
+          ].map((column_name) => ({
+            table_name: "review_decisions",
+            column_name,
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          })),
+          {
+            table_name: "review_decisions",
+            column_name: "payload",
+            data_type: "jsonb",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "review_decisions",
             column_name: "append_position",
             data_type: "bigint",
             is_nullable: "NO",
@@ -1615,7 +1812,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           },
         ]),
       );
-      expect(columns.rows).toHaveLength(62);
+      expect(columns.rows).toHaveLength(75);
     });
 
     it("creates the required primary, unique, foreign-key, and check constraints", async () => {
@@ -2900,6 +3097,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           assignment: null,
           transitions: [],
           agentRuns: [],
+          reviewDecisions: [],
           article: null,
         },
       };
@@ -3456,6 +3654,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         await pool.query(assignmentMigrationSql);
         await pool.query(agentRunMigrationSql);
         await pool.query(writerDraftMigrationSql);
+        await pool.query(directorReviewMigrationSql);
       }
     });
 

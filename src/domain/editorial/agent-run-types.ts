@@ -1,4 +1,5 @@
 import type { AssignmentProposal } from "./assignment-proposal-types";
+import type { DirectorReviewRecommendation } from "./director-review-types";
 import type { ModelDescriptor, ModelFailureCode } from "./source-evidence-preparation-types";
 import type {
   AgentProfileId,
@@ -98,7 +99,52 @@ export type WriterArticleDraftAgentRun = WriterArticleDraftAgentRunCommon &
       }
   );
 
-export type AgentRun = AssignmentProposalAgentRun | WriterArticleDraftAgentRun;
+export interface DirectorArticleReviewAgentRunInput {
+  readonly story: AssignmentProposalAgentRunInput["story"];
+  readonly assignment: WriterArticleDraftAgentRunInput["assignment"];
+  readonly article: {
+    readonly id: ArticleId;
+    readonly assignmentId: AssignmentId;
+  };
+  readonly revision: {
+    readonly id: ArticleRevisionId;
+    readonly articleId: ArticleId;
+    readonly revisionNumber: 1;
+    readonly writerProfileId: AgentProfileId;
+    readonly agentRunId: AgentRunId;
+    readonly headline: string;
+    readonly dek: string | null;
+    readonly bodyMarkdown: string;
+  };
+  readonly evidence: readonly EvidenceReference[];
+  readonly unavailableSourceIds: readonly SourceId[];
+}
+
+interface DirectorArticleReviewAgentRunCommon {
+  readonly id: AgentRunId;
+  readonly storyId: StoryId;
+  readonly profileId: AgentProfileId;
+  readonly role: "editor_in_chief";
+  readonly operation: "article_review";
+  readonly model: ModelDescriptor;
+  readonly prompt: { readonly key: string; readonly version: string };
+  readonly requestedBy: EditorialActor;
+  readonly startedAt: string;
+  readonly completedAt: string;
+  readonly input: DirectorArticleReviewAgentRunInput;
+}
+
+export type DirectorArticleReviewAgentRun = DirectorArticleReviewAgentRunCommon &
+  (
+    | { readonly outcome: "succeeded"; readonly review: DirectorReviewRecommendation }
+    | {
+        readonly outcome: "failed";
+        readonly failure: { readonly code: ModelFailureCode; readonly retryable: boolean };
+      }
+  );
+
+export type AgentRun =
+  AssignmentProposalAgentRun | WriterArticleDraftAgentRun | DirectorArticleReviewAgentRun;
 
 export type AgentRunValidationCode =
   | "AGENT_RUN_IDENTITY_INVALID"

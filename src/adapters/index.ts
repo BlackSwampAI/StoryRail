@@ -9,3 +9,4 @@ export * from "./story-source-persistence";
 export * from "./model";
 export * from "./agent-profile-persistence";
 export * from "./assignment-persistence";
+export * from "./review-persistence";

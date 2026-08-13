@@ -246,6 +246,7 @@ export function describeStoryInspectionRepositoryContract(
           assignment: null,
           transitions: [],
           agentRuns: [],
+          reviewDecisions: [],
           article: null,
         },
       });
@@ -265,6 +266,7 @@ export function describeStoryInspectionRepositoryContract(
           assignment: null,
           transitions: [],
           agentRuns: [],
+          reviewDecisions: [],
           article: null,
         },
       });
@@ -379,6 +381,7 @@ export function describeStoryInspectionRepositoryContract(
           assignment: null,
           transitions: [],
           agentRuns: [],
+          reviewDecisions: [],
           article: null,
         },
       });
@@ -416,6 +419,7 @@ export function describeStoryInspectionRepositoryContract(
           assignment: null,
           transitions: [],
           agentRuns: [],
+          reviewDecisions: [],
           article: null,
         },
       });
@@ -439,6 +443,7 @@ export function describeStoryInspectionRepositoryContract(
         inspection: {
           sources: [{ extractions: [extraction] }],
           agentRuns: [first, second],
+          reviewDecisions: [],
           article: null,
         },
       });
@@ -476,6 +481,7 @@ export function describeStoryInspectionRepositoryContract(
           assignment: null,
           transitions: [],
           agentRuns: [],
+          reviewDecisions: [],
           article: null,
         },
       });
@@ -574,6 +580,7 @@ export function describeStoryInspectionRepositoryContract(
         assignment: null,
         transitions: [],
         agentRuns: [],
+        reviewDecisions: [],
         article: null,
       });
       expect(second.inspection).not.toBe(first.inspection);
@@ -660,6 +667,7 @@ export function createReferenceStoryInspectionRepositoryHarness(): StoryInspecti
               assignment: null,
               transitions: [],
               agentRuns: agentRuns.get(storyIdentity) ?? [],
+              reviewDecisions: [],
               article: null,
             }),
           };

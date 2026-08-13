@@ -213,6 +213,8 @@ describe("createStoryRuntime", () => {
       "createCustomWriterProfile",
       "listAgentProfiles",
       "assignStory",
+      "submitStoryReview",
+      "recordStoryReviewDecision",
       "close",
     ]);
     expect(JSON.stringify(runtime)).not.toContain(DATABASE_URL);

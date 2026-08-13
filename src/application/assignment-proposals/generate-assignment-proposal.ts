@@ -267,6 +267,19 @@ export function createGenerateAssignmentProposal(dependencies: {
           };
     const recorded = recordAgentRun(candidate);
     if (!recorded.ok) throw new Error("The application produced an invalid AgentRun.");
-    return dependencies.runs.append(recorded.run);
+    const appended = await dependencies.runs.append(recorded.run);
+    if (!appended.ok) {
+      if (appended.error.code === "AGENT_RUN_ID_CONFLICT")
+        return {
+          ok: false,
+          error: {
+            code: "AGENT_RUN_ID_CONFLICT",
+            message: appended.error.message,
+            runId: appended.error.runId,
+          },
+        };
+      throw new Error("A non-Director AgentRun received a Director uniqueness conflict.");
+    }
+    return appended;
   };
 }

@@ -85,6 +85,8 @@ function makeRuntime(overrides: Partial<StoryRuntime> = {}): StoryRuntime {
     createCustomWriterProfile: vi.fn<StoryRuntime["createCustomWriterProfile"]>(),
     listAgentProfiles: vi.fn<StoryRuntime["listAgentProfiles"]>(),
     assignStory: vi.fn<StoryRuntime["assignStory"]>(),
+    submitStoryReview: vi.fn<StoryRuntime["submitStoryReview"]>(),
+    recordStoryReviewDecision: vi.fn<StoryRuntime["recordStoryReviewDecision"]>(),
     close: vi.fn<StoryRuntime["close"]>(async () => undefined),
     ...overrides,
   };
@@ -437,6 +439,7 @@ describe("createInspectStoryHttpHandler", () => {
       assignment: null,
       transitions: [],
       agentRuns: [],
+      reviewDecisions: [],
       article: null,
     };
     const inspectStory = vi.fn<StoryRuntime["inspectStory"]>(async () => ({
@@ -463,6 +466,7 @@ describe("createInspectStoryHttpHandler", () => {
         assignment: null,
         transitions: [],
         agentRuns: [],
+        reviewDecisions: [],
         article: null,
       },
     }));
@@ -483,6 +487,7 @@ describe("createInspectStoryHttpHandler", () => {
         assignment: null,
         transitions: [],
         agentRuns: [],
+        reviewDecisions: [],
         article: null,
       },
     });
@@ -496,6 +501,7 @@ describe("createInspectStoryHttpHandler", () => {
         assignment: null,
         transitions: [],
         agentRuns: [],
+        reviewDecisions: [],
         article: null,
       },
       {
@@ -511,6 +517,7 @@ describe("createInspectStoryHttpHandler", () => {
         assignment: null,
         transitions: [],
         agentRuns: [],
+        reviewDecisions: [],
         article: null,
       },
     ] as const;

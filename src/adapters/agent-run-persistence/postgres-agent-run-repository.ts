@@ -47,7 +47,26 @@ export function createPostgresAgentRunRepository(options: {
          FROM storyrail.agent_runs WHERE run_id = $1`,
         [run.id],
       );
-      if (!existing.rows[0]) throw new PostgresAgentRunInvariantError();
+      if (!existing.rows[0]) {
+        if (run.role === "editor_in_chief" && run.outcome === "succeeded") {
+          const successful = await options.pool.query(
+            `SELECT run_id FROM storyrail.agent_runs
+             WHERE role = 'editor_in_chief' AND operation = 'article_review'
+               AND outcome = 'succeeded' AND review_revision_id = $1`,
+            [run.input.revision.id],
+          );
+          if (successful.rows[0])
+            return {
+              ok: false,
+              error: {
+                code: "DIRECTOR_REVIEW_ALREADY_SUCCEEDED",
+                message: "The Article Revision already has a successful Director review.",
+                runId: run.id,
+              },
+            };
+        }
+        throw new PostgresAgentRunInvariantError();
+      }
       const durable = decodePostgresAgentRun(existing.rows[0]);
       return isDeepStrictEqual(durable, run)
         ? { ok: true, run: structuredClone(durable) }

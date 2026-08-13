@@ -63,6 +63,7 @@ function fixture() {
       article: null,
       transitions: [],
       agentRuns: [],
+      reviewDecisions: [],
       sources: [
         {
           attachment: {

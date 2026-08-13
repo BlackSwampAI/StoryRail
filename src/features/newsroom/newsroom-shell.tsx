@@ -394,6 +394,14 @@ export function NewsroomShell({
                     setExpandedQueue("in_progress");
                     setStorySelection({ kind: "loaded", inspection: refreshed });
                   }}
+                  onReviewStateChanged={(refreshed) => {
+                    upsertStoryListItem({
+                      story: refreshed.story,
+                      sourceCount: refreshed.sources.length,
+                    });
+                    setExpandedQueue(refreshed.story.state);
+                    setStorySelection({ kind: "loaded", inspection: refreshed });
+                  }}
                 />
               ) : storySelection.kind === "loading" ? (
                 <section className={styles.emptyWorkspace} role="status">

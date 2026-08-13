@@ -240,6 +240,86 @@ function WriterRuns({ runs }: Readonly<{ runs: readonly AgentRun[] }>) {
   );
 }
 
+function DirectorRuns({ runs }: Readonly<{ runs: readonly AgentRun[] }>) {
+  const directorRuns = runs.filter(
+    (run): run is Extract<AgentRun, { readonly role: "editor_in_chief" }> =>
+      run.role === "editor_in_chief",
+  );
+  return (
+    <section aria-labelledby="director-runs-heading">
+      <h4 id="director-runs-heading">Director runs</h4>
+      {directorRuns.length === 0 ? (
+        <p>No Director runs are recorded.</p>
+      ) : (
+        directorRuns.map((run) => (
+          <article key={run.id} className={styles.auditRecord}>
+            <h5>Article review · {run.outcome}</h5>
+            <dl className={styles.auditGrid}>
+              <div>
+                <dt>Run ID</dt>
+                <dd>{run.id}</dd>
+              </div>
+              <div>
+                <dt>Role / operation</dt>
+                <dd>
+                  {run.role} / {run.operation}
+                </dd>
+              </div>
+              <div>
+                <dt>Model</dt>
+                <dd>
+                  {run.model.provider} / {run.model.model}
+                </dd>
+              </div>
+              <div>
+                <dt>Prompt</dt>
+                <dd>
+                  {run.prompt.key} / {run.prompt.version}
+                </dd>
+              </div>
+              <div>
+                <dt>Revision ID</dt>
+                <dd>{run.input.revision.id}</dd>
+              </div>
+              <div>
+                <dt>Started</dt>
+                <dd>{run.startedAt}</dd>
+              </div>
+              <div>
+                <dt>Completed</dt>
+                <dd>{run.completedAt}</dd>
+              </div>
+              {run.outcome === "succeeded" ? (
+                <>
+                  <div>
+                    <dt>Recommendation</dt>
+                    <dd>{run.review.recommendation}</dd>
+                  </div>
+                  <div>
+                    <dt>Summary</dt>
+                    <dd>{run.review.summary}</dd>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <dt>Failure</dt>
+                    <dd>{run.failure.code}</dd>
+                  </div>
+                  <div>
+                    <dt>Retryable</dt>
+                    <dd>{run.failure.retryable ? "Yes" : "No"}</dd>
+                  </div>
+                </>
+              )}
+            </dl>
+          </article>
+        ))
+      )}
+    </section>
+  );
+}
+
 function EvidencePanel({ inspection }: Readonly<{ inspection: StoryInspection }>) {
   return (
     <details className={styles.secondaryPanel}>
@@ -324,7 +404,7 @@ function AuditPanel({
   inspection,
   runs,
 }: Readonly<{ inspection: StoryInspection; runs: readonly AgentRun[] }>) {
-  const { story, sources, assignment, transitions, article } = inspection;
+  const { story, sources, assignment, transitions, article, reviewDecisions } = inspection;
   return (
     <details className={styles.secondaryPanel}>
       <summary>
@@ -332,7 +412,7 @@ function AuditPanel({
           <strong>History &amp; Audit</strong>
           <small>Transitions, AgentRuns, durable records, and IDs</small>
         </span>
-        <span>{transitions.length + runs.length} records</span>
+        <span>{transitions.length + runs.length + reviewDecisions.length} records</span>
       </summary>
       <div className={styles.secondaryPanelContent}>
         <section aria-labelledby="story-audit-heading">
@@ -467,6 +547,45 @@ function AuditPanel({
         </section>
         <AssignmentRuns runs={runs} />
         <WriterRuns runs={runs} />
+        <DirectorRuns runs={runs} />
+        <section aria-labelledby="review-decisions-heading">
+          <h4 id="review-decisions-heading">Operator review decisions</h4>
+          {reviewDecisions.length === 0 ? (
+            <p>No operator review decision is recorded.</p>
+          ) : (
+            reviewDecisions.map((decision) => (
+              <article key={decision.id} className={styles.auditRecord}>
+                <h5>{decision.decision === "approve" ? "Approved" : "Changes requested"}</h5>
+                <dl className={styles.auditGrid}>
+                  <div>
+                    <dt>Decision ID</dt>
+                    <dd>{decision.id}</dd>
+                  </div>
+                  <div>
+                    <dt>Director run</dt>
+                    <dd>{decision.directorRunId}</dd>
+                  </div>
+                  <div>
+                    <dt>Revision ID</dt>
+                    <dd>{decision.revisionId}</dd>
+                  </div>
+                  <div>
+                    <dt>Decided by</dt>
+                    <dd>{actorLabel(decision.decidedBy)}</dd>
+                  </div>
+                  <div>
+                    <dt>Reason</dt>
+                    <dd>{decision.reason}</dd>
+                  </div>
+                  <div>
+                    <dt>Decided at</dt>
+                    <dd>{decision.decidedAt}</dd>
+                  </div>
+                </dl>
+              </article>
+            ))
+          )}
+        </section>
         <section aria-labelledby="article-audit-heading">
           <h4 id="article-audit-heading">Technical Article record</h4>
           {article === null ? (
@@ -537,6 +656,7 @@ export interface StoryWorkspaceProps {
     writerProfile: AgentProfile,
   ) => Promise<void>;
   readonly onWriterCompleted: (inspection: StoryInspection) => void;
+  readonly onReviewStateChanged: (inspection: StoryInspection) => void;
 }
 
 export function isWriterDropEligible(
@@ -576,6 +696,7 @@ export function StoryWorkspace({
   staff,
   onAssigned,
   onWriterCompleted,
+  onReviewStateChanged,
 }: StoryWorkspaceProps) {
   const { story, sources, assignment, agentRuns, article } = inspection;
   const durableProposal = [...agentRuns]
@@ -597,11 +718,15 @@ export function StoryWorkspace({
   const [assignmentPending, setAssignmentPending] = useState(false);
   const [proposalPending, setProposalPending] = useState(false);
   const [writerPending, setWriterPending] = useState(false);
+  const [reviewSubmissionPending, setReviewSubmissionPending] = useState(false);
+  const [directorPending, setDirectorPending] = useState(false);
+  const [decisionPending, setDecisionPending] = useState(false);
   const [editingAssignment, setEditingAssignment] = useState(false);
   const [proposalReady, setProposalReady] = useState(durableProposal !== undefined);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
   const [proposalStatus, setProposalStatus] = useState<string | null>(null);
   const [writerStatus, setWriterStatus] = useState<string | null>(null);
+  const [reviewStatus, setReviewStatus] = useState<string | null>(null);
   const [runs, setRuns] = useState<readonly AgentRun[]>(agentRuns);
   const latestProposal = [...runs]
     .reverse()
@@ -621,6 +746,31 @@ export function StoryWorkspace({
   const [constraints, setConstraints] = useState(durableProposal?.proposal.constraints ?? "");
   const [reason, setReason] = useState(durableProposal?.proposal.reason ?? "");
   const [writerOverridden, setWriterOverridden] = useState(false);
+  const successfulDirectorRun = [...runs]
+    .reverse()
+    .find(
+      (
+        run,
+      ): run is Extract<
+        AgentRun,
+        { readonly role: "editor_in_chief"; readonly outcome: "succeeded" }
+      > => run.role === "editor_in_chief" && run.outcome === "succeeded",
+    );
+  const failedDirectorRun = [...runs]
+    .reverse()
+    .find(
+      (
+        run,
+      ): run is Extract<
+        AgentRun,
+        { readonly role: "editor_in_chief"; readonly outcome: "failed" }
+      > => run.role === "editor_in_chief" && run.outcome === "failed",
+    );
+  const existingDecision = inspection.reviewDecisions.at(-1);
+  const [operatorDecision, setOperatorDecision] = useState<"approve" | "request_changes" | null>(
+    existingDecision?.decision ?? null,
+  );
+  const [decisionReason, setDecisionReason] = useState(existingDecision?.reason ?? "");
   const assignmentEligible = isWriterDropEligible(inspection);
   const { ref: assignmentDropRef, isDropTarget } = useDroppable({
     id: WRITER_ASSIGNMENT_DROP_ID,
@@ -764,6 +914,93 @@ export function StoryWorkspace({
     }
   }
 
+  async function refreshAfterReviewChange(message: string) {
+    const refreshed = await requests.inspectStory(story.id);
+    if (refreshed.kind === "completed") onReviewStateChanged(refreshed.value);
+    else setReviewStatus(message);
+  }
+
+  async function submitReview() {
+    if (reviewSubmissionPending) return;
+    setReviewSubmissionPending(true);
+    setReviewStatus(null);
+    try {
+      const result = await requests.submitReview(story.id);
+      if (result.kind !== "completed") {
+        setReviewStatus(
+          result.kind === "application-failure" ? result.error.message : result.message,
+        );
+        return;
+      }
+      await refreshAfterReviewChange(
+        "Review submission saved, but authoritative inspection refresh is unavailable. Reopen the Story.",
+      );
+    } finally {
+      setReviewSubmissionPending(false);
+    }
+  }
+
+  async function runDirector() {
+    if (directorPending) return;
+    setDirectorPending(true);
+    setReviewStatus(null);
+    try {
+      const result = await requests.runDirectorReview(story.id);
+      if (result.kind !== "completed") {
+        setReviewStatus(
+          result.kind === "application-failure" ? result.error.message : result.message,
+        );
+        return;
+      }
+      setRuns((current) => [...current, result.value]);
+      if (result.value.role !== "editor_in_chief") {
+        setReviewStatus("The Director returned an invalid execution record.");
+        return;
+      }
+      if (result.value.outcome === "failed") {
+        setReviewStatus(
+          `Director failed: ${result.value.failure.code}. Retryable: ${result.value.failure.retryable ? "yes" : "no"}.`,
+        );
+        return;
+      }
+      setOperatorDecision(result.value.review.recommendation);
+      setDecisionReason(
+        result.value.review.recommendation === "request_changes"
+          ? (result.value.review.revisionInstructions ?? "")
+          : "The current Article revision is approved for the next editorial stage.",
+      );
+      await refreshAfterReviewChange(
+        "Director review saved, but authoritative inspection refresh is unavailable. Reopen the Story.",
+      );
+    } finally {
+      setDirectorPending(false);
+    }
+  }
+
+  async function recordDecision() {
+    if (decisionPending || !successfulDirectorRun || !operatorDecision) return;
+    setDecisionPending(true);
+    setReviewStatus(null);
+    try {
+      const result = await requests.recordReviewDecision(story.id, {
+        directorRunId: successfulDirectorRun.id,
+        decision: operatorDecision,
+        reason: decisionReason,
+      });
+      if (result.kind !== "completed") {
+        setReviewStatus(
+          result.kind === "application-failure" ? result.error.message : result.message,
+        );
+        return;
+      }
+      await refreshAfterReviewChange(
+        "Review decision saved, but authoritative inspection refresh is unavailable. Reopen the Story.",
+      );
+    } finally {
+      setDecisionPending(false);
+    }
+  }
+
   const latestRevision = article?.revisions.at(-1);
   return (
     <article className={styles.storyWorkspace} aria-labelledby="workspace-story-title">
@@ -804,11 +1041,167 @@ export function StoryWorkspace({
           </div>
         ) : null}
         {article !== null && latestRevision !== undefined ? (
-          <ArticleReader
-            revision={latestRevision}
-            writerName={assignment?.writerProfile.name ?? "Writer"}
-            headingId="current-task-heading"
-          />
+          <div className={styles.articleReviewWorkspace}>
+            <ArticleReader
+              revision={latestRevision}
+              writerName={assignment?.writerProfile.name ?? "Writer"}
+              headingId="current-task-heading"
+            />
+            {story.state === "in_progress" ? (
+              <section className={styles.reviewTask} aria-labelledby="review-submission-heading">
+                <p className={styles.currentTaskLabel}>Current task · Editorial review</p>
+                <h2 id="review-submission-heading">Ready for review</h2>
+                <p>Submit the current immutable Article revision to the Director review stage.</p>
+                <button
+                  type="button"
+                  className={styles.primaryAction}
+                  disabled={reviewSubmissionPending}
+                  onClick={() => void submitReview()}
+                >
+                  {reviewSubmissionPending ? "Sending to Review…" : "Send to Review"}
+                </button>
+              </section>
+            ) : story.state === "in_review" && directorPending ? (
+              <section className={styles.progressCard} role="status" aria-busy="true">
+                <span className={styles.progressMark} aria-hidden="true" />
+                <div>
+                  <p className={styles.currentTaskLabel}>Current task · Director review</p>
+                  <h2>Director is reviewing the Article…</h2>
+                  <p>Checking the Assignment and exact evidence used by the Writer.</p>
+                </div>
+              </section>
+            ) : story.state === "in_review" && !successfulDirectorRun ? (
+              <section className={styles.reviewTask} aria-labelledby="director-task-heading">
+                <p className={styles.currentTaskLabel}>Current task · Director review</p>
+                <h2 id="director-task-heading">Director Review</h2>
+                <p>
+                  The Director will record an advisory recommendation without changing Story state
+                  or Article content.
+                </p>
+                <button
+                  type="button"
+                  className={styles.primaryAction}
+                  onClick={() => void runDirector()}
+                >
+                  {failedDirectorRun ? "Retry Director" : "Run Director"}
+                </button>
+              </section>
+            ) : successfulDirectorRun ? (
+              <section className={styles.directorReview} aria-labelledby="director-review-heading">
+                <p className={styles.currentTaskLabel}>Director review</p>
+                <h2 id="director-review-heading">
+                  {successfulDirectorRun.review.recommendation === "approve"
+                    ? "Approve"
+                    : "Request changes"}
+                </h2>
+                <p>{successfulDirectorRun.review.summary}</p>
+                <div className={styles.reviewChecks}>
+                  {Object.entries(successfulDirectorRun.review.checks).map(([name, check]) => (
+                    <article key={name}>
+                      <h3>{name}</h3>
+                      <strong>{check.status === "pass" ? "PASS" : "NEEDS CHANGES"}</strong>
+                      <p>{check.note}</p>
+                    </article>
+                  ))}
+                </div>
+                {successfulDirectorRun.review.revisionInstructions ? (
+                  <div className={styles.revisionInstructions}>
+                    <h3>Revision instructions</h3>
+                    <p>{successfulDirectorRun.review.revisionInstructions}</p>
+                  </div>
+                ) : null}
+                {story.state === "in_review" && !existingDecision ? (
+                  <form
+                    className={styles.decisionForm}
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void recordDecision();
+                    }}
+                  >
+                    <fieldset>
+                      <legend>Operator decision</legend>
+                      <div className={styles.taskActions}>
+                        <button
+                          type="button"
+                          className={styles.secondaryAction}
+                          aria-pressed={operatorDecision === "approve"}
+                          onClick={() => {
+                            setOperatorDecision("approve");
+                            setDecisionReason(
+                              "The current Article revision is approved for the next editorial stage.",
+                            );
+                          }}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.secondaryAction}
+                          aria-pressed={operatorDecision === "request_changes"}
+                          onClick={() => {
+                            setOperatorDecision("request_changes");
+                            setDecisionReason(
+                              successfulDirectorRun.review.revisionInstructions ?? "",
+                            );
+                          }}
+                        >
+                          Request changes
+                        </button>
+                      </div>
+                    </fieldset>
+                    {operatorDecision &&
+                    operatorDecision !== successfulDirectorRun.review.recommendation ? (
+                      <p role="status" className={styles.inlineAlert}>
+                        Operator decision differs from the Director recommendation.
+                      </p>
+                    ) : null}
+                    <label>
+                      Reason
+                      <textarea
+                        value={decisionReason}
+                        onChange={(event) => setDecisionReason(event.target.value)}
+                        required
+                        disabled={decisionPending}
+                      />
+                    </label>
+                    <button
+                      type="submit"
+                      className={styles.primaryAction}
+                      disabled={
+                        decisionPending || !operatorDecision || decisionReason.trim().length === 0
+                      }
+                    >
+                      {decisionPending ? "Recording decision…" : "Record decision"}
+                    </button>
+                  </form>
+                ) : existingDecision ? (
+                  <p className={styles.decisionResult}>
+                    Operator decision:{" "}
+                    <strong>
+                      {existingDecision.decision === "approve" ? "APPROVED" : "CHANGES REQUESTED"}
+                    </strong>{" "}
+                    — {existingDecision.reason}
+                  </p>
+                ) : null}
+                {story.state === "changes_requested" ? (
+                  <p className={styles.inlineAlert}>Writer revision required.</p>
+                ) : null}
+                {story.state === "approved" ? (
+                  <p className={styles.decisionResult}>
+                    This Article revision is approved. Publishing is not part of this workflow.
+                  </p>
+                ) : null}
+              </section>
+            ) : null}
+            {reviewStatus ? (
+              <p
+                role={reviewStatus.startsWith("Director failed") ? "alert" : "status"}
+                className={styles.inlineAlert}
+              >
+                {reviewStatus}
+              </p>
+            ) : null}
+          </div>
         ) : story.state === "intake" && assignment === null ? (
           <>
             {proposalPending ? (

@@ -58,6 +58,7 @@ function storyRequests(): StoryClient {
         assignment: null,
         transitions: [],
         agentRuns: [],
+        reviewDecisions: [],
         article: null,
       },
     })),
@@ -70,6 +71,18 @@ function storyRequests(): StoryClient {
       message: "The Story request could not be completed.",
     })),
     createWriterDraft: vi.fn<StoryClient["createWriterDraft"]>(async () => ({
+      kind: "unavailable",
+      message: "The Story request could not be completed.",
+    })),
+    submitReview: vi.fn<StoryClient["submitReview"]>(async () => ({
+      kind: "unavailable",
+      message: "The Story request could not be completed.",
+    })),
+    runDirectorReview: vi.fn<StoryClient["runDirectorReview"]>(async () => ({
+      kind: "unavailable",
+      message: "The Story request could not be completed.",
+    })),
+    recordReviewDecision: vi.fn<StoryClient["recordReviewDecision"]>(async () => ({
       kind: "unavailable",
       message: "The Story request could not be completed.",
     })),
@@ -303,6 +316,7 @@ describe("NewsroomShell", () => {
             assignment: null,
             transitions: [],
             agentRuns: [],
+            reviewDecisions: [],
             article: null,
           },
         })
@@ -314,6 +328,7 @@ describe("NewsroomShell", () => {
             assignment: { assignment, writerProfile: writer },
             transitions: [receipt],
             agentRuns: [],
+            reviewDecisions: [],
             article: null,
           },
         }),
@@ -591,6 +606,7 @@ describe("NewsroomShell", () => {
           assignment: null,
           transitions: [],
           agentRuns: [],
+          reviewDecisions: [],
           article: null,
         },
       })),
@@ -803,6 +819,7 @@ describe("NewsroomShell", () => {
           assignment: { assignment, writerProfile: writer },
           transitions: [],
           agentRuns: [],
+          reviewDecisions: [],
           article: null,
         },
       })),
@@ -886,12 +903,14 @@ describe("NewsroomShell", () => {
       assignment: { assignment, writerProfile: writer },
       transitions: [],
       agentRuns: [],
+      reviewDecisions: [],
       article: null,
     };
     const draftedInspection = {
       ...assignedInspection,
       story: inProgress,
       agentRuns: [successfulRun],
+      reviewDecisions: [],
       article: {
         article: {
           id: articleIdentity,
@@ -995,6 +1014,7 @@ describe("NewsroomShell", () => {
           assignment: { assignment, writerProfile: writer },
           transitions: [],
           agentRuns: [],
+          reviewDecisions: [],
           article: {
             article: {
               id: articleIdentity,
@@ -1039,6 +1059,7 @@ describe("NewsroomShell", () => {
       "rel",
       "noopener noreferrer",
     );
+    expect(screen.getByRole("button", { name: "Send to Review" })).toBeVisible();
     expect(screen.getByText("Revision 1 source Markdown")).not.toBeVisible();
     expect(document.querySelector("script")).toBeNull();
 

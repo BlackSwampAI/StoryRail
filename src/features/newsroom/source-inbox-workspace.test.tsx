@@ -126,6 +126,7 @@ function clients() {
         assignment: null,
         transitions: [],
         agentRuns: [],
+        reviewDecisions: [],
         article: null,
       },
     })),
@@ -138,6 +139,18 @@ function clients() {
       message: "The Story request could not be completed.",
     })),
     createWriterDraft: vi.fn<StoryClient["createWriterDraft"]>(async () => ({
+      kind: "unavailable",
+      message: "The Story request could not be completed.",
+    })),
+    submitReview: vi.fn<StoryClient["submitReview"]>(async () => ({
+      kind: "unavailable",
+      message: "The Story request could not be completed.",
+    })),
+    runDirectorReview: vi.fn<StoryClient["runDirectorReview"]>(async () => ({
+      kind: "unavailable",
+      message: "The Story request could not be completed.",
+    })),
+    recordReviewDecision: vi.fn<StoryClient["recordReviewDecision"]>(async () => ({
       kind: "unavailable",
       message: "The Story request could not be completed.",
     })),
@@ -440,7 +453,7 @@ describe("SourceInboxWorkspace", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Record skip decision" }));
     expect(await screen.findByText(/Skip decision recorded/)).toBeVisible();
-    expect(onPendingCountChange).toHaveBeenLastCalledWith(0);
+    await waitFor(() => expect(onPendingCountChange).toHaveBeenLastCalledWith(0));
 
     view.rerender(<SourceInboxWorkspace refreshVersion={1} {...props} />);
     await waitFor(() => expect(inbox.listPendingSources).toHaveBeenCalledTimes(2));

@@ -17,6 +17,8 @@ function makeRuntime(): StoryRuntime {
     createCustomWriterProfile: vi.fn<StoryRuntime["createCustomWriterProfile"]>(),
     listAgentProfiles: vi.fn<StoryRuntime["listAgentProfiles"]>(),
     assignStory: vi.fn<StoryRuntime["assignStory"]>(),
+    submitStoryReview: vi.fn<StoryRuntime["submitStoryReview"]>(),
+    recordStoryReviewDecision: vi.fn<StoryRuntime["recordStoryReviewDecision"]>(),
     close: vi.fn<StoryRuntime["close"]>(async () => undefined),
   });
 }

@@ -67,6 +67,24 @@ export function createReferenceAgentRunRepository(): AgentRunRepository {
               },
             };
       }
+      if (
+        candidate.role === "editor_in_chief" &&
+        candidate.outcome === "succeeded" &&
+        [...runs.values()].some(
+          (run) =>
+            run.role === "editor_in_chief" &&
+            run.outcome === "succeeded" &&
+            run.input.revision.id === candidate.input.revision.id,
+        )
+      )
+        return {
+          ok: false,
+          error: {
+            code: "DIRECTOR_REVIEW_ALREADY_SUCCEEDED",
+            message: "The Article Revision already has a successful Director review.",
+            runId: candidate.id,
+          },
+        };
       runs.set(candidate.id, structuredClone(candidate));
       return { ok: true, run: structuredClone(candidate) };
     },
