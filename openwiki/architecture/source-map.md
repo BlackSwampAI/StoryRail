@@ -168,3 +168,4 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 ## CI
 
 - `.github/workflows/ci.yml` — runs format/lint/typecheck/test/test:postgres/build/diff-check on PRs to `main`, pushes to `main`, and manual dispatch, against PostgreSQL 18.4-alpine.
+- `.github/workflows/openwiki-update.yml` — automated OpenWiki documentation update; triggers on push to `main` (ignoring `openwiki/**`, `AGENTS.md`, `CLAUDE.md`, and itself) and manual dispatch, runs `openwiki code --update`, and opens an `openwiki/update` pull request.

@@ -69,6 +69,10 @@ git diff --check
 
 pnpm dependency lifecycle scripts fail closed until reviewed. Each approval is recorded in `pnpm-workspace.yaml`'s `allowBuilds` map with an exact package version; a version change requires a new script review.
 
+## OpenWiki documentation workflow
+
+`.github/workflows/openwiki-update.yml` automates refresh of the generated `openwiki/` directory. It triggers on pushes to `main` (ignoring changes under `openwiki/**`, `AGENTS.md`, `CLAUDE.md`, and the workflow file itself) and on manual dispatch. It checks out full history (`fetch-depth: 0`) so OpenWiki can diff `HEAD` against the commit it last documented in `openwiki/.last-update.json`, installs `openwiki` globally, runs `openwiki code --update --print` with the OpenRouter provider, and opens an `openwiki/update` pull request through `peter-evans/create-pull-request`. The workflow never runs on PR branches; it only produces a documentation PR after changes land on `main`. Generated pages should not be hand-edited (see `AGENTS.md`/`CLAUDE.md`); prefer updating source code and docs and letting this workflow regenerate the wiki.
+
 ## Testing strategy
 
 - **Unit tests** (`src/**/*.test.{ts,tsx}`) run under Vitest with jsdom. Runtime and HTTP handler tests inject `Pool`, `fetch`, UUID, and clock substitutes, so they require no real PostgreSQL or Firecrawl access. Domain tests exercise the pure state machine and validation functions directly.
