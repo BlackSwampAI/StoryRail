@@ -24,7 +24,7 @@ describe("HomePage", () => {
 
     expect(screen.getByText("StoryRail")).toBeVisible();
     expect(screen.getByText("Editorial control plane")).toBeVisible();
-    expect(screen.getByRole("navigation", { name: "Story state queues" })).toBeVisible();
+    expect(screen.getByRole("navigation", { name: "Newsroom navigation" })).toBeVisible();
     expect(screen.getByRole("main")).toBeVisible();
     expect(await screen.findByRole("button", { name: "Intake, 0 stories" })).toBeVisible();
     expect(fetch).toHaveBeenCalledTimes(2);

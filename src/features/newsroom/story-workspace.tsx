@@ -1,0 +1,1056 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
+import type { StoryInspection } from "@/application/story-inspection";
+import {
+  type AgentProfile,
+  type AgentRun,
+  type Assignment,
+  type EditorialActor,
+  type StoryTransitionReceipt,
+} from "@/domain/editorial";
+
+import { agentProfileClient, type AgentProfileClient } from "./agent-profile-client";
+import { ArticleReader } from "./article-reader";
+import { STORY_STATE_LABELS } from "./newsroom-state";
+import styles from "./newsroom-shell.module.css";
+import type { StoryClient } from "./story-client";
+
+function actorLabel(actor: EditorialActor): string {
+  return actor.type === "operator"
+    ? `operator: ${actor.operatorId}`
+    : `agent: ${actor.role}, run ${actor.runId}`;
+}
+
+function safeUrl(value: string): string | null {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.href : null;
+  } catch {
+    return null;
+  }
+}
+
+function AssignmentRuns({ runs }: Readonly<{ runs: readonly AgentRun[] }>) {
+  const editorRuns = runs.filter(
+    (run): run is Extract<AgentRun, { readonly role: "assignment_editor" }> =>
+      run.role === "assignment_editor",
+  );
+  return (
+    <section aria-labelledby="assignment-runs-heading">
+      <h4 id="assignment-runs-heading">Assignment Editor runs</h4>
+      {editorRuns.length === 0 ? (
+        <p>No Assignment Editor runs are recorded.</p>
+      ) : (
+        editorRuns.map((run) => (
+          <article key={run.id} className={styles.auditRecord}>
+            <h5>{run.outcome === "succeeded" ? "Suggestion succeeded" : "Suggestion failed"}</h5>
+            <dl className={styles.auditGrid}>
+              <div>
+                <dt>Run ID</dt>
+                <dd>{run.id}</dd>
+              </div>
+              <div>
+                <dt>Profile ID</dt>
+                <dd>{run.profileId}</dd>
+              </div>
+              <div>
+                <dt>Model</dt>
+                <dd>
+                  {run.model.provider} / {run.model.model}
+                </dd>
+              </div>
+              <div>
+                <dt>Prompt</dt>
+                <dd>
+                  {run.prompt.key} / {run.prompt.version}
+                </dd>
+              </div>
+              <div>
+                <dt>Requested by</dt>
+                <dd>{actorLabel(run.requestedBy)}</dd>
+              </div>
+              <div>
+                <dt>Started</dt>
+                <dd>{run.startedAt}</dd>
+              </div>
+              <div>
+                <dt>Completed</dt>
+                <dd>{run.completedAt}</dd>
+              </div>
+              <div>
+                <dt>Outcome</dt>
+                <dd>{run.outcome}</dd>
+              </div>
+              {run.outcome === "succeeded" ? (
+                <>
+                  <div>
+                    <dt>Writer Profile</dt>
+                    <dd>{run.proposal.writerProfileId}</dd>
+                  </div>
+                  <div>
+                    <dt>Angle</dt>
+                    <dd>{run.proposal.angle}</dd>
+                  </div>
+                  <div>
+                    <dt>Brief</dt>
+                    <dd>{run.proposal.brief}</dd>
+                  </div>
+                  <div>
+                    <dt>Constraints</dt>
+                    <dd>{run.proposal.constraints ?? "None"}</dd>
+                  </div>
+                  <div>
+                    <dt>Reason</dt>
+                    <dd>{run.proposal.reason}</dd>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <dt>Failure code</dt>
+                    <dd>{run.failure.code}</dd>
+                  </div>
+                  <div>
+                    <dt>Retryable</dt>
+                    <dd>{run.failure.retryable ? "Yes" : "No"}</dd>
+                  </div>
+                </>
+              )}
+              <div>
+                <dt>Evidence references</dt>
+                <dd>
+                  {run.input.evidence.length === 0
+                    ? "None"
+                    : run.input.evidence
+                        .map(
+                          ({ sourceId, evidenceKind, evidenceId }) =>
+                            `${sourceId}: ${evidenceKind} ${evidenceId}`,
+                        )
+                        .join(", ")}
+                </dd>
+              </div>
+              <div>
+                <dt>Unavailable Sources</dt>
+                <dd>{run.input.unavailableSourceIds.join(", ") || "None"}</dd>
+              </div>
+            </dl>
+          </article>
+        ))
+      )}
+    </section>
+  );
+}
+
+function WriterRuns({ runs }: Readonly<{ runs: readonly AgentRun[] }>) {
+  const writerRuns = runs.filter(
+    (run): run is Extract<AgentRun, { readonly role: "writer" }> => run.role === "writer",
+  );
+  return (
+    <section aria-labelledby="writer-runs-heading">
+      <h4 id="writer-runs-heading">Writer runs</h4>
+      {writerRuns.length === 0 ? (
+        <p>No Writer runs are recorded.</p>
+      ) : (
+        writerRuns.map((run) => (
+          <article key={run.id} className={styles.auditRecord}>
+            <h5>Article draft · {run.outcome}</h5>
+            <dl className={styles.auditGrid}>
+              <div>
+                <dt>Run ID</dt>
+                <dd>{run.id}</dd>
+              </div>
+              <div>
+                <dt>Writer Profile ID</dt>
+                <dd>{run.profileId}</dd>
+              </div>
+              <div>
+                <dt>Model</dt>
+                <dd>
+                  {run.model.provider} / {run.model.model}
+                </dd>
+              </div>
+              <div>
+                <dt>Prompt</dt>
+                <dd>
+                  {run.prompt.key} / {run.prompt.version}
+                </dd>
+              </div>
+              <div>
+                <dt>Assignment ID</dt>
+                <dd>{run.input.assignment.id}</dd>
+              </div>
+              <div>
+                <dt>Requested by</dt>
+                <dd>{actorLabel(run.requestedBy)}</dd>
+              </div>
+              <div>
+                <dt>Started</dt>
+                <dd>{run.startedAt}</dd>
+              </div>
+              <div>
+                <dt>Completed</dt>
+                <dd>{run.completedAt}</dd>
+              </div>
+              {run.outcome === "succeeded" ? (
+                <>
+                  <div>
+                    <dt>Article ID</dt>
+                    <dd>{run.articleId}</dd>
+                  </div>
+                  <div>
+                    <dt>Revision ID</dt>
+                    <dd>{run.revisionId}</dd>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <dt>Failure</dt>
+                    <dd>{run.failure.code}</dd>
+                  </div>
+                  <div>
+                    <dt>Retryable</dt>
+                    <dd>{run.failure.retryable ? "Yes" : "No"}</dd>
+                  </div>
+                </>
+              )}
+              <div>
+                <dt>Evidence references</dt>
+                <dd>
+                  {run.input.evidence
+                    .map(
+                      ({ sourceId, evidenceKind, evidenceId }) =>
+                        `${sourceId}: ${evidenceKind} ${evidenceId}`,
+                    )
+                    .join(", ") || "None"}
+                </dd>
+              </div>
+              <div>
+                <dt>Unavailable Sources</dt>
+                <dd>{run.input.unavailableSourceIds.join(", ") || "None"}</dd>
+              </div>
+            </dl>
+          </article>
+        ))
+      )}
+    </section>
+  );
+}
+
+function EvidencePanel({ inspection }: Readonly<{ inspection: StoryInspection }>) {
+  return (
+    <details className={styles.secondaryPanel}>
+      <summary>
+        <span>
+          <strong>Evidence</strong>
+          <small>Prepared evidence, relevance, and extraction history</small>
+        </span>
+        <span>
+          {inspection.sources.length} {inspection.sources.length === 1 ? "Source" : "Sources"}
+        </span>
+      </summary>
+      <div className={styles.secondaryPanelContent}>
+        {inspection.sources.length === 0 ? <p>No Sources are attached to this Story.</p> : null}
+        {inspection.sources.map(({ attachment, source, extractions, preparations }) => {
+          const href = safeUrl(source.canonicalUrl);
+          return (
+            <article className={styles.evidenceCard} key={source.id}>
+              <header>
+                <div>
+                  <p className={styles.currentTaskLabel}>Source</p>
+                  <h4>
+                    {href === null ? (
+                      source.canonicalUrl
+                    ) : (
+                      <a href={href} target="_blank" rel="noopener noreferrer">
+                        {source.canonicalUrl}
+                      </a>
+                    )}
+                  </h4>
+                </div>
+                <span>{preparations.length > 0 ? "Prepared" : "Raw"}</span>
+              </header>
+              <p>
+                <strong>Relevance</strong> · {attachment.relevance}
+              </p>
+              {preparations.map((preparation, index) => (
+                <details key={preparation.id} className={styles.evidenceDisclosure}>
+                  <summary>
+                    Prepared evidence attempt {index + 1} · {preparation.outcome}
+                  </summary>
+                  {preparation.outcome === "succeeded" ? (
+                    <pre className={styles.extractedContent}>{preparation.document.content}</pre>
+                  ) : (
+                    <p>
+                      {preparation.failure.code} · retryable:{" "}
+                      {preparation.failure.retryable ? "yes" : "no"}
+                    </p>
+                  )}
+                </details>
+              ))}
+              <details className={styles.evidenceDisclosure}>
+                <summary>
+                  Raw extraction history · {extractions.length}{" "}
+                  {extractions.length === 1 ? "attempt" : "attempts"}
+                </summary>
+                {extractions.map((extraction, index) => (
+                  <article key={extraction.id} className={styles.auditRecord}>
+                    <h5>
+                      Extraction attempt {index + 1} · {extraction.outcome}
+                    </h5>
+                    {extraction.outcome === "succeeded" ? (
+                      <pre className={styles.extractedContent}>{extraction.document.content}</pre>
+                    ) : (
+                      <p>
+                        {extraction.failure.code} · retryable:{" "}
+                        {extraction.failure.retryable ? "yes" : "no"}
+                      </p>
+                    )}
+                  </article>
+                ))}
+              </details>
+            </article>
+          );
+        })}
+      </div>
+    </details>
+  );
+}
+
+function AuditPanel({
+  inspection,
+  runs,
+}: Readonly<{ inspection: StoryInspection; runs: readonly AgentRun[] }>) {
+  const { story, sources, assignment, transitions, article } = inspection;
+  return (
+    <details className={styles.secondaryPanel}>
+      <summary>
+        <span>
+          <strong>History &amp; Audit</strong>
+          <small>Transitions, AgentRuns, durable records, and IDs</small>
+        </span>
+        <span>{transitions.length + runs.length} records</span>
+      </summary>
+      <div className={styles.secondaryPanelContent}>
+        <section aria-labelledby="story-audit-heading">
+          <h4 id="story-audit-heading">Technical Story details</h4>
+          <dl className={styles.auditGrid}>
+            <div>
+              <dt>Story ID</dt>
+              <dd>{story.id}</dd>
+            </div>
+            <div>
+              <dt>Created</dt>
+              <dd>{story.createdAt}</dd>
+            </div>
+            <div>
+              <dt>Updated</dt>
+              <dd>{story.updatedAt}</dd>
+            </div>
+            <div>
+              <dt>Revision cycle</dt>
+              <dd>{story.revisionCycle}</dd>
+            </div>
+          </dl>
+        </section>
+        <section aria-labelledby="source-audit-heading">
+          <h4 id="source-audit-heading">Evidence identities</h4>
+          {sources.length === 0 ? (
+            <p>No evidence identities are recorded.</p>
+          ) : (
+            sources.map(({ source, attachment, extractions, preparations }) => (
+              <dl className={styles.auditGrid} key={source.id}>
+                <div>
+                  <dt>Source ID</dt>
+                  <dd>{source.id}</dd>
+                </div>
+                <div>
+                  <dt>Submitted URL</dt>
+                  <dd>{source.submittedUrl}</dd>
+                </div>
+                <div>
+                  <dt>Source provenance</dt>
+                  <dd>{actorLabel(source.submittedBy)}</dd>
+                </div>
+                <div>
+                  <dt>Received</dt>
+                  <dd>{source.receivedAt}</dd>
+                </div>
+                <div>
+                  <dt>Attached by</dt>
+                  <dd>{actorLabel(attachment.attachedBy)}</dd>
+                </div>
+                <div>
+                  <dt>Attached</dt>
+                  <dd>{attachment.attachedAt}</dd>
+                </div>
+                <div>
+                  <dt>Extraction IDs</dt>
+                  <dd>{extractions.map(({ id }) => id).join(", ") || "None"}</dd>
+                </div>
+                <div>
+                  <dt>Preparation IDs</dt>
+                  <dd>{preparations.map(({ id }) => id).join(", ") || "None"}</dd>
+                </div>
+              </dl>
+            ))
+          )}
+        </section>
+        <section aria-labelledby="assignment-audit-heading">
+          <h4 id="assignment-audit-heading">Technical Assignment record</h4>
+          {assignment === null ? (
+            <p>No durable Assignment is recorded.</p>
+          ) : (
+            <dl className={styles.auditGrid}>
+              <div>
+                <dt>Assignment ID</dt>
+                <dd>{assignment.assignment.id}</dd>
+              </div>
+              <div>
+                <dt>Writer Profile ID</dt>
+                <dd>{assignment.assignment.writerProfileId}</dd>
+              </div>
+              <div>
+                <dt>Source IDs</dt>
+                <dd>{assignment.assignment.sourceIds.join(", ") || "None"}</dd>
+              </div>
+              <div>
+                <dt>Assigned by</dt>
+                <dd>{actorLabel(assignment.assignment.assignedBy)}</dd>
+              </div>
+              <div>
+                <dt>Assigned at</dt>
+                <dd>{assignment.assignment.assignedAt}</dd>
+              </div>
+            </dl>
+          )}
+        </section>
+        <section aria-labelledby="transition-audit-heading">
+          <h4 id="transition-audit-heading">Story transitions</h4>
+          {transitions.length === 0 ? (
+            <p>No durable Story transitions are recorded.</p>
+          ) : (
+            transitions.map((transition) => (
+              <article key={transition.transitionId} className={styles.auditRecord}>
+                <h5>
+                  {STORY_STATE_LABELS[transition.previousState]} →{" "}
+                  {STORY_STATE_LABELS[transition.nextState]}
+                </h5>
+                <dl className={styles.auditGrid}>
+                  <div>
+                    <dt>Transition ID</dt>
+                    <dd>{transition.transitionId}</dd>
+                  </div>
+                  <div>
+                    <dt>Actor</dt>
+                    <dd>{actorLabel(transition.actor)}</dd>
+                  </div>
+                  <div>
+                    <dt>Reason</dt>
+                    <dd>{transition.reason}</dd>
+                  </div>
+                  <div>
+                    <dt>Occurred</dt>
+                    <dd>{transition.occurredAt}</dd>
+                  </div>
+                  <div>
+                    <dt>Revision cycle</dt>
+                    <dd>{transition.revisionCycle}</dd>
+                  </div>
+                </dl>
+              </article>
+            ))
+          )}
+        </section>
+        <AssignmentRuns runs={runs} />
+        <WriterRuns runs={runs} />
+        <section aria-labelledby="article-audit-heading">
+          <h4 id="article-audit-heading">Technical Article record</h4>
+          {article === null ? (
+            <p>No durable Article is recorded.</p>
+          ) : (
+            <>
+              <dl className={styles.auditGrid}>
+                <div>
+                  <dt>Article ID</dt>
+                  <dd>{article.article.id}</dd>
+                </div>
+                <div>
+                  <dt>Assignment ID</dt>
+                  <dd>{article.article.assignmentId}</dd>
+                </div>
+                <div>
+                  <dt>Created</dt>
+                  <dd>{article.article.createdAt}</dd>
+                </div>
+              </dl>
+              {article.revisions.map((revision) => (
+                <details className={styles.evidenceDisclosure} key={revision.id}>
+                  <summary>Revision {revision.revisionNumber} source Markdown</summary>
+                  <dl className={styles.auditGrid}>
+                    <div>
+                      <dt>Revision ID</dt>
+                      <dd>{revision.id}</dd>
+                    </div>
+                    <div>
+                      <dt>Writer Profile ID</dt>
+                      <dd>{revision.writerProfileId}</dd>
+                    </div>
+                    <div>
+                      <dt>AgentRun ID</dt>
+                      <dd>{revision.agentRunId}</dd>
+                    </div>
+                    <div>
+                      <dt>Created by</dt>
+                      <dd>{actorLabel(revision.createdBy)}</dd>
+                    </div>
+                    <div>
+                      <dt>Created</dt>
+                      <dd>{revision.createdAt}</dd>
+                    </div>
+                  </dl>
+                  <pre className={styles.extractedContent}>{revision.bodyMarkdown}</pre>
+                </details>
+              ))}
+            </>
+          )}
+        </section>
+      </div>
+    </details>
+  );
+}
+
+export interface StoryWorkspaceProps {
+  readonly inspection: StoryInspection;
+  readonly notice?: string;
+  readonly requests: StoryClient;
+  readonly profileRequests?: AgentProfileClient;
+  readonly onAssigned: (
+    facts: {
+      readonly assignment: Assignment;
+      readonly story: StoryInspection["story"];
+      readonly transitionReceipt: StoryTransitionReceipt;
+    },
+    writerProfile: AgentProfile,
+  ) => Promise<void>;
+  readonly onWriterCompleted: (inspection: StoryInspection) => void;
+}
+
+export function StoryWorkspace({
+  inspection,
+  notice,
+  requests,
+  profileRequests = agentProfileClient,
+  onAssigned,
+  onWriterCompleted,
+}: StoryWorkspaceProps) {
+  const { story, sources, assignment, agentRuns, article } = inspection;
+  const durableProposal = [...agentRuns]
+    .reverse()
+    .find(
+      (
+        run,
+      ): run is Extract<
+        AgentRun,
+        { readonly role: "assignment_editor"; readonly outcome: "succeeded" }
+      > => run.role === "assignment_editor" && run.outcome === "succeeded",
+    );
+  const [profiles, setProfiles] = useState<readonly AgentProfile[]>([]);
+  const [profilesUnavailable, setProfilesUnavailable] = useState(false);
+  const [assignmentPending, setAssignmentPending] = useState(false);
+  const [proposalPending, setProposalPending] = useState(false);
+  const [writerPending, setWriterPending] = useState(false);
+  const [editingAssignment, setEditingAssignment] = useState(false);
+  const [proposalReady, setProposalReady] = useState(durableProposal !== undefined);
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const [proposalStatus, setProposalStatus] = useState<string | null>(null);
+  const [writerStatus, setWriterStatus] = useState<string | null>(null);
+  const [runs, setRuns] = useState<readonly AgentRun[]>(agentRuns);
+  const [writerProfileId, setWriterProfileId] = useState(
+    durableProposal?.proposal.writerProfileId ?? "",
+  );
+  const [angle, setAngle] = useState(durableProposal?.proposal.angle ?? "");
+  const [brief, setBrief] = useState(durableProposal?.proposal.brief ?? "");
+  const [constraints, setConstraints] = useState(durableProposal?.proposal.constraints ?? "");
+  const [reason, setReason] = useState(durableProposal?.proposal.reason ?? "");
+
+  useEffect(() => {
+    if (story.state !== "intake" || assignment !== null) return;
+    let active = true;
+    void profileRequests
+      .listProfiles()
+      .then((result) => {
+        if (!active) return;
+        if (result.kind !== "completed") {
+          setProfilesUnavailable(true);
+          return;
+        }
+        const writers = result.value.filter((profile) => profile.role === "writer");
+        setProfiles(writers);
+        setWriterProfileId((current) => current || writers[0]?.id || "");
+      })
+      .catch(() => {
+        if (active) setProfilesUnavailable(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [assignment, profileRequests, story.id, story.state]);
+
+  const latestProposal = [...runs]
+    .reverse()
+    .find(
+      (
+        run,
+      ): run is Extract<
+        AgentRun,
+        { readonly role: "assignment_editor"; readonly outcome: "succeeded" }
+      > => run.role === "assignment_editor" && run.outcome === "succeeded",
+    );
+  const proposedWriter = profiles.find((profile) => profile.id === writerProfileId);
+  const currentSourceIds = new Set(sources.map(({ source }) => source.id));
+  const proposalSourceIds = new Set(
+    latestProposal === undefined
+      ? []
+      : [
+          ...latestProposal.input.evidence.map(({ sourceId }) => sourceId),
+          ...latestProposal.input.unavailableSourceIds,
+        ],
+  );
+  const evidenceChanged =
+    latestProposal !== undefined &&
+    (currentSourceIds.size !== proposalSourceIds.size ||
+      [...currentSourceIds].some((sourceId) => !proposalSourceIds.has(sourceId)));
+
+  async function generateProposal() {
+    if (proposalPending) return;
+    setProposalPending(true);
+    setProposalStatus(null);
+    try {
+      const result = await requests.generateAssignmentProposal(story.id);
+      if (result.kind !== "completed") {
+        setProposalStatus(
+          result.kind === "application-failure" ? result.error.message : result.message,
+        );
+        return;
+      }
+      setRuns((current) => [...current, result.value]);
+      if (result.value.role !== "assignment_editor") {
+        setProposalStatus("The Assignment Editor returned an invalid execution record.");
+        return;
+      }
+      if (result.value.outcome === "failed") {
+        setProposalStatus(
+          `Assignment Editor failed: ${result.value.failure.code}. Retryable: ${result.value.failure.retryable ? "yes" : "no"}.`,
+        );
+        return;
+      }
+      setWriterProfileId(result.value.proposal.writerProfileId);
+      setAngle(result.value.proposal.angle);
+      setBrief(result.value.proposal.brief);
+      setConstraints(result.value.proposal.constraints ?? "");
+      setReason(result.value.proposal.reason);
+      setProposalReady(true);
+      setEditingAssignment(false);
+      setProposalStatus("Assignment Editor suggestion ready for review.");
+    } catch {
+      setProposalStatus("The Assignment Editor request could not be completed.");
+    } finally {
+      setProposalPending(false);
+    }
+  }
+
+  async function submitAssignment() {
+    if (assignmentPending) return;
+    setAssignmentPending(true);
+    setSubmissionError(null);
+    try {
+      const result = await requests.assignStory(story.id, {
+        writerProfileId,
+        angle,
+        brief,
+        constraints: constraints.trim().length === 0 ? null : constraints,
+        reason,
+      });
+      if (result.kind !== "completed") {
+        setSubmissionError(
+          result.kind === "application-failure" ? result.error.message : result.message,
+        );
+        return;
+      }
+      const writer = profiles.find((profile) => profile.id === writerProfileId);
+      if (!writer) {
+        setSubmissionError("The selected Writer Profile is no longer available.");
+        return;
+      }
+      await onAssigned(result.value, writer);
+    } finally {
+      setAssignmentPending(false);
+    }
+  }
+
+  async function runWriter() {
+    if (writerPending) return;
+    setWriterPending(true);
+    setWriterStatus(null);
+    try {
+      const result = await requests.createWriterDraft(story.id);
+      if (result.kind !== "completed") {
+        setWriterStatus(
+          result.kind === "application-failure" ? result.error.message : result.message,
+        );
+        return;
+      }
+      setRuns((current) => [...current, result.value]);
+      if (result.value.role !== "writer" || result.value.outcome === "failed") {
+        if (result.value.role === "writer")
+          setWriterStatus(
+            `Writer failed: ${result.value.failure.code}. Retryable: ${result.value.failure.retryable ? "yes" : "no"}.`,
+          );
+        return;
+      }
+      const refreshed = await requests.inspectStory(story.id);
+      if (refreshed.kind === "completed") onWriterCompleted(refreshed.value);
+      else
+        setWriterStatus(
+          "Draft saved, but authoritative inspection refresh is unavailable. Reopen the Story.",
+        );
+    } catch {
+      setWriterStatus("The Writer request could not be completed.");
+    } finally {
+      setWriterPending(false);
+    }
+  }
+
+  const latestRevision = article?.revisions.at(-1);
+  return (
+    <article className={styles.storyWorkspace} aria-labelledby="workspace-story-title">
+      <header
+        className={`${styles.storyWorkspaceHeader} ${article ? styles.storyWorkspaceHeaderCompact : ""}`}
+      >
+        <div>
+          <p className={styles.sectionKicker}>Active work</p>
+          <h1 id="workspace-story-title">{story.title}</h1>
+          <div className={styles.storyMeta}>
+            <span>
+              {sources.length} {sources.length === 1 ? "Source" : "Sources"}
+            </span>
+            {assignment ? <span>Writer · {assignment.writerProfile.name}</span> : null}
+          </div>
+        </div>
+        <span className={styles.stateBadge}>{STORY_STATE_LABELS[story.state]}</span>
+      </header>
+      {notice ? (
+        <p role="status" className={styles.workspaceNotice}>
+          {notice}
+        </p>
+      ) : null}
+
+      <section
+        className={styles.currentTask}
+        aria-labelledby="current-task-heading"
+        aria-live="polite"
+      >
+        {article !== null && latestRevision !== undefined ? (
+          <ArticleReader
+            revision={latestRevision}
+            writerName={assignment?.writerProfile.name ?? "Writer"}
+            headingId="current-task-heading"
+          />
+        ) : story.state === "intake" && assignment === null ? (
+          <>
+            {proposalPending ? (
+              <div className={styles.progressCard} role="status" aria-busy="true">
+                <span className={styles.progressMark} aria-hidden="true" />
+                <div>
+                  <p className={styles.currentTaskLabel}>Current task</p>
+                  <h2 id="current-task-heading">Assignment Editor is reviewing the evidence…</h2>
+                  <p>Evaluating attached Sources, prepared evidence, and available Writers.</p>
+                </div>
+              </div>
+            ) : proposalReady && !editingAssignment ? (
+              <div className={styles.proposalCard}>
+                <p className={styles.currentTaskLabel}>Assignment Editor suggestion</p>
+                <div className={styles.proposalLead}>
+                  <div>
+                    <span>Recommended Writer</span>
+                    <h2 id="current-task-heading">
+                      {proposedWriter?.name ?? "Recommended Writer"}
+                    </h2>
+                  </div>
+                  {proposedWriter ? (
+                    <span className={styles.profilePill}>
+                      {proposedWriter.builtIn ? "Built in" : "Custom"}
+                    </span>
+                  ) : null}
+                </div>
+                <dl className={styles.proposalFacts}>
+                  <div>
+                    <dt>Angle</dt>
+                    <dd>{angle}</dd>
+                  </div>
+                  <div>
+                    <dt>Brief</dt>
+                    <dd>{brief}</dd>
+                  </div>
+                  <div>
+                    <dt>Constraints</dt>
+                    <dd>{constraints || "None"}</dd>
+                  </div>
+                  <div>
+                    <dt>Editorial reason</dt>
+                    <dd>{reason}</dd>
+                  </div>
+                </dl>
+                {evidenceChanged ? (
+                  <p role="alert" className={styles.inlineAlert}>
+                    Story evidence has changed since this suggestion was generated. Regenerate
+                    before relying on it.
+                  </p>
+                ) : null}
+                <div className={styles.taskActions}>
+                  <button
+                    type="button"
+                    className={styles.primaryAction}
+                    disabled={assignmentPending || writerProfileId.length === 0}
+                    onClick={() => void submitAssignment()}
+                  >
+                    {assignmentPending ? "Creating Assignment…" : "Create Assignment"}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.secondaryAction}
+                    onClick={() => setEditingAssignment(true)}
+                  >
+                    Edit before assigning
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.tertiaryAction}
+                    onClick={() => void generateProposal()}
+                  >
+                    Regenerate
+                  </button>
+                </div>
+                {submissionError ? (
+                  <p role="alert" className={styles.inlineAlert}>
+                    {submissionError}
+                  </p>
+                ) : null}
+              </div>
+            ) : editingAssignment ? (
+              <form
+                className={styles.assignmentEditorForm}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void submitAssignment();
+                }}
+              >
+                <header>
+                  <div>
+                    <p className={styles.currentTaskLabel}>Assignment editing mode</p>
+                    <h2 id="current-task-heading">Edit the Writer assignment</h2>
+                  </div>
+                  {latestProposal ? (
+                    <button
+                      type="button"
+                      className={styles.tertiaryAction}
+                      onClick={() => setEditingAssignment(false)}
+                    >
+                      Back to suggestion
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className={styles.tertiaryAction}
+                      disabled={proposalPending}
+                      onClick={() => void generateProposal()}
+                    >
+                      {proposalPending ? "Assignment Editor is working…" : "Ask Assignment Editor"}
+                    </button>
+                  )}
+                </header>
+                <p>Assignment will snapshot all currently attached Sources: {sources.length}</p>
+                <label>
+                  Writer
+                  <select
+                    value={writerProfileId}
+                    onChange={(event) => setWriterProfileId(event.target.value)}
+                    disabled={assignmentPending || profilesUnavailable}
+                    required
+                  >
+                    {profiles.length === 0 ? <option value="">No Writers available</option> : null}
+                    {profiles.map((profile) => (
+                      <option value={profile.id} key={profile.id}>
+                        {profile.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Angle
+                  <input
+                    value={angle}
+                    onChange={(event) => setAngle(event.target.value)}
+                    disabled={assignmentPending}
+                    required
+                  />
+                </label>
+                <label>
+                  Brief
+                  <textarea
+                    value={brief}
+                    onChange={(event) => setBrief(event.target.value)}
+                    disabled={assignmentPending}
+                    required
+                  />
+                </label>
+                <label>
+                  Constraints (optional)
+                  <textarea
+                    value={constraints}
+                    onChange={(event) => setConstraints(event.target.value)}
+                    disabled={assignmentPending}
+                  />
+                </label>
+                <label>
+                  Assignment reason
+                  <input
+                    value={reason}
+                    onChange={(event) => setReason(event.target.value)}
+                    disabled={assignmentPending}
+                    required
+                  />
+                </label>
+                <button
+                  type="submit"
+                  className={styles.primaryAction}
+                  disabled={assignmentPending || writerProfileId.length === 0}
+                >
+                  {assignmentPending ? "Creating Assignment…" : "Create Assignment"}
+                </button>
+                {profilesUnavailable ? <p role="alert">Writer Profiles are unavailable.</p> : null}
+                {proposalStatus ? (
+                  <p
+                    role={
+                      proposalStatus.startsWith("Assignment Editor failed") ? "alert" : "status"
+                    }
+                  >
+                    {proposalStatus}
+                  </p>
+                ) : null}
+                {submissionError ? <p role="alert">{submissionError}</p> : null}
+              </form>
+            ) : (
+              <div className={styles.readyCard}>
+                <p className={styles.currentTaskLabel}>Current task · Assignment</p>
+                <h2 id="current-task-heading">Ready for assignment</h2>
+                <p>
+                  Ask the Assignment Editor to prepare a Writer recommendation and brief, or create
+                  the Assignment manually.
+                </p>
+                <div className={styles.taskActions}>
+                  <button
+                    type="button"
+                    className={styles.primaryAction}
+                    onClick={() => void generateProposal()}
+                  >
+                    Ask Assignment Editor
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.secondaryAction}
+                    onClick={() => setEditingAssignment(true)}
+                  >
+                    Assign manually
+                  </button>
+                </div>
+                {proposalStatus ? (
+                  <p
+                    role={
+                      proposalStatus.startsWith("Assignment Editor failed") ? "alert" : "status"
+                    }
+                    className={styles.inlineAlert}
+                  >
+                    {proposalStatus}
+                  </p>
+                ) : null}
+              </div>
+            )}
+          </>
+        ) : story.state === "assigned" && assignment !== null ? (
+          writerPending ? (
+            <div className={styles.progressCard} role="status" aria-busy="true">
+              <span className={styles.progressMark} aria-hidden="true" />
+              <div>
+                <p className={styles.currentTaskLabel}>Current task · Drafting</p>
+                <h2 id="current-task-heading">{assignment.writerProfile.name} is drafting…</h2>
+                <p>
+                  Using the Assignment brief, {assignment.assignment.sourceIds.length} evidence{" "}
+                  {assignment.assignment.sourceIds.length === 1 ? "Source" : "Sources"}
+                  {assignment.writerProfile.model
+                    ? `, and ${assignment.writerProfile.model.model}`
+                    : ""}
+                  .
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className={styles.assignmentSummary}>
+              <p className={styles.currentTaskLabel}>Current task · Writer execution</p>
+              <h2 id="current-task-heading">Assignment ready</h2>
+              <dl className={styles.proposalFacts}>
+                <div>
+                  <dt>Writer</dt>
+                  <dd>{assignment.writerProfile.name}</dd>
+                </div>
+                <div>
+                  <dt>Angle</dt>
+                  <dd>{assignment.assignment.angle}</dd>
+                </div>
+                <div>
+                  <dt>Brief</dt>
+                  <dd>{assignment.assignment.brief}</dd>
+                </div>
+                <div>
+                  <dt>Constraints</dt>
+                  <dd>{assignment.assignment.constraints ?? "None"}</dd>
+                </div>
+              </dl>
+              <div className={styles.taskActions}>
+                <button
+                  type="button"
+                  className={styles.primaryAction}
+                  onClick={() => void runWriter()}
+                >
+                  Run Writer
+                </button>
+              </div>
+              {writerStatus ? (
+                <p
+                  role={writerStatus.startsWith("Writer failed") ? "alert" : "status"}
+                  className={styles.inlineAlert}
+                >
+                  {writerStatus}
+                </p>
+              ) : null}
+            </div>
+          )
+        ) : (
+          <div className={styles.readyCard}>
+            <p className={styles.currentTaskLabel}>Current task</p>
+            <h2 id="current-task-heading">{STORY_STATE_LABELS[story.state]}</h2>
+            <p>This Story has no active work product for the current state.</p>
+          </div>
+        )}
+      </section>
+
+      <div className={styles.secondaryPanels}>
+        <EvidencePanel inspection={inspection} />
+        <AuditPanel inspection={inspection} runs={runs} />
+      </div>
+    </article>
+  );
+}
