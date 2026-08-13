@@ -836,24 +836,27 @@ export function StoryWorkspace({
                     </span>
                   ) : null}
                 </div>
-                <dl className={styles.proposalFacts}>
-                  <div>
-                    <dt>Angle</dt>
-                    <dd>{angle}</dd>
-                  </div>
-                  <div>
-                    <dt>Brief</dt>
-                    <dd>{brief}</dd>
-                  </div>
-                  <div>
-                    <dt>Constraints</dt>
-                    <dd>{constraints || "None"}</dd>
-                  </div>
-                  <div>
-                    <dt>Editorial reason</dt>
-                    <dd>{reason}</dd>
-                  </div>
-                </dl>
+                <div className={styles.editorialBrief}>
+                  <section className={styles.briefAngle} aria-labelledby="proposal-angle-heading">
+                    <h3 id="proposal-angle-heading">Angle</h3>
+                    <p>{angle}</p>
+                  </section>
+                  <section className={styles.briefCopy} aria-labelledby="proposal-brief-heading">
+                    <h3 id="proposal-brief-heading">Brief</h3>
+                    <p>{brief}</p>
+                  </section>
+                  <details className={styles.briefDisclosure}>
+                    <summary>Constraints</summary>
+                    <p>{constraints || "None"}</p>
+                  </details>
+                  <aside
+                    className={styles.editorialRationale}
+                    aria-labelledby="proposal-reason-heading"
+                  >
+                    <h3 id="proposal-reason-heading">Why this assignment</h3>
+                    <p>{reason}</p>
+                  </aside>
+                </div>
                 {evidenceChanged ? (
                   <p role="alert" className={styles.inlineAlert}>
                     Story evidence has changed since this suggestion was generated. Regenerate
@@ -1067,24 +1070,24 @@ export function StoryWorkspace({
             <div className={styles.assignmentSummary}>
               <p className={styles.currentTaskLabel}>Current task · Writer execution</p>
               <h2 id="current-task-heading">Assignment ready</h2>
-              <dl className={styles.proposalFacts}>
-                <div>
-                  <dt>Writer</dt>
-                  <dd>{assignment.writerProfile.name}</dd>
-                </div>
-                <div>
-                  <dt>Angle</dt>
-                  <dd>{assignment.assignment.angle}</dd>
-                </div>
-                <div>
-                  <dt>Brief</dt>
-                  <dd>{assignment.assignment.brief}</dd>
-                </div>
-                <div>
-                  <dt>Constraints</dt>
-                  <dd>{assignment.assignment.constraints ?? "None"}</dd>
-                </div>
-              </dl>
+              <div className={styles.assignedWriter}>
+                <span>Writer</span>
+                <h3>{assignment.writerProfile.name}</h3>
+              </div>
+              <div className={styles.editorialBrief}>
+                <section className={styles.briefAngle} aria-labelledby="assignment-angle-heading">
+                  <h3 id="assignment-angle-heading">Angle</h3>
+                  <p>{assignment.assignment.angle}</p>
+                </section>
+                <section className={styles.briefCopy} aria-labelledby="assignment-brief-heading">
+                  <h3 id="assignment-brief-heading">Brief</h3>
+                  <p>{assignment.assignment.brief}</p>
+                </section>
+                <details className={styles.briefDisclosure}>
+                  <summary>Constraints</summary>
+                  <p>{assignment.assignment.constraints ?? "None"}</p>
+                </details>
+              </div>
               <div className={styles.taskActions}>
                 <button
                   type="button"

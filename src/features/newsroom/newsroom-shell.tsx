@@ -1,6 +1,7 @@
 "use client";
 
 import { DragDropProvider, DragOverlay } from "@dnd-kit/react";
+import Image from "next/image";
 import { useCallback, useEffect, useState } from "react";
 
 import type { StoryInspection } from "@/application/story-inspection";
@@ -175,6 +176,16 @@ export function NewsroomShell({
     });
   }
 
+  function upsertStaffProfile(profile: AgentProfile) {
+    setStaff((current) => {
+      if (current.kind !== "loaded") return current;
+      return {
+        kind: "loaded",
+        profiles: [...current.profiles.filter(({ id }) => id !== profile.id), profile],
+      };
+    });
+  }
+
   return (
     <DragDropProvider
       onDragStart={(event) => {
@@ -189,8 +200,17 @@ export function NewsroomShell({
         desk={
           <aside className={styles.desk} aria-label="The Desk">
             <header className={styles.identity}>
-              <p className={styles.eyebrow}>Editorial control plane</p>
-              <p className={styles.wordmark}>StoryRail</p>
+              <p className={styles.eyebrow}>Alpha preview</p>
+              <div className={styles.deskLogoFrame}>
+                <Image
+                  className={styles.deskLogo}
+                  src="/logo.png"
+                  alt="StoryRail"
+                  width={1795}
+                  height={876}
+                  preload
+                />
+              </div>
             </header>
 
             <nav className={styles.deskNavigation} aria-label="Newsroom navigation">
@@ -200,6 +220,17 @@ export function NewsroomShell({
                 </p>
                 <button
                   type="button"
+                  className={styles.addSourceAction}
+                  aria-current={workspaceMode === "source-intake" ? "page" : undefined}
+                  onClick={() => openWorkspace("source-intake")}
+                >
+                  <span className={styles.addSourceMark} aria-hidden="true">
+                    +
+                  </span>
+                  <span>Add Source</span>
+                </button>
+                <button
+                  type="button"
                   className={styles.navButton}
                   aria-label="Inbox"
                   aria-current={workspaceMode === "source-inbox" ? "page" : undefined}
@@ -207,14 +238,6 @@ export function NewsroomShell({
                 >
                   <span>Inbox</span>
                   <span className={styles.queueCount}>{sourceInboxCount ?? "—"}</span>
-                </button>
-                <button
-                  type="button"
-                  className={styles.navButton}
-                  aria-current={workspaceMode === "source-intake" ? "page" : undefined}
-                  onClick={() => openWorkspace("source-intake")}
-                >
-                  <span>Add Source</span>
                 </button>
               </section>
 
@@ -440,7 +463,10 @@ export function NewsroomShell({
             </div>
             <div hidden={workspaceMode !== "agents"}>
               {workspaceMode === "agents" ? (
-                <AgentProfilesWorkspace requests={agentProfileRequests} />
+                <AgentProfilesWorkspace
+                  requests={agentProfileRequests}
+                  onProfileCreated={upsertStaffProfile}
+                />
               ) : null}
             </div>
           </main>

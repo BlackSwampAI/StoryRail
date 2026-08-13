@@ -25,8 +25,8 @@ describe("HomePage", () => {
     vi.stubGlobal("fetch", fetch);
     render(<HomePage />);
 
-    expect(screen.getByText("StoryRail")).toBeVisible();
-    expect(screen.getByText("Editorial control plane")).toBeVisible();
+    expect(screen.getByRole("img", { name: "StoryRail" })).toBeVisible();
+    expect(screen.getByText("Alpha preview")).toBeVisible();
     expect(screen.getByRole("navigation", { name: "Newsroom navigation" })).toBeVisible();
     expect(screen.getByRole("main")).toBeVisible();
     expect(await screen.findByRole("button", { name: "Intake, 0 stories" })).toBeVisible();
