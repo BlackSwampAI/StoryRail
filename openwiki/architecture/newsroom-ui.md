@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: Newsroom UI shell
-description: Resizable React newsroom workbench with a Story desk, Source-evidence intake, Source inbox, Agent Profiles, and a Story workspace covering assignment, Writer execution, and Article reading.
+description: Resizable React newsroom workbench with a Story desk, Source-evidence intake, Source inbox, Agent Profiles, and a Story workspace covering assignment, Writer execution, review submission, Director review, operator decisions, and Article reading.
 tags: [ui, react, newsroom, nextjs]
 ---
 
@@ -33,7 +33,7 @@ It fetches Stories via `storyClient`, pending Sources via `sourceInboxRequests`,
 | ------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `SourceEvidenceWorkspace` | `source-evidence-workspace.tsx` | `POST /api/source-evidence/url` via `source-evidence-url-client.ts`, then `POST /api/sources/[sourceId]/preparations` via `source-inbox-client.ts` |
 | `SourceInboxWorkspace`    | `source-inbox-workspace.tsx`    | `GET /api/source-inbox`, `POST /api/sources/[sourceId]/preparations`, and `PUT /api/sources/[sourceId]/triage` via `source-inbox-client.ts`        |
-| `StoryWorkspace`          | `story-workspace.tsx`           | `GET /api/stories/[storyId]`, `POST .../assignment-proposals`, `POST .../assignments`, `POST .../writer-drafts` via `story-client.ts`              |
+| `StoryWorkspace`          | `story-workspace.tsx`           | `GET /api/stories/[storyId]`, `POST .../assignment-proposals`, `POST .../assignments`, `POST .../writer-drafts`, `POST .../review-submissions`, `POST .../director-reviews`, `POST .../review-decisions` via `story-client.ts` |
 | `AgentProfilesWorkspace`  | `agent-profiles-workspace.tsx`  | `GET/POST /api/agent-profiles` via `agent-profile-client.ts`                                                                                       |
 | `ArticleReader`           | `article-reader.tsx`            | Renders an `ArticleRevision` through `SafeMarkdown`                                                                                                |
 
@@ -47,14 +47,18 @@ It fetches Stories via `storyClient`, pending Sources via `sourceInboxRequests`,
 
 ### Story workspace, assignment, and Writer execution
 
-`story-workspace.tsx` (`StoryWorkspace`) is the state-aware workspace for a selected Story inspection. It renders the Story state, attached Sources with raw/prepared evidence histories, the Assignment Editor and Writer `AgentRun` audit histories, and — when an Article exists — the `ArticleReader`. It also owns the drag-and-drop Assignment flow:
+`story-workspace.tsx` (`StoryWorkspace`) is the state-aware workspace for a selected Story inspection. It renders the Story state, attached Sources with raw/prepared evidence histories, the Assignment Editor, Writer, and Director `AgentRun` audit histories, the operator review decision history, and — when an Article exists — the `ArticleReader`. It also owns the drag-and-drop Assignment flow and the review workflow:
 
 - `useDroppable` with `WRITER_ASSIGNMENT_DROP_ID` accepts a dropped Writer Profile (`isWriterDropEligible`, `resolveWriterDropSelection`).
 - The operator may request a supervised Assignment Editor suggestion (`generateAssignmentProposal`), whose proposal prefills the Assignment form but does not mutate state. The suggestion renders as an `editorialBrief`: an **Angle** section, a **Brief** section, a collapsible `<details>` **Constraints** disclosure, and an **Why this assignment** rationale `aside`.
 - Submitting the Assignment form calls `assignStory`; `onAssigned` updates the desk and inspection and refreshes.
 - Once Assigned, the **Assignment ready** summary shows the assigned Writer as an `assignedWriter` heading followed by the same `editorialBrief` (Angle, Brief, Constraints disclosure). The operator may run the Writer (`createWriterDraft`); on success `onWriterCompleted` refreshes the inspection, which now includes the Article and the `assigned` → `in_progress` transition.
+- When the Story is In Progress with an Article, a **Ready for review** card offers a **Send to Review** button that calls `submitReview` (`in_progress` → `in_review`); `onReviewStateChanged` refreshes the inspection.
+- When the Story is In Review without a successful Director run, a **Director Review** card offers a **Run Director** button (or **Retry Director** after a failed run) that calls `runDirectorReview`. The Director records an advisory `AgentRun` without mutating the Story.
+- Once a successful Director run exists, the workspace renders the recommendation (Approve / Request changes), the summary, five named checks (assignment, accuracy, headline, structure, style) with pass/needs-changes status and notes, and optional revision instructions. If no operator decision exists yet, an editable **Operator decision** form offers **Approve** and **Request changes** toggle buttons (prefilled from the recommendation but overridable), a required reason `<textarea>`, and a **Record decision** button that calls `recordReviewDecision`. The UI surfaces an inline alert when the operator decision differs from the Director recommendation. After a decision, the decision result is shown read-only.
+- `AuditPanel` and `DirectorRuns` render the Director `AgentRun` and the operator `ReviewDecision` in the audit history; the `onReviewStateChanged` callback refreshes the inspection after each review-stage mutation.
 
-`story-client.ts` creates Stories, lists them, inspects a selected Story, attaches Sources, assigns Stories, generates Assignment Editor proposals, and creates Writer drafts. `newsroom-shell.tsx` uses `actorLabel` to render operator/agent provenance and `safeUrl` to validate displayed URLs before rendering them as links.
+`story-client.ts` creates Stories, lists them, inspects a selected Story, attaches Sources, assigns Stories, generates Assignment Editor proposals, creates Writer drafts, submits reviews, runs Director reviews, and records review decisions, with strict shape validation of every returned domain object. `newsroom-shell.tsx` uses `actorLabel` to render operator/agent provenance and `safeUrl` to validate displayed URLs before rendering them as links.
 
 ### Agent Profiles workspace
 

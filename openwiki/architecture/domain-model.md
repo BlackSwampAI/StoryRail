@@ -1,7 +1,7 @@
 ---
 type: Domain Model
 title: Editorial domain model
-description: Pure domain types, validation rules, and the Story state machine that form the hexagonal core of StoryRail, with Source intake, extraction, triage, Story creation, and Source attachment contracts.
+description: Pure domain types, validation rules, and the Story state machine that form the hexagonal core of StoryRail, with Source intake, extraction, triage, Story creation, Source attachment, Assignment, AgentRun, Director review, and ReviewDecision contracts.
 tags: [domain, editorial, state-machine, source, story]
 ---
 
@@ -13,7 +13,7 @@ The domain lives in `src/domain/editorial` and is the pure, I/O-free core of Sto
 
 `src/domain/editorial/types.ts` declares a branded `Identifier<Name>` type and constructors. All entity and run identifiers are opaque string brands, not raw strings:
 
-- `SourceId`, `SourceExtractionId`, `SourceEvidencePreparationId`, `StoryId`, `ArticleId`, `ArticleRevisionId`, `AgentRunId`, `AgentProfileId`, `AssignmentId`, `OperatorId`, `TransitionId`
+- `SourceId`, `SourceExtractionId`, `SourceEvidencePreparationId`, `StoryId`, `ArticleId`, `ArticleRevisionId`, `AgentRunId`, `AgentProfileId`, `AssignmentId`, `OperatorId`, `TransitionId`, `ReviewDecisionId`
 
 Constructors (`sourceId(value)`, `storyId(value)`, etc.) cast a `string` to the branded type at the system boundary.
 
@@ -86,7 +86,7 @@ Transition rules enforced by `transitionStory`:
 
 A successful transition returns the updated `Story` and a `StoryTransitionReceipt` recording the transition id, story id, previous/next states, actor, reason, occurredAt, and resulting revision cycle. Receipts are the durable audit record of state changes and are persisted in `storyrail.story_transition_receipts` (see [database schema](database-schema.md)).
 
-The first two transitions are exercised by the application layer: `assignStory` performs `intake` → `assigned` atomically with the durable Assignment and its receipt, and `createWriterDraft` performs `assigned` → `in_progress` atomically with the first Article, Revision 1, the Writer `AgentRun`, and its receipt. Both transitions and their receipts are committed in a single database transaction by the corresponding persistence adapter.
+The first two transitions are exercised by the application layer: `assignStory` performs `intake` → `assigned` atomically with the durable Assignment and its receipt, and `createWriterDraft` performs `assigned` → `in_progress` atomically with the first Article, Revision 1, the Writer `AgentRun`, and its receipt. The review workflow adds two more: `submitStoryReview` performs `in_progress` → `in_review`, and `recordStoryReviewDecision` performs `in_review` → `approved` (incrementing nothing) or `in_review` → `changes_requested` (incrementing `revisionCycle`, bounded by `MAX_REVISION_CYCLES`). All transitions and their receipts are committed in a single database transaction by the corresponding persistence adapter.
 
 ## Source intake and canonical URLs
 
@@ -166,12 +166,37 @@ The `sourceIds` snapshot is taken server-side by `assignStory` from the authorit
 
 ## AgentRuns
 
-`agent-run-types.ts` and `agent-run.ts` model one immutable, attributable execution record. An `AgentRun` is a discriminated union over two supported role/operation pairs:
+`agent-run-types.ts` and `agent-run.ts` model one immutable, attributable execution record. An `AgentRun` is a discriminated union over three supported role/operation pairs:
 
 - `assignment_editor` + `assignment_proposal` — succeeds with an `AssignmentProposal` or fails with a `ModelFailureCode`/`retryable` pair.
 - `writer` + `article_draft` — succeeds with `articleId`/`revisionId` references or fails with the same failure shape.
+- `editor_in_chief` + `article_review` — succeeds with a `DirectorReviewRecommendation` (see [Director review](#director-review)) or fails with the same failure shape.
 
-Both carry a frozen `input` snapshot of the Story metadata, an `EvidenceReference[]` (each `{ sourceId, relevance, evidenceKind: "prepared" | "raw", evidenceId }`), `unavailableSourceIds`, and role-specific fields (Writer candidates for the editor; the full Assignment for the writer). `recordAgentRun` validates identities, the role/operation pairing, model and prompt descriptors, the input snapshot, evidence uniqueness and disjointness (selected evidence and unavailable Sources must not overlap), timestamps, and the outcome shape. For successful editor runs it re-validates the embedded proposal through `createAssignmentProposal` and requires the chosen Writer to be in `input.writerProfileIds`; for successful writer runs it requires the Assignment's Source snapshot to exactly partition into selected evidence plus unavailable Sources. The DB schema (migration `0030`, extended by `0031`) mirrors these invariants in SQL.
+All three carry a frozen `input` snapshot of the Story metadata, an `EvidenceReference[]` (each `{ sourceId, relevance, evidenceKind: "prepared" | "raw", evidenceId }`), `unavailableSourceIds`, and role-specific fields (Writer candidates for the editor; the full Assignment for the writer and Director). `recordAgentRun` validates identities, the role/operation pairing, model and prompt descriptors, the input snapshot, evidence uniqueness and disjointness (selected evidence and unavailable Sources must not overlap), timestamps, and the outcome shape. For successful editor runs it re-validates the embedded proposal through `createAssignmentProposal` and requires the chosen Writer to be in `input.writerProfileIds`; for successful writer runs it requires the Assignment's Source snapshot to exactly partition into selected evidence plus unavailable Sources; for successful Director runs it re-validates the embedded review through `createDirectorReview` and requires `input.story.state === "in_review"` plus a full Assignment, Article, and Revision snapshot (revision number 1). The DB schema (migration `0030`, extended by `0031` and `0038`) mirrors these invariants in SQL.
+
+## Director review
+
+`director-review-types.ts` and `director-review.ts` model the advisory evaluation the Director produces against one exact Article revision. A `DirectorReviewRecommendation` carries a `recommendation` (`"approve"` or `"request_changes"`), a non-empty `summary`, a `checks` record over five fixed check names (`assignment`, `accuracy`, `headline`, `structure`, `style` — each `{ status: "pass" | "needs_changes", note }`), and optional `revisionInstructions: string | null`.
+
+`createDirectorReview` validates:
+
+- A non-empty `summary` and a non-empty `note` on every check (`DIRECTOR_REVIEW_INVALID`).
+- **Consistency** — an `approve` recommendation requires all checks to pass and `revisionInstructions` to be `null`; a `request_changes` recommendation requires at least one `needs_changes` check and non-empty actionable `revisionInstructions`.
+
+The review is advisory: it is recorded as the `review` field of a succeeded Director `AgentRun` but never mutates the Article or Story. The operator may override the recommendation when recording a [ReviewDecision](#reviewdecision).
+
+## ReviewDecision
+
+`review-decision-types.ts` and `review-decision.ts` model one durable operator-owned approval or request-changes decision for an Article revision. A `ReviewDecision` carries `id` (`ReviewDecisionId`), `storyId`, `articleId`, `revisionId`, `directorRunId` (the exact succeeded Director `AgentRunId`), `decision` (`"approve"` or `"request_changes"`), a non-empty `reason`, `decidedBy` (must be an `OperatorActor`), and `decidedAt`.
+
+`createReviewDecision` validates:
+
+- Non-empty identities and `decidedAt` (`REVIEW_DECISION_IDENTITY_INVALID`).
+- A supported `decision` value (`REVIEW_DECISION_VALUE_INVALID`).
+- A non-empty `reason` (`REVIEW_DECISION_REASON_REQUIRED`).
+- That `decidedBy` is an operator with a non-empty `operatorId` (`REVIEW_DECISION_OPERATOR_REQUIRED`) — an agent cannot record a review decision.
+
+The decision is persisted atomically with the Story transition and receipt: `approve` moves the Story to `approved`; `request_changes` moves it to `changes_requested` (incrementing `revisionCycle`, bounded by `MAX_REVISION_CYCLES`). See [application workflows](application-workflows.md) for the `recordStoryReviewDecision` orchestration.
 
 ## Articles and Revisions
 
@@ -182,4 +207,4 @@ Both carry a frozen `input` snapshot of the Story metadata, an `EvidenceReferenc
 
 ## Re-export barrel
 
-`src/domain/editorial/index.ts` re-exports every module in the domain — Source intake/extraction/triage/preparation, Story creation and attachment, the state machine, Agent Profiles, Assignments, Assignment Proposals, AgentRuns, and Articles — and `src/application/index.ts` re-exports the application layer's domain-facing types so callers import from a single barrel.
+`src/domain/editorial/index.ts` re-exports every module in the domain — Source intake/extraction/triage/preparation, Story creation and attachment, the state machine, Agent Profiles, Assignments, Assignment Proposals, AgentRuns, Director review, ReviewDecisions, and Articles — and `src/application/index.ts` re-exports the application layer's domain-facing types so callers import from a single barrel.
