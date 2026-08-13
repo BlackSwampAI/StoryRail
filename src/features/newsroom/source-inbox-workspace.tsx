@@ -13,6 +13,7 @@ import type {
 } from "@/domain/editorial";
 
 import styles from "./newsroom-shell.module.css";
+import { SafeMarkdown } from "./safe-markdown";
 import {
   sourceInboxClient,
   SOURCE_INBOX_UNAVAILABLE_MESSAGE,
@@ -85,7 +86,7 @@ function PreparationRecord({
               <dd>{preparation.document.language ?? "Unavailable"}</dd>
             </div>
           </dl>
-          <h6>Clean Markdown</h6>
+          <h6>Exact prepared Markdown</h6>
           <pre className={styles.extractedContent}>{preparation.document.content}</pre>
         </>
       ) : (
@@ -127,57 +128,121 @@ function Evidence({
   preparationMessage: string | null;
   onPrepare: (extractionId: SourceExtractionId) => void;
 }>) {
-  const successfulExtractions = item.extractions.flatMap((extraction, index) =>
-    extraction.outcome === "succeeded" ? [{ extraction, attemptNumber: index + 1 }] : [],
-  );
+  const latestSuccessfulExtraction = [...item.extractions]
+    .reverse()
+    .find((extraction) => extraction.outcome === "succeeded");
+  const latestSuccessfulPreparation = [...preparations]
+    .reverse()
+    .find((preparation) => preparation.outcome === "succeeded");
+  const latestPreparation = preparations.at(-1) ?? null;
+  const latestAttemptFailed = latestPreparation?.outcome === "failed" ? latestPreparation : null;
 
   return (
     <div className={styles.persistedEvidence}>
-      <h4>Prepare evidence</h4>
-      {successfulExtractions.length === 0 ? (
-        <p className={styles.noExtraction}>No successful extraction is available to prepare.</p>
+      <h4>Prepared Evidence</h4>
+      {latestSuccessfulPreparation ? (
+        <section className={styles.preparedEvidence}>
+          <header>
+            <h5>
+              {latestSuccessfulPreparation.document.title ??
+                (latestSuccessfulExtraction?.outcome === "succeeded"
+                  ? latestSuccessfulExtraction.document.title
+                  : null) ??
+                "Prepared evidence"}
+            </h5>
+            {latestSuccessfulPreparation.document.byline ||
+            latestSuccessfulPreparation.document.publishedAt ? (
+              <p>
+                {[
+                  latestSuccessfulPreparation.document.byline,
+                  latestSuccessfulPreparation.document.publishedAt,
+                ]
+                  .filter((value) => value !== null)
+                  .join(" · ")}
+              </p>
+            ) : null}
+          </header>
+          <SafeMarkdown markdown={latestSuccessfulPreparation.document.content} />
+        </section>
       ) : (
-        successfulExtractions.map(({ extraction, attemptNumber }) => (
-          <article className={styles.persistedExtraction} key={extraction.id}>
-            <header className={styles.extractionHeader}>
-              <h5>Extraction attempt {attemptNumber}</h5>
-              <span>Successful raw extraction</span>
-            </header>
-            <p>{extraction.document.title ?? "Title unavailable"}</p>
-            <p>Targets extraction ID: {extraction.id}</p>
+        <div className={styles.noExtraction}>
+          <p>No prepared evidence is available.</p>
+          {latestSuccessfulExtraction?.outcome === "succeeded" ? (
             <button
               type="button"
               disabled={preparingExtractionId !== null}
-              onClick={() => onPrepare(extraction.id)}
+              onClick={() => onPrepare(latestSuccessfulExtraction.id)}
             >
-              {preparingExtractionId === extraction.id
+              {preparingExtractionId === latestSuccessfulExtraction.id
                 ? "Preparing evidence…"
-                : preparations.some((candidate) => candidate.extractionId === extraction.id)
-                  ? "Prepare again"
-                  : "Prepare evidence"}
+                : "Prepare evidence"}
             </button>
-          </article>
-        ))
+          ) : (
+            <p>No successful extraction is available to prepare.</p>
+          )}
+        </div>
       )}
+      {latestAttemptFailed ? (
+        <div className={styles.extractionFailure} role="alert">
+          <h5>Latest preparation attempt failed</h5>
+          <p>
+            {latestAttemptFailed.failure.code} · retryable:{" "}
+            {latestAttemptFailed.failure.retryable ? "yes" : "no"}
+          </p>
+          {latestSuccessfulPreparation ? (
+            <p>The latest successful Prepared Evidence remains primary.</p>
+          ) : null}
+        </div>
+      ) : null}
+      {latestSuccessfulPreparation && latestSuccessfulExtraction?.outcome === "succeeded" ? (
+        <button
+          type="button"
+          className={styles.secondaryAction}
+          disabled={preparingExtractionId !== null}
+          onClick={() => onPrepare(latestSuccessfulExtraction.id)}
+        >
+          {preparingExtractionId === latestSuccessfulExtraction.id
+            ? "Preparing evidence…"
+            : "Prepare again"}
+        </button>
+      ) : null}
       {preparationMessage ? (
         <p className={styles.pendingStatus} role="status">
           {preparationMessage}
         </p>
       ) : null}
-      <h4>Prepared evidence</h4>
-      {preparations.length === 0 ? (
-        <p className={styles.noExtraction}>No prepared evidence is recorded for this Source.</p>
-      ) : (
-        preparations.map((preparation, index) => (
-          <PreparationRecord
-            key={preparation.id}
-            preparation={preparation}
-            attemptNumber={index + 1}
-          />
-        ))
-      )}
       <details className={styles.rawExtractionHistory}>
-        <summary>Raw extraction history</summary>
+        <summary>
+          <span className={styles.disclosureLabel}>
+            <span className={styles.disclosureChevron} aria-hidden="true">
+              ›
+            </span>
+            Preparation history
+          </span>
+          <span>{preparations.length} attempts</span>
+        </summary>
+        {preparations.length === 0 ? (
+          <p className={styles.noExtraction}>No preparation is recorded for this Source.</p>
+        ) : (
+          preparations.map((preparation, index) => (
+            <PreparationRecord
+              key={preparation.id}
+              preparation={preparation}
+              attemptNumber={index + 1}
+            />
+          ))
+        )}
+      </details>
+      <details className={styles.rawExtractionHistory}>
+        <summary>
+          <span className={styles.disclosureLabel}>
+            <span className={styles.disclosureChevron} aria-hidden="true">
+              ›
+            </span>
+            Raw extraction history
+          </span>
+          <span>{item.extractions.length} attempts</span>
+        </summary>
         {item.extractions.length === 0 ? (
           <p className={styles.noExtraction}>No extraction is recorded for this Source.</p>
         ) : (

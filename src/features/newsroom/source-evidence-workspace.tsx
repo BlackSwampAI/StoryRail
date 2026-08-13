@@ -2,9 +2,21 @@
 
 import { useRef, useState, type FormEvent, type ReactNode } from "react";
 
-import type { EditorialActor, SourceExtraction, UrlSource } from "@/domain/editorial";
+import type {
+  EditorialActor,
+  SourceEvidencePreparation,
+  SourceExtraction,
+  UrlSource,
+} from "@/domain/editorial";
 
 import styles from "./newsroom-shell.module.css";
+import { SafeMarkdown } from "./safe-markdown";
+import {
+  sourceInboxClient,
+  SOURCE_INBOX_UNAVAILABLE_MESSAGE,
+  type SourceInboxClient,
+  type SourceInboxClientError,
+} from "./source-inbox-client";
 import {
   requestSourceEvidenceUrl,
   SOURCE_EVIDENCE_UNAVAILABLE_MESSAGE,
@@ -12,22 +24,42 @@ import {
   type SourceEvidenceApplicationError,
   type SourceEvidenceUrlResult,
 } from "./source-evidence-url-client";
+
 export interface SourceEvidenceWorkspaceProps {
   readonly requestSourceEvidence?: RequestSourceEvidenceUrl;
+  readonly inboxRequests?: SourceInboxClient;
   readonly onSourceAvailable?: (sourceId: string) => void;
   readonly onReviewInInbox?: (sourceId: string) => void;
 }
 
-function ActorValue({ actor }: Readonly<{ actor: EditorialActor }>) {
-  if (actor.type === "operator") {
-    return (
-      <>
-        operator: <span>{actor.operatorId}</span>
-      </>
-    );
-  }
+type PreparationRequestFailure =
+  | { readonly kind: "application-failure"; readonly error: SourceInboxClientError }
+  | { readonly kind: "unavailable"; readonly message: string };
 
-  return (
+type IntakeState =
+  | { readonly kind: "idle" }
+  | { readonly kind: "preserving" }
+  | {
+      readonly kind: "preparing";
+      readonly source: UrlSource;
+      readonly extraction: Extract<SourceExtraction, { readonly outcome: "succeeded" }>;
+      readonly preparations: readonly SourceEvidencePreparation[];
+    }
+  | {
+      readonly kind: "review";
+      readonly source: UrlSource;
+      readonly extraction: Extract<SourceExtraction, { readonly outcome: "succeeded" }>;
+      readonly preparations: readonly SourceEvidencePreparation[];
+      readonly requestFailure: PreparationRequestFailure | null;
+    }
+  | { readonly kind: "result"; readonly result: SourceEvidenceUrlResult };
+
+function ActorValue({ actor }: Readonly<{ actor: EditorialActor }>) {
+  return actor.type === "operator" ? (
+    <>
+      operator: <span>{actor.operatorId}</span>
+    </>
+  ) : (
     <>
       agent: <span>{actor.role}</span>, run <span>{actor.runId}</span>
     </>
@@ -43,14 +75,10 @@ function Fact({ label, children }: Readonly<{ label: string; children: ReactNode
   );
 }
 
-function Timestamp({ value }: Readonly<{ value: string }>) {
-  return <time dateTime={value}>{value}</time>;
-}
-
 function SourceFacts({ source }: Readonly<{ source: UrlSource }>) {
   return (
-    <section className={styles.receiptSection} aria-labelledby="source-receipt-heading">
-      <h3 id="source-receipt-heading">Preserved Source</h3>
+    <section className={styles.receiptSection}>
+      <h3>Preserved Source</h3>
       <dl className={styles.receiptFacts}>
         <Fact label="Source ID">{source.id}</Fact>
         <Fact label="Type">{source.type}</Fact>
@@ -60,7 +88,7 @@ function SourceFacts({ source }: Readonly<{ source: UrlSource }>) {
           <ActorValue actor={source.submittedBy} />
         </Fact>
         <Fact label="Received timestamp">
-          <Timestamp value={source.receivedAt} />
+          <time dateTime={source.receivedAt}>{source.receivedAt}</time>
         </Fact>
       </dl>
     </section>
@@ -69,51 +97,70 @@ function SourceFacts({ source }: Readonly<{ source: UrlSource }>) {
 
 function ExtractionFacts({ extraction }: Readonly<{ extraction: SourceExtraction }>) {
   return (
-    <section className={styles.receiptSection} aria-labelledby="extraction-receipt-heading">
-      <h3 id="extraction-receipt-heading">Extraction receipt</h3>
+    <section className={styles.receiptSection}>
+      <h3>Extraction record</h3>
       <dl className={styles.receiptFacts}>
         <Fact label="Extraction ID">{extraction.id}</Fact>
         <Fact label="Source ID">{extraction.sourceId}</Fact>
-        <Fact label="Extractor key">{extraction.extractor.key}</Fact>
-        <Fact label="Extractor version">{extraction.extractor.version}</Fact>
+        <Fact label="Extractor">
+          {extraction.extractor.key} / {extraction.extractor.version}
+        </Fact>
         <Fact label="Requesting actor">
           <ActorValue actor={extraction.requestedBy} />
         </Fact>
-        <Fact label="Started timestamp">
-          <Timestamp value={extraction.startedAt} />
-        </Fact>
-        <Fact label="Completed timestamp">
-          <Timestamp value={extraction.completedAt} />
-        </Fact>
+        <Fact label="Started">{extraction.startedAt}</Fact>
+        <Fact label="Completed">{extraction.completedAt}</Fact>
         <Fact label="Outcome">{extraction.outcome}</Fact>
+        {extraction.outcome === "failed" ? (
+          <>
+            <Fact label="Failure code">{extraction.failure.code}</Fact>
+            <Fact label="Retryable">{extraction.failure.retryable ? "Yes" : "No"}</Fact>
+          </>
+        ) : null}
       </dl>
-
       {extraction.outcome === "succeeded" ? (
         <>
-          <h4>Extracted document</h4>
-          <dl className={styles.receiptFacts}>
-            <Fact label="Document format">{extraction.document.format}</Fact>
-            <Fact label="Title">{extraction.document.title ?? "Unavailable"}</Fact>
-            <Fact label="Byline">{extraction.document.byline ?? "Unavailable"}</Fact>
-            <Fact label="Publication timestamp">
-              {extraction.document.publishedAt === null ? (
-                "Unavailable"
-              ) : (
-                <Timestamp value={extraction.document.publishedAt} />
-              )}
-            </Fact>
-            <Fact label="Language">{extraction.document.language ?? "Unavailable"}</Fact>
-          </dl>
-          <h4>Extracted Markdown</h4>
+          <h4>Exact raw extracted Markdown</h4>
           <pre className={styles.extractedContent}>{extraction.document.content}</pre>
         </>
-      ) : (
-        <dl className={styles.receiptFacts}>
-          <Fact label="Failure code">{extraction.failure.code}</Fact>
-          <Fact label="Retryable">{extraction.failure.retryable ? "Yes" : "No"}</Fact>
-        </dl>
-      )}
+      ) : null}
     </section>
+  );
+}
+
+function PreparationAudit({ preparation }: Readonly<{ preparation: SourceEvidencePreparation }>) {
+  return (
+    <article className={styles.auditRecord}>
+      <h5>{preparation.outcome === "succeeded" ? "Succeeded" : "Failed"}</h5>
+      <dl className={styles.receiptFacts}>
+        <Fact label="Preparation ID">{preparation.id}</Fact>
+        <Fact label="Extraction ID">{preparation.extractionId}</Fact>
+        <Fact label="Model">
+          {preparation.model.provider} / {preparation.model.model}
+        </Fact>
+        <Fact label="Preparer">
+          {preparation.preparer.key} / {preparation.preparer.version}
+        </Fact>
+        <Fact label="Requested by">
+          <ActorValue actor={preparation.requestedBy} />
+        </Fact>
+        <Fact label="Started">{preparation.startedAt}</Fact>
+        <Fact label="Completed">{preparation.completedAt}</Fact>
+        <Fact label="Outcome">{preparation.outcome}</Fact>
+        {preparation.outcome === "failed" ? (
+          <>
+            <Fact label="Failure code">{preparation.failure.code}</Fact>
+            <Fact label="Retryable">{preparation.failure.retryable ? "Yes" : "No"}</Fact>
+          </>
+        ) : null}
+      </dl>
+      {preparation.outcome === "succeeded" ? (
+        <>
+          <h5>Exact prepared Markdown</h5>
+          <pre className={styles.extractedContent}>{preparation.document.content}</pre>
+        </>
+      ) : null}
+    </article>
   );
 }
 
@@ -126,217 +173,353 @@ function ErrorFacts({ error }: Readonly<{ error: SourceEvidenceApplicationError 
   );
 }
 
-type ResultOfKind<Kind extends SourceEvidenceUrlResult["kind"]> = Extract<
-  SourceEvidenceUrlResult,
-  { readonly kind: Kind }
->;
+function BasicResult({ result }: Readonly<{ result: SourceEvidenceUrlResult }>) {
+  if (result.kind === "completed") {
+    const failed = result.extraction.outcome === "failed";
+    return (
+      <article className={`${styles.receipt} ${styles.receiptPartial}`} role="alert">
+        <p className={styles.sectionKicker}>Source preserved</p>
+        <h2>{failed ? "Extraction failed" : "Source extraction completed"}</h2>
+        <ul className={styles.completionChecklist}>
+          <li data-stage="completed">Source preserved</li>
+          <li data-stage={failed ? "failed" : "completed"}>
+            {failed ? "Extraction failed" : "Article extracted"}
+          </li>
+          <li data-stage={failed ? "skipped" : "active"}>
+            {failed ? "Evidence preparation not attempted" : "Evidence preparation pending"}
+          </li>
+        </ul>
+        {result.extraction.outcome === "failed" ? (
+          <div className={styles.extractionFailure} role="alert">
+            <h3>Extraction failure recorded</h3>
+            <p>
+              {result.extraction.failure.code} · retryable:{" "}
+              {result.extraction.failure.retryable ? "yes" : "no"}
+            </p>
+          </div>
+        ) : null}
+        <details className={styles.secondaryPanel}>
+          <summary>
+            <span>
+              <strong>Technical details</strong>
+              <small>Source and raw extraction records</small>
+            </span>
+          </summary>
+          <div className={styles.secondaryPanelContent}>
+            <SourceFacts source={result.source} />
+            <ExtractionFacts extraction={result.extraction} />
+          </div>
+        </details>
+      </article>
+    );
+  }
 
-function ValidationErrorFacts({
-  error,
-}: Readonly<{ error: ResultOfKind<"preservation-validation-failure">["error"] }>) {
-  return (
-    <>
-      <ErrorFacts error={error} />
-      {error.code === "SOURCE_URL_TOO_LONG" ? (
+  if (result.kind === "partial-completion")
+    return (
+      <article className={`${styles.receipt} ${styles.receiptPartial}`} role="alert">
+        <p className={styles.sectionKicker}>Source preserved</p>
+        <h2>Extraction could not complete</h2>
+        <ul className={styles.completionChecklist}>
+          <li data-stage="completed">Source preserved</li>
+          <li data-stage="failed">Extraction application failure</li>
+          <li data-stage="skipped">Evidence preparation not attempted</li>
+        </ul>
+        <ErrorFacts error={result.error} />
+        <details className={styles.secondaryPanel}>
+          <summary>
+            <span>
+              <strong>Technical details</strong>
+              <small>Preserved Source record</small>
+            </span>
+          </summary>
+          <div className={styles.secondaryPanelContent}>
+            <SourceFacts source={result.source} />
+          </div>
+        </details>
+      </article>
+    );
+
+  if (result.kind === "preservation-conflict")
+    return (
+      <article
+        className={`${styles.receipt} ${
+          result.error.code === "DUPLICATE_SOURCE" ? styles.receiptPartial : styles.receiptRejected
+        }`}
+        role="alert"
+      >
+        <p className={styles.sectionKicker}>Preservation conflict</p>
+        <h2>
+          {result.error.code === "DUPLICATE_SOURCE"
+            ? "Source already exists"
+            : "Source was not preserved"}
+        </h2>
+        <p>
+          {result.error.code === "DUPLICATE_SOURCE"
+            ? "No new extraction or preparation was created. Review the existing Source in the Inbox."
+            : result.error.message}
+        </p>
+        <ErrorFacts error={result.error} />
         <dl className={styles.receiptFacts}>
-          <Fact label="Maximum length">{error.maximumLength}</Fact>
-        </dl>
-      ) : null}
-    </>
-  );
-}
-
-function ConflictErrorFacts({
-  error,
-}: Readonly<{ error: ResultOfKind<"preservation-conflict">["error"] }>) {
-  return (
-    <>
-      <ErrorFacts error={error} />
-      <dl className={styles.receiptFacts}>
-        {error.code === "DUPLICATE_SOURCE" ? (
-          <>
-            <Fact label="Existing Source ID">{error.existingSourceId}</Fact>
-            <Fact label="Canonical URL">{error.canonicalUrl}</Fact>
-          </>
-        ) : (
-          <Fact label="Source ID">{error.sourceId}</Fact>
-        )}
-      </dl>
-    </>
-  );
-}
-
-function ExtractionErrorFacts({
-  error,
-}: Readonly<{ error: ResultOfKind<"partial-completion">["error"] }>) {
-  return (
-    <>
-      <ErrorFacts error={error} />
-      {error.code === "SOURCE_NOT_FOUND" || error.code === "SOURCE_EXTRACTION_ID_CONFLICT" ? (
-        <dl className={styles.receiptFacts}>
-          {error.code === "SOURCE_NOT_FOUND" ? (
-            <Fact label="Source ID">{error.sourceId}</Fact>
+          {result.error.code === "DUPLICATE_SOURCE" ? (
+            <>
+              <Fact label="Existing Source ID">{result.error.existingSourceId}</Fact>
+              <Fact label="Canonical URL">{result.error.canonicalUrl}</Fact>
+            </>
           ) : (
-            <Fact label="Extraction ID">{error.extractionId}</Fact>
+            <Fact label="Source ID">{result.error.sourceId}</Fact>
           )}
         </dl>
+      </article>
+    );
+
+  const error = result.kind === "unavailable" ? null : result.error;
+  return (
+    <article className={`${styles.receipt} ${styles.receiptRejected}`} role="alert">
+      <p className={styles.sectionKicker}>Source intake did not complete</p>
+      <h2>{result.kind === "unavailable" ? result.message : result.error.message}</h2>
+      {error ? <ErrorFacts error={error} /> : null}
+      {result.kind === "preservation-validation-failure" &&
+      result.error.code === "SOURCE_URL_TOO_LONG" ? (
+        <dl className={styles.receiptFacts}>
+          <Fact label="Maximum length">{result.error.maximumLength}</Fact>
+        </dl>
       ) : null}
-    </>
+    </article>
   );
 }
 
-function ResultReceipt({ result }: Readonly<{ result: SourceEvidenceUrlResult }>) {
-  switch (result.kind) {
-    case "completed":
-      return (
-        <article className={`${styles.receipt} ${styles.receiptCompleted}`} role="status">
-          <p className={styles.sectionKicker}>Completed operation</p>
-          <h2>
-            {result.extraction.outcome === "succeeded"
-              ? "Source preserved and extraction completed"
-              : "Source preserved; extraction failure recorded"}
-          </h2>
-          <p>Source preserved and available for editorial review in Source Inbox.</p>
-          <ul className={styles.completionChecklist}>
-            <li>Source preserved</li>
-            <li>
-              {result.extraction.outcome === "succeeded"
-                ? "Extraction completed"
-                : "Extraction failure recorded"}
-            </li>
-          </ul>
-          <details className={styles.secondaryPanel}>
-            <summary>
-              <span>
-                <strong>Operation details</strong>
-                <small>Preserved Source and extraction receipt</small>
-              </span>
-            </summary>
-            <div className={styles.secondaryPanelContent}>
-              <SourceFacts source={result.source} />
-              <ExtractionFacts extraction={result.extraction} />
-            </div>
-          </details>
-        </article>
-      );
-    case "preservation-validation-failure":
-      return (
-        <article className={`${styles.receipt} ${styles.receiptRejected}`} role="alert">
-          <p className={styles.sectionKicker}>Preservation validation failure</p>
-          <h2>Source was not preserved because URL validation failed</h2>
-          <ValidationErrorFacts error={result.error} />
-        </article>
-      );
-    case "preservation-conflict":
-      return (
-        <article
-          className={`${styles.receipt} ${
-            result.error.code === "DUPLICATE_SOURCE"
-              ? styles.receiptPartial
-              : styles.receiptRejected
-          }`}
-          role="alert"
-        >
-          <p className={styles.sectionKicker}>Preservation conflict</p>
-          <h2>
-            {result.error.code === "DUPLICATE_SOURCE"
-              ? "Source already exists and can be reused"
-              : "Source was not preserved because preservation conflicted"}
-          </h2>
-          <ConflictErrorFacts error={result.error} />
-        </article>
-      );
-    case "partial-completion":
-      return (
-        <article className={`${styles.receipt} ${styles.receiptPartial}`} role="alert">
-          <p className={styles.sectionKicker}>Partial completion</p>
-          <h2>Source preserved; extraction could not complete</h2>
-          <SourceFacts source={result.source} />
-          <section className={styles.receiptSection} aria-labelledby="partial-error-heading">
-            <h3 id="partial-error-heading">Extraction-stage application failure</h3>
-            <dl className={styles.receiptFacts}>
-              <Fact label="Stage">{result.stage}</Fact>
-            </dl>
-            <ExtractionErrorFacts error={result.error} />
-          </section>
-        </article>
-      );
-    case "interface-rejection":
-      return (
-        <article className={`${styles.receipt} ${styles.receiptRejected}`} role="alert">
-          <p className={styles.sectionKicker}>Interface-request rejection</p>
-          <h2>The Source evidence interface rejected the request</h2>
-          <ErrorFacts error={result.error} />
-        </article>
-      );
-    case "internal-failure":
-      return (
-        <article className={`${styles.receipt} ${styles.receiptRejected}`} role="alert">
-          <p className={styles.sectionKicker}>Application failure</p>
-          <h2>The Source evidence operation failed</h2>
-          <ErrorFacts error={result.error} />
-        </article>
-      );
-    case "unavailable":
-      return (
-        <article className={`${styles.receipt} ${styles.receiptRejected}`} role="alert">
-          <p className={styles.sectionKicker}>Unavailable response</p>
-          <h2>{result.message}</h2>
-        </article>
-      );
-  }
-}
-
-function reviewableSourceId(result: SourceEvidenceUrlResult): string | null {
-  if (result.kind === "completed" || result.kind === "partial-completion") {
-    return result.source.id;
-  }
-  if (result.kind === "preservation-conflict" && result.error.code === "DUPLICATE_SOURCE") {
-    return result.error.existingSourceId;
+function latestSuccessful(preparations: readonly SourceEvidencePreparation[]) {
+  for (let index = preparations.length - 1; index >= 0; index -= 1) {
+    const preparation = preparations[index];
+    if (preparation?.outcome === "succeeded") return preparation;
   }
   return null;
 }
 
+function EvidenceReview({
+  source,
+  extraction,
+  preparations,
+  requestFailure,
+}: Readonly<{
+  source: UrlSource;
+  extraction: Extract<SourceExtraction, { readonly outcome: "succeeded" }>;
+  preparations: readonly SourceEvidencePreparation[];
+  requestFailure: PreparationRequestFailure | null;
+}>) {
+  const primary = latestSuccessful(preparations);
+  const latest = preparations.at(-1) ?? null;
+  const latestDurableFailure = latest?.outcome === "failed" ? latest : null;
+
+  return (
+    <article
+      className={`${styles.receipt} ${primary ? styles.receiptCompleted : styles.receiptPartial}`}
+      role={primary ? "status" : "alert"}
+    >
+      <p className={styles.sectionKicker}>{primary ? "Source ready" : "Source preserved"}</p>
+      <h2>{primary ? "Prepared Evidence" : "Evidence preparation failed"}</h2>
+      <ul className={styles.completionChecklist}>
+        <li data-stage="completed">Source preserved</li>
+        <li data-stage="completed">Article extracted</li>
+        <li data-stage={primary ? "completed" : "failed"}>
+          {primary ? "Evidence prepared" : "Evidence preparation failed"}
+        </li>
+      </ul>
+
+      {primary ? (
+        <section className={styles.preparedEvidence} aria-labelledby="prepared-evidence-title">
+          <header>
+            <h3 id="prepared-evidence-title">
+              {primary.document.title ?? extraction.document.title ?? "Prepared evidence"}
+            </h3>
+            {primary.document.byline || primary.document.publishedAt ? (
+              <p>
+                {[primary.document.byline, primary.document.publishedAt]
+                  .filter((value) => value !== null)
+                  .join(" · ")}
+              </p>
+            ) : null}
+          </header>
+          <SafeMarkdown markdown={primary.document.content} />
+        </section>
+      ) : null}
+
+      {latestDurableFailure ? (
+        <div className={styles.extractionFailure} role="alert">
+          <h3>Latest preparation attempt failed</h3>
+          <p>
+            {latestDurableFailure.failure.code} · retryable:{" "}
+            {latestDurableFailure.failure.retryable ? "yes" : "no"}
+          </p>
+          {primary ? <p>The last successful Prepared Evidence remains available above.</p> : null}
+        </div>
+      ) : null}
+
+      {requestFailure ? (
+        <div className={styles.extractionFailure} role="alert">
+          <h3>StoryRail could not request evidence preparation</h3>
+          <p>Source and extraction are safe. No preparation record was fabricated.</p>
+          <p>
+            {requestFailure.kind === "application-failure"
+              ? `${requestFailure.error.code} · ${requestFailure.error.message}`
+              : requestFailure.message}
+          </p>
+        </div>
+      ) : null}
+
+      <div className={styles.secondaryPanels}>
+        <details className={styles.secondaryPanel}>
+          <summary>
+            <span>
+              <strong>Preparation history · {preparations.length} attempts</strong>
+              <small>Immutable prepared evidence and provenance</small>
+            </span>
+          </summary>
+          <div className={styles.secondaryPanelContent}>
+            {preparations.length === 0 ? (
+              <p>No durable preparation record is available.</p>
+            ) : (
+              preparations.map((preparation) => (
+                <PreparationAudit key={preparation.id} preparation={preparation} />
+              ))
+            )}
+          </div>
+        </details>
+        <details className={styles.secondaryPanel}>
+          <summary>
+            <span>
+              <strong>Raw extraction</strong>
+              <small>Exact immutable retrieval evidence</small>
+            </span>
+          </summary>
+          <div className={styles.secondaryPanelContent}>
+            <ExtractionFacts extraction={extraction} />
+          </div>
+        </details>
+        <details className={styles.secondaryPanel}>
+          <summary>
+            <span>
+              <strong>Technical details</strong>
+              <small>Source, extraction, and preparation records</small>
+            </span>
+          </summary>
+          <div className={styles.secondaryPanelContent}>
+            <SourceFacts source={source} />
+            <ExtractionFacts extraction={extraction} />
+            {latest ? <PreparationAudit preparation={latest} /> : null}
+          </div>
+        </details>
+      </div>
+    </article>
+  );
+}
+
+function reviewableSourceId(state: IntakeState): string | null {
+  if (state.kind !== "result") return null;
+  const { result } = state;
+  if (result.kind === "completed" || result.kind === "partial-completion") return result.source.id;
+  return result.kind === "preservation-conflict" && result.error.code === "DUPLICATE_SOURCE"
+    ? result.error.existingSourceId
+    : null;
+}
+
 export function SourceEvidenceWorkspace({
   requestSourceEvidence = requestSourceEvidenceUrl,
+  inboxRequests = sourceInboxClient,
   onSourceAvailable,
   onReviewInInbox,
 }: SourceEvidenceWorkspaceProps) {
   const [submittedUrl, setSubmittedUrl] = useState("");
-  const [pending, setPending] = useState(false);
-  const [result, setResult] = useState<SourceEvidenceUrlResult | null>(null);
+  const [state, setState] = useState<IntakeState>({ kind: "idle" });
   const pendingRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const sourceIdForReview = result === null ? null : reviewableSourceId(result);
+  const pending = state.kind === "preserving" || state.kind === "preparing";
+  const sourceIdForReview = reviewableSourceId(state);
+
+  async function prepare(
+    source: UrlSource,
+    extraction: Extract<SourceExtraction, { readonly outcome: "succeeded" }>,
+    priorPreparations: readonly SourceEvidencePreparation[],
+  ) {
+    if (pendingRef.current) return;
+    pendingRef.current = true;
+    setState({ kind: "preparing", source, extraction, preparations: priorPreparations });
+    try {
+      const result = await inboxRequests.prepareEvidence(source.id, extraction.id);
+      if (result.kind === "completed") {
+        setState({
+          kind: "review",
+          source,
+          extraction,
+          preparations: [...priorPreparations, result.value],
+          requestFailure: null,
+        });
+      } else {
+        setState({
+          kind: "review",
+          source,
+          extraction,
+          preparations: priorPreparations,
+          requestFailure: result,
+        });
+      }
+    } catch {
+      setState({
+        kind: "review",
+        source,
+        extraction,
+        preparations: priorPreparations,
+        requestFailure: { kind: "unavailable", message: SOURCE_INBOX_UNAVAILABLE_MESSAGE },
+      });
+    } finally {
+      onSourceAvailable?.(source.id);
+      pendingRef.current = false;
+    }
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
-    if (pendingRef.current) {
-      return;
-    }
-
+    if (pendingRef.current) return;
     pendingRef.current = true;
-    setPending(true);
+    setState({ kind: "preserving" });
 
     try {
-      const nextResult = await requestSourceEvidence(submittedUrl);
-      setResult(nextResult);
-      if (nextResult.kind === "completed" || nextResult.kind === "partial-completion") {
+      const result = await requestSourceEvidence(submittedUrl);
+      if (result.kind === "completed") {
         setSubmittedUrl("");
-        onSourceAvailable?.(nextResult.source.id);
-      } else if (
-        nextResult.kind === "preservation-conflict" &&
-        nextResult.error.code === "DUPLICATE_SOURCE"
-      ) {
-        onSourceAvailable?.(nextResult.error.existingSourceId);
+        if (result.extraction.outcome === "succeeded") {
+          pendingRef.current = false;
+          await prepare(result.source, result.extraction, []);
+          return;
+        }
+        setState({ kind: "result", result });
+        onSourceAvailable?.(result.source.id);
+      } else {
+        setState({ kind: "result", result });
+        if (result.kind === "partial-completion") {
+          setSubmittedUrl("");
+          onSourceAvailable?.(result.source.id);
+        } else if (
+          result.kind === "preservation-conflict" &&
+          result.error.code === "DUPLICATE_SOURCE"
+        ) {
+          onSourceAvailable?.(result.error.existingSourceId);
+        }
       }
     } catch {
-      setResult({ kind: "unavailable", message: SOURCE_EVIDENCE_UNAVAILABLE_MESSAGE });
+      setState({
+        kind: "result",
+        result: { kind: "unavailable", message: SOURCE_EVIDENCE_UNAVAILABLE_MESSAGE },
+      });
     } finally {
       pendingRef.current = false;
-      setPending(false);
     }
+  }
+
+  function reset() {
+    setState({ kind: "idle" });
+    setSubmittedUrl("");
+    inputRef.current?.focus();
   }
 
   return (
@@ -347,67 +530,114 @@ export function SourceEvidenceWorkspace({
     >
       <header className={styles.sourceWorkspaceHeader}>
         <p className={styles.sectionKicker}>Source intake</p>
-        <h1 id="source-intake-title">Preserve one URL as Source evidence</h1>
+        <h1 id="source-intake-title">Add a Source to the newsroom</h1>
         <p>
-          Submit a caller-controlled URL to preserve the Source and attempt extraction. A preserved
-          Source remains distinct from a Story and becomes available for manual editorial triage in
-          Source Inbox.
+          StoryRail preserves the URL, extracts raw evidence, and prepares it for editorial review
+          when extraction succeeds. Triage remains a separate decision in Source Inbox.
         </p>
       </header>
 
-      <form className={styles.sourceForm} onSubmit={submit} aria-busy={pending}>
-        <label htmlFor="source-url">Source URL</label>
-        <div className={styles.sourceFormControls}>
-          <input
-            ref={inputRef}
-            id="source-url"
-            type="text"
-            inputMode="url"
-            autoComplete="url"
-            spellCheck={false}
-            value={submittedUrl}
-            onChange={(event) => setSubmittedUrl(event.currentTarget.value)}
-          />
-          <button type="submit" disabled={pending}>
-            Preserve and extract
-          </button>
-        </div>
-        <p className={styles.formHint}>The server validates and canonicalizes the exact value.</p>
-        {pending ? (
-          <p className={styles.pendingStatus} role="status">
-            Preserving the Source and attempting extraction…
-          </p>
-        ) : null}
-      </form>
+      {state.kind === "idle" || state.kind === "preserving" ? (
+        <form className={styles.sourceForm} onSubmit={submit} aria-busy={pending}>
+          <label htmlFor="source-url">Source URL</label>
+          <div className={styles.sourceFormControls}>
+            <input
+              ref={inputRef}
+              id="source-url"
+              type="text"
+              inputMode="url"
+              autoComplete="url"
+              spellCheck={false}
+              value={submittedUrl}
+              onChange={(event) => setSubmittedUrl(event.currentTarget.value)}
+            />
+            <button type="submit" disabled={pending}>
+              Bring into newsroom
+            </button>
+          </div>
+          <p className={styles.formHint}>The exact submitted value is validated on the server.</p>
+          {state.kind === "preserving" ? (
+            <p className={styles.pendingStatus} role="status">
+              Preserving and extracting Source…
+            </p>
+          ) : null}
+        </form>
+      ) : null}
 
-      <div className={styles.resultRegion} aria-live="polite" aria-atomic="true">
-        {result === null ? null : (
-          <>
-            <ResultReceipt result={result} />
-            {sourceIdForReview !== null ? (
-              <div className={styles.handoffActions}>
-                <button
-                  type="button"
-                  className={styles.primaryAction}
-                  onClick={() => onReviewInInbox?.(sourceIdForReview)}
-                >
-                  Review in Source Inbox
-                </button>
-                <button
-                  type="button"
-                  className={styles.secondaryAction}
-                  onClick={() => {
-                    setResult(null);
-                    setSubmittedUrl("");
-                    inputRef.current?.focus();
-                  }}
-                >
-                  Add another Source
-                </button>
-              </div>
-            ) : null}
-          </>
-        )}
+      <div className={styles.resultRegion} aria-live="polite">
+        {state.kind === "preparing" ? (
+          <article
+            className={`${styles.receipt} ${styles.preparationActive}`}
+            role="status"
+            aria-busy="true"
+            aria-labelledby="preparation-active-heading"
+          >
+            <p className={styles.sectionKicker}>Source preserved</p>
+            <h2 id="preparation-active-heading">Preparing evidence…</h2>
+            <p className={styles.preparationWaitCopy}>
+              StoryRail is preparing the extracted article for editorial review. This can take a few
+              seconds.
+            </p>
+            <ul className={`${styles.completionChecklist} ${styles.preparationChecklist}`}>
+              <li data-stage="completed">Source preserved</li>
+              <li data-stage="completed">Article extracted</li>
+              <li className={styles.preparationActiveStage} data-stage="active">
+                Preparing evidence…
+              </li>
+            </ul>
+            <div
+              className={styles.preparationActivity}
+              data-testid="preparation-activity"
+              aria-hidden="true"
+            >
+              <span />
+            </div>
+          </article>
+        ) : null}
+        {state.kind === "review" ? <EvidenceReview {...state} /> : null}
+        {state.kind === "result" ? <BasicResult result={state.result} /> : null}
+
+        {state.kind === "review" ? (
+          <div className={styles.handoffActions}>
+            <button
+              type="button"
+              className={styles.primaryAction}
+              onClick={() => onReviewInInbox?.(state.source.id)}
+            >
+              Review in Source Inbox
+            </button>
+            <button
+              type="button"
+              className={styles.secondaryAction}
+              disabled={pending}
+              onClick={() => void prepare(state.source, state.extraction, state.preparations)}
+            >
+              {state.preparations.length === 0 ? "Retry preparation" : "Prepare again"}
+            </button>
+            <button type="button" className={styles.secondaryAction} onClick={reset}>
+              Add another Source
+            </button>
+          </div>
+        ) : sourceIdForReview !== null ? (
+          <div className={styles.handoffActions}>
+            <button
+              type="button"
+              className={styles.primaryAction}
+              onClick={() => onReviewInInbox?.(sourceIdForReview)}
+            >
+              Review in Source Inbox
+            </button>
+            <button type="button" className={styles.secondaryAction} onClick={reset}>
+              Add another Source
+            </button>
+          </div>
+        ) : state.kind === "result" ? (
+          <div className={styles.handoffActions}>
+            <button type="button" className={styles.secondaryAction} onClick={reset}>
+              Try another Source
+            </button>
+          </div>
+        ) : null}
       </div>
     </section>
   );

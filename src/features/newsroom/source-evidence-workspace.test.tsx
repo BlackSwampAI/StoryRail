@@ -1,15 +1,18 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   canonicalizeSourceUrl,
   operatorId,
+  sourceEvidencePreparationId,
   sourceExtractionId,
   sourceId,
+  type SourceEvidencePreparation,
   type SourceExtraction,
   type UrlSource,
 } from "@/domain/editorial";
 
+import type { SourceInboxClient, SourceInboxClientResult } from "./source-inbox-client";
 import type {
   RequestSourceEvidenceUrl,
   SourceEvidenceUrlResult,
@@ -39,11 +42,42 @@ const EXTRACTION = {
     format: "markdown",
     content: "# Exact persisted evidence",
     title: "Evidence title",
-    byline: null,
-    publishedAt: null,
-    language: null,
+    byline: "Raw Reporter",
+    publishedAt: "2026-08-09T09:00:00.000Z",
+    language: "en",
   },
 } satisfies SourceExtraction;
+const PREPARATION = {
+  id: sourceEvidencePreparationId("preparation-24"),
+  sourceId: SOURCE.id,
+  extractionId: EXTRACTION.id,
+  model: { provider: "openrouter", model: "example/model" },
+  preparer: { key: "storyrail_evidence_preparer", version: "1" },
+  requestedBy: ACTOR,
+  startedAt: "2026-08-10T12:00:03.000Z",
+  completedAt: "2026-08-10T12:00:04.000Z",
+  outcome: "succeeded",
+  document: {
+    format: "markdown",
+    content: "# Prepared heading\n\nReadable **evidence** with [source](https://example.com).",
+    title: "Prepared title",
+    byline: "Prepared Reporter",
+    publishedAt: "2026-08-09T09:00:00.000Z",
+    language: "en",
+  },
+} satisfies SourceEvidencePreparation;
+const FAILED_PREPARATION = {
+  id: sourceEvidencePreparationId("preparation-failed"),
+  sourceId: SOURCE.id,
+  extractionId: EXTRACTION.id,
+  model: { provider: "openrouter", model: "example/model" },
+  preparer: { key: "storyrail_evidence_preparer", version: "1" },
+  requestedBy: ACTOR,
+  startedAt: "2026-08-10T12:00:03.000Z",
+  completedAt: "2026-08-10T12:00:04.000Z",
+  outcome: "failed",
+  failure: { code: "MODEL_OUTPUT_INVALID", retryable: true },
+} satisfies SourceEvidencePreparation;
 const COMPLETED = {
   kind: "completed",
   source: SOURCE,
@@ -54,51 +88,257 @@ function request(result: SourceEvidenceUrlResult = COMPLETED) {
   return vi.fn<RequestSourceEvidenceUrl>(async () => result);
 }
 
+function inbox(
+  prepareResult: SourceInboxClientResult<SourceEvidencePreparation> = {
+    kind: "completed",
+    value: PREPARATION,
+  },
+): SourceInboxClient {
+  return {
+    listPendingSources: vi.fn<SourceInboxClient["listPendingSources"]>(async () => ({
+      kind: "completed",
+      value: [],
+    })),
+    recordTriageDecision: vi.fn<SourceInboxClient["recordTriageDecision"]>(async () => ({
+      kind: "unavailable",
+      message: "The Source Inbox request could not be completed.",
+    })),
+    prepareEvidence: vi.fn<SourceInboxClient["prepareEvidence"]>(async () => prepareResult),
+  };
+}
+
+function submit() {
+  fireEvent.change(screen.getByRole("textbox", { name: "Source URL" }), {
+    target: { value: "  exact caller URL  " },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Bring into newsroom" }));
+}
+
 describe("SourceEvidenceWorkspace", () => {
-  it("preserves the exact URL, renders durable receipts, and directs the operator to Source Inbox", async () => {
+  it("composes preserve/extract and preparation once, then makes Prepared Evidence primary", async () => {
     const perform = request();
+    const inboxRequests = inbox();
     const onSourceAvailable = vi.fn();
     const onReviewInInbox = vi.fn();
     render(
       <SourceEvidenceWorkspace
         requestSourceEvidence={perform}
+        inboxRequests={inboxRequests}
         onSourceAvailable={onSourceAvailable}
         onReviewInInbox={onReviewInInbox}
       />,
     );
-    const input = screen.getByRole("textbox", { name: "Source URL" });
-    fireEvent.change(input, { target: { value: "  exact caller URL  " } });
-    fireEvent.click(screen.getByRole("button", { name: "Preserve and extract" }));
+    submit();
 
-    expect(await screen.findByText("Source preserved")).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Prepared Evidence" })).toBeVisible();
+    expect(perform).toHaveBeenCalledOnce();
     expect(perform).toHaveBeenCalledWith("  exact caller URL  ");
-    expect(screen.getByText(/available for editorial review in Source Inbox/i)).toBeVisible();
-    expect(input).toHaveValue("");
+    expect(inboxRequests.prepareEvidence).toHaveBeenCalledOnce();
+    expect(inboxRequests.prepareEvidence).toHaveBeenCalledWith(SOURCE.id, EXTRACTION.id);
+    expect(screen.getByRole("heading", { name: "Prepared title" })).toBeVisible();
+    const completedChecklist = screen
+      .getByRole("heading", { name: "Prepared Evidence" })
+      .closest("article");
+    expect(
+      within(completedChecklist as HTMLElement).getByText("Source preserved", {
+        selector: 'li[data-stage="completed"]',
+      }),
+    ).toBeVisible();
+    expect(
+      within(completedChecklist as HTMLElement).getByText("Article extracted", {
+        selector: 'li[data-stage="completed"]',
+      }),
+    ).toBeVisible();
+    expect(
+      within(completedChecklist as HTMLElement).getByText("Evidence prepared", {
+        selector: 'li[data-stage="completed"]',
+      }),
+    ).toBeVisible();
+    expect(screen.getByText("evidence")).toHaveProperty("tagName", "STRONG");
+    expect(screen.getByRole("link", { name: "source" })).toHaveAttribute(
+      "href",
+      "https://example.com/",
+    );
+    expect(screen.getByRole("button", { name: "Review in Source Inbox" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Add another Source" })).toBeVisible();
+    expect(screen.queryByRole("textbox", { name: "Source URL" })).not.toBeInTheDocument();
     expect(onSourceAvailable).toHaveBeenCalledWith(SOURCE.id);
-    expect(onReviewInInbox).not.toHaveBeenCalled();
+    expect(inboxRequests.recordTriageDecision).not.toHaveBeenCalled();
+
     fireEvent.click(screen.getByRole("button", { name: "Review in Source Inbox" }));
     expect(onReviewInInbox).toHaveBeenCalledWith(SOURCE.id);
-    expect(screen.queryByText("Create Story from Source")).not.toBeInTheDocument();
   });
 
-  it("returns to a clean intake form when the operator chooses Add another Source", async () => {
-    render(<SourceEvidenceWorkspace requestSourceEvidence={request()} />);
-    fireEvent.change(screen.getByRole("textbox", { name: "Source URL" }), {
-      target: { value: SOURCE.submittedUrl },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Preserve and extract" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Add another Source" }));
-    expect(screen.getByRole("textbox", { name: "Source URL" })).toHaveValue("");
+  it("announces the real preserve/extract and preparation request boundaries", async () => {
+    let resolveIntake!: (result: SourceEvidenceUrlResult) => void;
+    let resolvePreparation!: (result: SourceInboxClientResult<SourceEvidencePreparation>) => void;
+    const perform = vi.fn<RequestSourceEvidenceUrl>(
+      () =>
+        new Promise((resolve) => {
+          resolveIntake = resolve;
+        }),
+    );
+    const inboxRequests = inbox();
+    inboxRequests.prepareEvidence = vi.fn<SourceInboxClient["prepareEvidence"]>(
+      () =>
+        new Promise((resolve) => {
+          resolvePreparation = resolve;
+        }),
+    );
+    render(
+      <SourceEvidenceWorkspace requestSourceEvidence={perform} inboxRequests={inboxRequests} />,
+    );
+    submit();
+
+    expect(screen.getByText("Preserving and extracting Source…")).toBeVisible();
+    await act(async () => resolveIntake(COMPLETED));
+    const activeHeading = await screen.findByRole("heading", { name: "Preparing evidence…" });
+    const activeStatus = activeHeading.closest("article");
+    expect(activeStatus).toHaveAttribute("aria-busy", "true");
+    expect(
+      within(activeStatus as HTMLElement).getByText(/This can take a few seconds/),
+    ).toBeVisible();
+    const completedStages = within(activeStatus as HTMLElement)
+      .getAllByRole("listitem")
+      .filter((item) => item.dataset.stage === "completed");
+    expect(completedStages).toHaveLength(2);
+    expect(completedStages[0]).toHaveTextContent("Source preserved");
+    expect(completedStages[1]).toHaveTextContent("Article extracted");
+    const activeStage = within(activeStatus as HTMLElement)
+      .getAllByRole("listitem")
+      .find((item) => item.dataset.stage === "active");
+    expect(activeStage).toHaveTextContent("Preparing evidence…");
+    expect(activeStage).not.toHaveAttribute("data-stage", "completed");
+    expect(screen.getByTestId("preparation-activity")).toHaveAttribute("aria-hidden", "true");
     expect(
       screen.queryByRole("button", { name: "Review in Source Inbox" }),
     ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add another Source" })).not.toBeInTheDocument();
+    await act(async () => resolvePreparation({ kind: "completed", value: PREPARATION }));
+    expect(await screen.findByRole("heading", { name: "Prepared Evidence" })).toBeVisible();
+    expect(screen.queryByTestId("preparation-activity")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review in Source Inbox" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Add another Source" })).toBeVisible();
   });
 
-  it("refreshes authoritative inbox state for a duplicate without inventing a local pending item", async () => {
+  it("preserves Source and extraction truth when a durable preparation fails", async () => {
+    const inboxRequests = inbox({ kind: "completed", value: FAILED_PREPARATION });
+    render(
+      <SourceEvidenceWorkspace requestSourceEvidence={request()} inboxRequests={inboxRequests} />,
+    );
+    submit();
+
+    expect(
+      await screen.findByRole("heading", { name: "Evidence preparation failed" }),
+    ).toBeVisible();
+    expect(screen.getAllByText("Source preserved").length).toBeGreaterThan(0);
+    expect(screen.getByText("Article extracted")).toBeVisible();
+    const failedStage = screen.getByText("Evidence preparation failed", {
+      selector: "li",
+    });
+    expect(failedStage).toHaveAttribute("data-stage", "failed");
+    expect(failedStage).not.toHaveAttribute("data-stage", "completed");
+    const latestFailure = screen
+      .getByRole("heading", { name: "Latest preparation attempt failed" })
+      .closest("div");
+    expect(within(latestFailure as HTMLElement).getByText(/MODEL_OUTPUT_INVALID/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Prepare again" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Review in Source Inbox" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Add another Source" })).toBeVisible();
+    expect(screen.queryByTestId("preparation-activity")).not.toBeInTheDocument();
+    expect(inboxRequests.prepareEvidence).toHaveBeenCalledOnce();
+  });
+
+  it("distinguishes an unavailable preparation request from a durable failed preparation", async () => {
+    const inboxRequests = inbox({
+      kind: "unavailable",
+      message: "The Source Inbox request could not be completed.",
+    });
+    render(
+      <SourceEvidenceWorkspace requestSourceEvidence={request()} inboxRequests={inboxRequests} />,
+    );
+    submit();
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "StoryRail could not request evidence preparation",
+      }),
+    ).toBeVisible();
+    expect(screen.getByText(/Source and extraction are safe/)).toBeVisible();
+    expect(screen.getByText("No durable preparation record is available.")).not.toBeVisible();
+    expect(screen.getByRole("button", { name: "Retry preparation" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Review in Source Inbox" })).toBeVisible();
+  });
+
+  it("keeps Source and extraction acknowledged after a preparation application failure", async () => {
+    const inboxRequests = inbox({
+      kind: "application-failure",
+      error: { code: "SOURCE_EXTRACTION_NOT_PREPARABLE", message: "Cannot prepare." },
+    });
+    render(
+      <SourceEvidenceWorkspace requestSourceEvidence={request()} inboxRequests={inboxRequests} />,
+    );
+    submit();
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "StoryRail could not request evidence preparation",
+      }),
+    ).toBeVisible();
+    expect(screen.getByText(/SOURCE_EXTRACTION_NOT_PREPARABLE/)).toBeVisible();
+    expect(screen.getByText(/Source and extraction are safe/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Retry preparation" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Review in Source Inbox" })).toBeVisible();
+  });
+
+  it("does not prepare after a durable extraction failure", async () => {
+    const failedExtraction: SourceExtraction = {
+      id: sourceExtractionId("failed-extraction-24"),
+      sourceId: SOURCE.id,
+      extractor: { key: "controlled", version: "1" },
+      requestedBy: ACTOR,
+      startedAt: "2026-08-10T12:00:01.000Z",
+      completedAt: "2026-08-10T12:00:02.000Z",
+      outcome: "failed",
+      failure: { code: "RETRIEVAL_FAILED", retryable: true },
+    };
+    const inboxRequests = inbox();
+    render(
+      <SourceEvidenceWorkspace
+        requestSourceEvidence={request({
+          kind: "completed",
+          source: SOURCE,
+          extraction: failedExtraction,
+        })}
+        inboxRequests={inboxRequests}
+      />,
+    );
+    submit();
+
+    expect(await screen.findByRole("heading", { name: "Extraction failed" })).toBeVisible();
+    const extractionFailedStage = screen.getByText("Extraction failed", { selector: "li" });
+    expect(extractionFailedStage).toHaveAttribute("data-stage", "failed");
+    expect(extractionFailedStage).not.toHaveAttribute("data-stage", "completed");
+    const skippedStage = screen.getByText("Evidence preparation not attempted", {
+      selector: "li",
+    });
+    expect(skippedStage).toHaveAttribute("data-stage", "skipped");
+    expect(skippedStage).not.toHaveAttribute("data-stage", "completed");
+    const extractionFailure = screen
+      .getByRole("heading", { name: "Extraction failure recorded" })
+      .closest("div");
+    expect(within(extractionFailure as HTMLElement).getByText(/RETRIEVAL_FAILED/)).toBeVisible();
+    expect(inboxRequests.prepareEvidence).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Review in Source Inbox" })).toBeVisible();
+  });
+
+  it("keeps duplicate intake distinct and performs no preparation", async () => {
+    const inboxRequests = inbox();
     const onSourceAvailable = vi.fn();
     render(
       <SourceEvidenceWorkspace
         onSourceAvailable={onSourceAvailable}
+        inboxRequests={inboxRequests}
         requestSourceEvidence={request({
           kind: "preservation-conflict",
           error: {
@@ -110,24 +350,48 @@ describe("SourceEvidenceWorkspace", () => {
         })}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Preserve and extract" }));
-    expect(await screen.findByText(/Source already exists/i)).toBeVisible();
-    expect(onSourceAvailable).toHaveBeenCalledOnce();
+    submit();
+
+    expect(await screen.findByRole("heading", { name: "Source already exists" })).toBeVisible();
+    expect(screen.getByText(/No new extraction or preparation was created/)).toBeVisible();
+    expect(inboxRequests.prepareEvidence).not.toHaveBeenCalled();
+    expect(onSourceAvailable).toHaveBeenCalledWith(SOURCE.id);
+    expect(screen.getByRole("button", { name: "Review in Source Inbox" })).toBeVisible();
   });
 
-  it("does not refresh the inbox for validation failure", async () => {
-    const onSourceAvailable = vi.fn();
+  it("prepares the same intake extraction again and retains both immutable attempts", async () => {
+    const second = {
+      ...PREPARATION,
+      id: sourceEvidencePreparationId("preparation-25"),
+      document: { ...PREPARATION.document, title: "Newest prepared title" },
+    } satisfies SourceEvidencePreparation;
+    const inboxRequests = inbox();
+    vi.mocked(inboxRequests.prepareEvidence)
+      .mockResolvedValueOnce({ kind: "completed", value: PREPARATION })
+      .mockResolvedValueOnce({ kind: "completed", value: second });
     render(
-      <SourceEvidenceWorkspace
-        onSourceAvailable={onSourceAvailable}
-        requestSourceEvidence={request({
-          kind: "preservation-validation-failure",
-          error: { code: "SOURCE_URL_REQUIRED", message: "Required." },
-        })}
-      />,
+      <SourceEvidenceWorkspace requestSourceEvidence={request()} inboxRequests={inboxRequests} />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Preserve and extract" }));
-    await waitFor(() => expect(screen.getByRole("alert")).toBeVisible());
-    expect(onSourceAvailable).not.toHaveBeenCalled();
+    submit();
+    fireEvent.click(await screen.findByRole("button", { name: "Prepare again" }));
+
+    expect(await screen.findByRole("heading", { name: "Newest prepared title" })).toBeVisible();
+    expect(inboxRequests.prepareEvidence).toHaveBeenNthCalledWith(2, SOURCE.id, EXTRACTION.id);
+    const history = screen.getByText("Preparation history · 2 attempts").closest("details");
+    expect(history).not.toHaveAttribute("open");
+    fireEvent.click(within(history as HTMLElement).getByText("Preparation history · 2 attempts"));
+    await waitFor(() =>
+      expect(within(history as HTMLElement).getAllByText("Succeeded")).toHaveLength(2),
+    );
+  });
+
+  it("returns to a clean intake form when the operator chooses Add another Source", async () => {
+    render(<SourceEvidenceWorkspace requestSourceEvidence={request()} inboxRequests={inbox()} />);
+    submit();
+    fireEvent.click(await screen.findByRole("button", { name: "Add another Source" }));
+    expect(screen.getByRole("textbox", { name: "Source URL" })).toHaveValue("");
+    expect(
+      screen.queryByRole("button", { name: "Review in Source Inbox" }),
+    ).not.toBeInTheDocument();
   });
 });

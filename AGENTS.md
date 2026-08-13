@@ -47,6 +47,6 @@ This repository has a generated `openwiki/` evidence index. It is optional just-
 - Treat source code and tests as authoritative. A brief's unknowns and review items are verification gaps, not automatic requirements.
 - Prefer the narrowest quiet validation that proves the changed behavior. Preserve complete failure output.
 
-The `openwiki/` directory is generated documentation. Refresh it with OpenWiki when appropriate; do not hand-edit generated pages unless explicitly asked, and prefer updating source code/docs before regeneration.
+The automated OpenWiki GitHub Actions workflow refreshes the repository wiki after changes land on `main`. Do not hand-edit generated OpenWiki pages unless explicitly asked; prefer updating source code/docs and letting OpenWiki regenerate.
 
 <!-- OPENWIKI:END -->

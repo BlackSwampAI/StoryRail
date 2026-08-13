@@ -9,7 +9,7 @@ tags: [application, workflows, use-cases, ports]
 
 The application layer (`src/application`) contains the use-case workflows that orchestrate domain rules with repository ports. Each workflow is a factory function (`create*`) that accepts dependencies and returns the workflow function. Dependencies include repository ports, id factories, and a `now` clock, making workflows injectable and testable without a real database or network.
 
-`src/application/index.ts` also exposes the structured-model boundary and Source evidence-preparation workflow alongside the Source, triage, and Story modules described below.
+`src/application/index.ts` also exposes the structured-model boundary, Source evidence-preparation, Agent Profile, Assignment, Assignment Proposal, AgentRun, and Writer draft workflows alongside the Source, triage, and Story modules described below.
 
 ## Source-evidence workflows
 
@@ -32,13 +32,54 @@ The application layer (`src/application`) contains the use-case workflows that o
 
 ## Story read models
 
-- **`story-inspection`** (`src/application/story-inspection/`) — defines the `StoryInspectionRepository.inspect` port returning `InspectStoryResult`. `StoryInspection` assembles a `Story` with its `StoryInspectionSource[]`, each containing the attachment, the `UrlSource`, and the Source's extraction attempts.
+- **`story-inspection`** (`src/application/story-inspection/`) — defines the `StoryInspectionRepository.inspect` port returning `InspectStoryResult`. `StoryInspection` assembles a `Story` with its `StoryInspectionSource[]` (each containing the attachment, the `UrlSource`, and the Source's extraction and preparation attempts), the optional `{ assignment, writerProfile }` pair, the `StoryTransitionReceipt[]` history, the `AgentRun[]` history, and the optional `{ article, revisions }` pair. Inspection is the read model the Assignment and Writer workflows use to snapshot evidence and check preconditions.
 - **`story-listing`** (`src/application/story-listing/`) — defines the `StoryListingRepository.list` port returning `readonly StoryListItem[]` where each item is `{ story, sourceCount }`.
 - **`source-inbox`** (`src/application/source-inbox/`) — defines the `SourceInboxRepository.listPending` port returning `readonly SourceInboxItem[]` where each item is `{ source, extractions }`.
 
 ## Source triage workflow
 
 `src/application/source-triage/record-source-triage-decision.ts` — calls the domain `decideSourceTriage` (reason/story consistency validation) and, on success, records via `SourceTriageDecisionRepository.record`. The repository port (`source-triage-repository.ts`) also defines persistence errors: `SOURCE_NOT_FOUND`, `SOURCE_ALREADY_ATTACHED` (an already-attached Source cannot be skipped), `STORY_SOURCE_ATTACHMENT_NOT_FOUND` (a `new_story`/`existing_story` decision requires a pre-existing attachment), and `SOURCE_TRIAGE_CONFLICT` (a different final decision already exists).
+
+## Agent Profile workflow
+
+`src/application/agent-profiles/create-custom-writer-profile.ts` — `createCreateCustomWriterProfile` allocates an `AgentProfileId`, calls the domain `createAgentProfile` with `role: "writer"` and `builtIn: false`, and persists via `AgentProfileRepository.append`. The port (`agent-profile-repository.ts`) also exposes `findById` and `list` and defines `AGENT_PROFILE_ID_CONFLICT`. The built-in profiles are seeded by migration `0027`; only custom Writers are created at runtime.
+
+## Assignment workflow
+
+`src/application/assignments/assign-story.ts` — `createAssignStory` is the authoritative manual Assignment boundary. It:
+
+1. Loads the Story (`STORY_NOT_FOUND`) and the selected Writer Profile (`AGENT_PROFILE_NOT_FOUND`, `AGENT_PROFILE_NOT_WRITER`).
+2. Inspects the Story to snapshot every attached Source identity server-side.
+3. Calls the domain `createAssignment` (angle/brief/constraints/actor/duplicate validation).
+4. Calls `transitionStory` to move `intake` → `assigned` (`INVALID_TRANSITION`, `OPERATOR_REQUIRED`, `REVISION_LIMIT_REACHED`).
+5. Persists the Assignment, updated Story, and transition receipt atomically through `AssignmentPersistence.persist`, which surfaces `STORY_ASSIGNMENT_CONFLICT` (the Story was already assigned or its state changed concurrently).
+
+The operator actor is derived from `STORYRAIL_OPERATOR_ID` by the HTTP handler. An Assignment Editor agent is also permitted by the domain (`ASSIGNMENT_ACTOR_NOT_ALLOWED` allows `operator` or `assignment_editor`), but the current HTTP path always attributes the manual Assignment to the operator.
+
+## Assignment Proposal workflow
+
+`src/application/assignment-proposals/generate-assignment-proposal.ts` — `createGenerateAssignmentProposal` produces one supervised `AssignmentProposalAgentRun` for an Intake Story. It:
+
+1. Inspects the Story (`STORY_NOT_FOUND`); rejects unless `story.state === "intake"` and there is no existing Assignment (`ASSIGNMENT_PROPOSAL_NOT_ALLOWED`).
+2. Loads the built-in Assignment Editor Profile (`ASSIGNMENT_EDITOR_PROFILE_UNAVAILABLE`) and at least one Writer Profile (`WRITER_PROFILE_REQUIRED`).
+3. Selects, for each attached Source, the latest successful Prepared Evidence (falling back to the latest successful raw extraction) and collects `unavailableSourceIds` for Sources with neither; requires at least one selected (`ASSIGNMENT_EDITOR_EVIDENCE_REQUIRED`).
+4. Calls the provider-neutral `StructuredModel.generateStructured` with a frozen system prompt (`ASSIGNMENT_EDITOR_PROMPT = { key: "storyrail_assignment_editor", version: "1" }`) and a Zod schema, then validates the parsed output against `createAssignmentProposal` and confirms the chosen Writer is in the candidate set.
+5. Builds a candidate `AgentRun` (succeeded with the proposal, or failed with `MODEL_OUTPUT_INVALID` / the model failure) and appends it via `AgentRunRepository.append` (`AGENT_RUN_ID_CONFLICT`).
+
+The proposal is a suggestion only: it prefills the manual Assignment form but cannot create an Assignment or transition Story state.
+
+## Writer draft workflow
+
+`src/application/writer-drafts/create-writer-draft.ts` — `createWriterDraft` runs the assigned Writer against an Assigned Story to produce the first Article. It:
+
+1. Inspects the Story (`STORY_NOT_FOUND`); rejects unless `story.state === "assigned"` (`WRITER_DRAFT_NOT_ALLOWED`), a durable Assignment exists (`ASSIGNMENT_REQUIRED`), and no Article exists yet (`ARTICLE_ALREADY_EXISTS`).
+2. Confirms the assigned Writer Profile exists and matches the Assignment (`WRITER_PROFILE_UNAVAILABLE`).
+3. Selects evidence from the Assignment's `sourceIds` (latest successful Prepared Evidence, else latest successful raw extraction, else unavailable) and requires at least one (`WRITER_EVIDENCE_REQUIRED`).
+4. Resolves the executable model: a Profile OpenRouter model wins, otherwise `STORYRAIL_WRITER_MODEL` is required (`WRITER_MODEL_UNSUPPORTED`, `WRITER_MODEL_UNAVAILABLE`).
+5. Calls `StructuredModel.generateStructured` with the frozen `WRITER_DRAFT_PROMPT = { key: "storyrail_writer_draft", version: "1" }` and a `headline`/`dek`/`bodyMarkdown` Zod schema.
+6. On failure or invalid output, appends a failed Writer `AgentRun` and returns `{ ok: true, run }` (the failed run is still durable history). On success, builds the `Article` and `ArticleRevision` (revision number 1) via the domain constructors, transitions the Story `assigned` → `in_progress`, and persists the run, Article, revision, updated Story, and receipt atomically through `WriterDraftPersistence.persist` (`WRITER_DRAFT_CONFLICT`).
+
+If the application produces invalid domain state internally it throws (a programming error) rather than returning a partial result. The Writer cannot browse, use tools, revise, or send work to review.
 
 ## Repository ports
 
@@ -53,5 +94,9 @@ Persistence contracts are expressed as interfaces in the application layer and i
 | `StoryListingRepository`                             | `src/application/story-listing/story-listing-repository.ts`                      | `src/adapters/story-listing/postgres-story-listing-repository.ts`                      |
 | `SourceInboxRepository`                              | `src/application/source-inbox/source-inbox-repository.ts`                        | `src/adapters/source-inbox/postgres-source-inbox-repository.ts`                        |
 | `SourceTriageDecisionRepository`                     | `src/application/source-triage/source-triage-repository.ts`                      | `src/adapters/source-triage-persistence/postgres-source-triage-decision-repository.ts` |
+| `AgentProfileRepository`                             | `src/application/agent-profiles/agent-profile-repository.ts`                     | `src/adapters/agent-profile-persistence/postgres-agent-profile-repository.ts`          |
+| `AssignmentPersistence`                              | `src/application/assignments/assignment-persistence.ts`                          | `src/adapters/assignment-persistence/postgres-assignment-persistence.ts`               |
+| `AgentRunRepository`                                 | `src/application/agent-runs/agent-run-repository.ts`                             | `src/adapters/agent-run-persistence/postgres-agent-run-repository.ts`                  |
+| `WriterDraftPersistence`                             | `src/application/writer-drafts/writer-draft-persistence.ts`                      | `src/adapters/article-persistence/postgres-writer-draft-persistence.ts`                |
 
-The `*.contract.ts` files alongside several ports (`source-repositories.contract.ts`, `story-inspection-repository.contract.ts`, etc.) are shared harnesses that verify any repository implementation satisfies the same behavior contract. The PostgreSQL adapter tests run these contracts against real PostgreSQL in the integration suite.
+The `*.contract.ts` files alongside several ports (`source-repositories.contract.ts`, `story-inspection-repository.contract.ts`, `agent-run-repository.contract.ts`, etc.) are shared harnesses that verify any repository implementation satisfies the same behavior contract. The PostgreSQL adapter tests run these contracts against real PostgreSQL in the integration suite.

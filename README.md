@@ -36,10 +36,11 @@ Small teams need to preserve provenance, make automation inspectable, and keep e
 flowchart LR
     URL[Submitted URL] --> FC[Firecrawl extraction]
     FC --> RAW[Immutable raw evidence]
-    RAW --> INBOX[Source Inbox]
-    INBOX -. optional .-> PREP[Prepared Evidence]
-    PREP --> DECIDE{Editorial decision}
-    INBOX --> DECIDE
+    RAW -->|successful extraction| PREP[Automatic Prepared Evidence]
+    RAW -->|failed extraction| INBOX[Source Inbox]
+    PREP --> REVIEW[Evidence review]
+    REVIEW --> INBOX
+    INBOX --> DECIDE{Editorial decision}
     DECIDE -->|New Story| NEW[Persisted Story + Source]
     DECIDE -->|Existing Story| EXISTING[Attach Source to Story]
     DECIDE -->|Skip| SKIP[Durable skip decision]
@@ -61,7 +62,7 @@ Durable Profiles configure the Assignment Editor, Writer, and Director/editor-in
 - Immutable, append-ordered raw extraction history, including durable failures and retries.
 - A PostgreSQL-backed Source Inbox with durable **New Story**, **Existing Story**, and **Skip** triage.
 - Persistent Story queues, Story creation, Source-to-Story attachments, and Story inspection.
-- Manual Prepared Evidence generation through a provider-neutral model boundary, LangChain, and OpenRouter.
+- Automatic Prepared Evidence generation after successful new extraction, plus explicit append-only preparation retries through a provider-neutral model boundary, LangChain, and OpenRouter.
 - Immutable successful and failed preparation history alongside the original raw evidence.
 - Reconstruction of raw and prepared evidence from PostgreSQL after triage or browser reload.
 - Immutable, PostgreSQL-backed Agent Profiles with built-in Assignment Editor, General Writer, and Director configurations plus custom Writer creation and optional provider-neutral model selection.

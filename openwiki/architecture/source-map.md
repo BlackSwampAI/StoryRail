@@ -21,7 +21,7 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 | `eslint.config.mjs`                                    | next core-web-vitals + TypeScript configs; ignores build/cache output                                                |
 | `.prettierrc.json`, `.prettierignore`, `.editorconfig` | formatting                                                                                                           |
 | `.nvmrc`                                               | Node 24.18.0                                                                                                         |
-| `.env.example`                                         | Database, operator, Firecrawl, OpenRouter, and evidence-preparation model variable names                             |
+| `.env.example`                                         | Database, operator, Firecrawl, OpenRouter, evidence-preparation, assignment-editor, and writer model variable names  |
 | `.gitignore`                                           | env, node_modules, build output, caches                                                                              |
 | `AGENTS.md`, `CLAUDE.md`                               | agent operating instructions (do not edit during wiki runs)                                                          |
 
@@ -39,6 +39,11 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `source-evidence-preparation-types.ts`, `source-evidence-preparation.ts` — immutable Prepared Evidence attempts
 - `story-creation-types.ts`, `story-creation.ts` — `createStory`
 - `story-source-attachment-types.ts`, `story-source-attachment.ts` — `attachSourceToStory`
+- `agent-profile-types.ts`, `agent-profile.ts` — `createAgentProfile`, built-in/custom Writer profiles
+- `assignment-types.ts`, `assignment.ts` — `createAssignment`
+- `assignment-proposal-types.ts`, `assignment-proposal.ts` — `createAssignmentProposal`
+- `agent-run-types.ts`, `agent-run.ts` — `recordAgentRun` (Assignment Editor and Writer run validation)
+- `article-types.ts`, `article.ts` — `createArticle`, `createFirstArticleRevision`
 - `index.ts` — barrel re-export
 
 ### `src/application` — use-case workflows + repository ports
@@ -56,6 +61,11 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `story-source-persistence/` — `story-source-attachment-repository.ts` (port), `.contract.ts`
 - `story-inspection/` — `story-inspection-repository.ts` (port), `.contract.ts`
 - `story-listing/` — `story-listing-repository.ts` (port), `.contract.ts`
+- `agent-profiles/` — `agent-profile-repository.ts` (port), `create-custom-writer-profile.ts`, `.contract.ts`
+- `assignments/` — `assign-story.ts`, `assignment-persistence.ts`
+- `agent-runs/` — `agent-run-repository.ts` (port), `.contract.ts`
+- `assignment-proposals/` — `generate-assignment-proposal.ts`
+- `writer-drafts/` — `create-writer-draft.ts`, `writer-draft-persistence.ts`
 - `index.ts` — barrel re-export
 
 ### `src/adapters` — PostgreSQL + Firecrawl implementations
@@ -66,6 +76,10 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `source-triage-persistence/` — `postgres-source-triage-decision-repository.ts`
 - `source-evidence-preparation-persistence/` — append-only PostgreSQL preparation repository and decoder
 - `model/` — LangChain-backed OpenRouter structured-model adapter
+- `agent-profile-persistence/` — `postgres-agent-profile-repository.ts`, `postgres-agent-profile-decoder.ts`
+- `assignment-persistence/` — `postgres-assignment-persistence.ts`, `postgres-assignment-decoder.ts`
+- `agent-run-persistence/` — `postgres-agent-run-repository.ts`, `postgres-agent-run-decoder.ts`
+- `article-persistence/` — `postgres-writer-draft-persistence.ts`, `postgres-article-decoder.ts`
 - `story-persistence/` — `postgres-story-repository.ts`
 - `story-source-persistence/` — `postgres-story-source-attachment-repository.ts`
 - `story-inspection/` — `postgres-story-inspection-repository.ts`
@@ -78,6 +92,8 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `source-evidence-runtime.ts` — `createSourceEvidenceRuntime` / `...FromEnvironment`
 - `evidence-preparation-runtime.ts` and configuration — explicit OpenRouter preparation composition
 - `story-runtime.ts` — `createStoryRuntime` / `...FromEnvironment`
+- `assignment-editor-configuration.ts`, `assignment-editor-runtime.ts` — supervised Assignment Editor proposal runtime
+- `writer-configuration.ts`, `writer-runtime.ts` — supervised Writer draft runtime and model resolution
 - `index.ts` — barrel re-export
 
 ### `src/server` — lazy runtime providers
@@ -85,6 +101,8 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `source-evidence-runtime-provider.ts`
 - `evidence-preparation-runtime-provider.ts`
 - `story-runtime-provider.ts`
+- `assignment-editor-runtime-provider.ts`
+- `writer-runtime-provider.ts`
 
 ### `src/interfaces/http` — HTTP handlers
 
@@ -94,23 +112,36 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `list-source-inbox-handler.ts`
 - `record-source-triage-decision-handler.ts`
 - `prepare-source-evidence-handler.ts`
+- `list-agent-profiles-handler.ts`, `create-custom-writer-profile-handler.ts`
+- `generate-assignment-proposal-handler.ts`
+- `assign-story-handler.ts`
+- `create-writer-draft-handler.ts`
 
 ### `src/app` — Next.js routes
 
 - `page.tsx` → `<NewsroomShell />`; `layout.tsx`; `globals.css`
 - `api/source-evidence/url/route.ts` (POST)
-- `api/source-inbox/route.ts` (GET)
+- `api/inbox/route.ts` (GET)
 - `api/sources/[sourceId]/triage/route.ts` (PUT)
 - `api/sources/[sourceId]/preparations/route.ts` (POST)
 - `api/stories/route.ts` (GET, POST)
 - `api/stories/[storyId]/route.ts` (GET)
 - `api/stories/[storyId]/sources/route.ts` (POST)
+- `api/stories/[storyId]/assignment-proposals/route.ts` (POST)
+- `api/stories/[storyId]/assignments/route.ts` (POST)
+- `api/stories/[storyId]/writer-drafts/route.ts` (POST)
+- `api/agent-profiles/route.ts` (GET, POST)
 
 ### `src/features/newsroom` — React UI
 
 - `newsroom-shell.tsx`, `newsroom-shell.module.css`, `newsroom-state.ts`
-- `source-evidence-workspace.tsx`, `source-evidence-url-client.ts`
+- `resizable-newsroom-layout.tsx` — draggable desk/workspace split with persisted proportions
+- `newsroom-staff.tsx` — Agent Profile roster and Writer drag sources
+- `source-evidence-workspace.tsx`, `source-evidence-url-client.ts` — integrated intake → prepare → review flow
 - `source-inbox-workspace.tsx`, `source-inbox-client.ts`
+- `story-workspace.tsx` — Assignment, Writer execution, and Article reading workspace
+- `article-reader.tsx`, `safe-markdown.tsx` — dependency-free safe Markdown renderer for untrusted content
+- `agent-profiles-workspace.tsx`, `agent-profile-client.ts`
 - `story-client.ts`
 
 ### `src/test`
@@ -124,6 +155,10 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `0018-durable-story-source-attachment.sql` — `story_source_attachments`
 - `0024-source-triage-decisions.sql` — `source_triage_decisions`
 - `0025-source-evidence-preparations.sql` — immutable prepared-evidence history
+- `0027-agent-profiles.sql` — `agent_profiles` and built-in Assignment Editor, General Writer, and Director profiles
+- `0028-durable-assignments.sql` — `story_assignments`, `story_transition_receipts`, disjoint-source validation functions
+- `0030-agent-runs.sql` — `agent_runs` with Assignment Editor proposal input/outcome constraints
+- `0031-articles-and-writer-drafts.sql` — extends `agent_runs` for Writer `article_draft` runs; creates `articles` and `article_revisions`
 
 ## Documentation (`docs/`)
 
