@@ -9,7 +9,7 @@ tags: [application, workflows, use-cases, ports]
 
 The application layer (`src/application`) contains the use-case workflows that orchestrate domain rules with repository ports. Each workflow is a factory function (`create*`) that accepts dependencies and returns the workflow function. Dependencies include repository ports, id factories, and a `now` clock, making workflows injectable and testable without a real database or network.
 
-`src/application/index.ts` also exposes the structured-model boundary, Source evidence-preparation, Agent Profile, Assignment, Assignment Proposal, AgentRun, Writer draft, Writer revision, review submission, Director review, and review decision workflows alongside the Source, triage, and Story modules described below.
+`src/application/index.ts` also exposes the structured-model boundary, Source evidence-preparation, Agent Profile, Assignment, Assignment Proposal, AgentRun, Writer draft, Writer revision, review submission, Director review, review decision, and Story rejection workflows alongside the Source, triage, and Story modules described below.
 
 ## Source-evidence workflows
 
@@ -138,6 +138,16 @@ The Director is advisory: it records a recommendation, summary, five checks, and
 
 The operator may override the Director's recommendation (e.g., approve despite a `request_changes` recommendation); the workflow surfaces no error for a disagreement. See the [domain model](domain-model.md#reviewdecision) for the decision validation rules and the [newsroom UI](newsroom-ui.md) for the operator decision controls.
 
+## Story rejection workflow
+
+`src/application/story-rejections/reject-story.ts` — `createRejectStory` is the authoritative operator action that rejects a Story with an attributable reason. It is the first application workflow to exercise the domain's operator-only transitions into the terminal `rejected` state. It:
+
+1. Inspects the Story (`STORY_NOT_FOUND` if the inspection itself fails).
+2. Calls `transitionStory` to move the Story from `intake`, `assigned`, `in_progress`, `in_review`, or `changes_requested` → `rejected` (`REASON_REQUIRED`, `INVALID_TRANSITION`, `OPERATOR_REQUIRED`). The domain already permits these five rejected transitions and requires an `operator` actor; the workflow contributes only the reason, actor, transition id, and timestamp.
+3. Persists the rejected Story and transition receipt atomically through `StoryRejectionPersistence.persist` (`STORY_REJECTION_CONFLICT` if the Story changed concurrently).
+
+Rejection is terminal and does not contact a model. It preserves all existing work: Sources, attachments, the Assignment, Articles and their revisions, `AgentRun`s, `ReviewDecision`s, and prior transition receipts are untouched — the rejection only appends one new Story row and one new `story_transition_receipts` row. The reason is stored on the durable transition receipt (not a denormalized Story field), so the newsroom reads it from the authoritative transition history after a reload. Rejection is a separate operator-owned Story transition; it is not a `ReviewDecision` and introduces no new domain entity. See the [domain model](domain-model.md#story-and-the-state-machine) for the state machine, the [HTTP API](http-api.md) for the rejection endpoint, and the [newsroom UI](newsroom-ui.md) for the operator rejection controls.
+
 ## Repository ports
 
 Persistence contracts are expressed as interfaces in the application layer and implemented by PostgreSQL adapters:
@@ -158,5 +168,6 @@ Persistence contracts are expressed as interfaces in the application layer and i
 | `WriterRevisionPersistence`                           | `src/application/writer-revisions/writer-revision-persistence.ts`                | `src/adapters/article-persistence/postgres-writer-revision-persistence.ts`              |
 | `ReviewSubmissionPersistence`                         | `src/application/review-submissions/review-submission-persistence.ts`             | `src/adapters/review-persistence/postgres-review-submission-persistence.ts`            |
 | `ReviewDecisionPersistence`                           | `src/application/review-decisions/review-decision-persistence.ts`                 | `src/adapters/review-persistence/postgres-review-decision-persistence.ts`              |
+| `StoryRejectionPersistence`                           | `src/application/story-rejections/story-rejection-persistence.ts`                  | `src/adapters/story-rejection-persistence/postgres-story-rejection-persistence.ts`      |
 
 The `*.contract.ts` files alongside several ports (`source-repositories.contract.ts`, `story-inspection-repository.contract.ts`, `agent-run-repository.contract.ts`, etc.) are shared harnesses that verify any repository implementation satisfies the same behavior contract. The PostgreSQL adapter tests run these contracts against real PostgreSQL in the integration suite.
