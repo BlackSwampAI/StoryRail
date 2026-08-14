@@ -72,6 +72,7 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `review-submissions/` — `submit-story-review.ts`, `review-submission-persistence.ts`
 - `director-reviews/` — `run-director-review.ts`
 - `review-decisions/` — `record-story-review-decision.ts`, `review-decision-persistence.ts`
+- `story-rejections/` — `reject-story.ts`, `story-rejection-persistence.ts`
 - `index.ts` — barrel re-export
 
 ### `src/adapters` — PostgreSQL + Firecrawl implementations
@@ -91,6 +92,7 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `story-source-persistence/` — `postgres-story-source-attachment-repository.ts`
 - `story-inspection/` — `postgres-story-inspection-repository.ts`
 - `story-listing/` — `postgres-story-listing-repository.ts`, `.test.ts`
+- `story-rejection-persistence/` — `postgres-story-rejection-persistence.ts`, `.test.ts`
 - `index.ts` — barrel re-export
 
 ### `src/runtime` — composed runtimes
@@ -129,6 +131,7 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `submit-story-review-handler.ts`
 - `run-director-review-handler.ts`
 - `record-story-review-decision-handler.ts`
+- `reject-story-handler.ts`
 
 ### `src/app` — Next.js routes
 
@@ -147,6 +150,7 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `api/stories/[storyId]/review-submissions/route.ts` (POST)
 - `api/stories/[storyId]/director-reviews/route.ts` (POST)
 - `api/stories/[storyId]/review-decisions/route.ts` (POST)
+- `api/stories/[storyId]/rejections/route.ts` (POST)
 - `api/agent-profiles/route.ts` (GET, POST)
 
 ### `src/features/newsroom` — React UI

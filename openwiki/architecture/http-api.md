@@ -262,6 +262,22 @@ Always returns 200 on success or 500 on internal failure.
 | 415/400| Media type / JSON / shape errors                                                                                                                                                      |
 | 500    | Missing `STORYRAIL_OPERATOR_ID` or internal error                                                                                                                                     |
 
+## POST /api/stories/[storyId]/rejections — reject a Story
+
+- Route: `src/app/api/stories/[storyId]/rejections/route.ts`
+- Handler: `src/interfaces/http/reject-story-handler.ts`
+- Provider: `storyRuntimeProvider`
+- Body: `{ "reason": string }` (exactly one string property). `STORYRAIL_OPERATOR_ID` must be configured or the handler returns 500.
+- Workflow: `rejectStory`. Inspects the Story, calls the domain `transitionStory` to move `intake`, `assigned`, `in_progress`, `in_review`, or `changes_requested` → `rejected` with the operator actor and reason, and persists the rejected Story and transition receipt atomically. Rejection is terminal and preserves all existing Sources, assignments, Articles, agent runs, review decisions, and audit records; only the Story and one new transition receipt row are written. The reason is read back from the durable transition receipt.
+
+| Status | Condition                                                                                                  |
+| ------ | ---------------------------------------------------------------------------------------------------------- |
+| 201    | Story rejected; durable Story and transition receipt persisted                                             |
+| 404    | `STORY_NOT_FOUND`                                                                                          |
+| 409    | `INVALID_TRANSITION` (Story not in a rejectable state), `STORY_REJECTION_CONFLICT` (Story changed concurrently) |
+| 415/400| Media type / JSON / shape errors                                                                           |
+| 500    | Missing `STORYRAIL_OPERATOR_ID` or internal error                                                          |
+
 ## Handler conventions
 
 - `statusFor*` functions map the discriminated workflow result `error.code` to an HTTP status, so domain error codes are the source of truth for HTTP semantics.
