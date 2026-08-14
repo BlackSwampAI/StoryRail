@@ -146,6 +146,10 @@ function clients() {
       kind: "unavailable",
       message: "The Story request could not be completed.",
     })),
+    rejectStory: vi.fn<StoryClient["rejectStory"]>(async () => ({
+      kind: "unavailable",
+      message: "The Story request could not be completed.",
+    })),
     submitReview: vi.fn<StoryClient["submitReview"]>(async () => ({
       kind: "unavailable",
       message: "The Story request could not be completed.",

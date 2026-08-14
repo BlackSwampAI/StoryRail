@@ -80,6 +80,7 @@ Durable Profiles configure the Assignment Editor, Writer, and Director/editor-in
 - Durable, append-ordered AgentRun history that records the exact Story, evidence references, Writer candidates, model, prompt version, requester, outcome, and proposal or safe failure.
 - Supervised Writer execution with Assignment-selected identity, Profile model override or `STORYRAIL_WRITER_MODEL` default, durable Article Revision 1, and an `assigned` to `in_progress` transition.
 - Supervised review submission, a durable Director AgentRun against the exact evidence IDs recorded by the Writer run, and an operator-owned ReviewDecision that atomically moves the Story to Approved or Changes Requested.
+- Explicit operator rejection from Intake, Assigned, In Progress, In Review, or Changes Requested, with a required reason and an atomic terminal Story transition receipt.
 - Supervised Writer revisions after Request Changes, with immutable Revision 2/3 history, exact evidence reuse, operator-owned revision direction, and an atomic return to In Progress.
 - Operator review and editing of suggestions in the existing Assignment form; the manual Assignment remains the authoritative state-mutation boundary and remains attributed to the operator.
 
@@ -87,7 +88,7 @@ Durable Profiles configure the Assignment Editor, Writer, and Director/editor-in
 
 The planned alpha path continues from a Story through an Assignment Editor, a structured Assignment, a configurable Writer, a persisted Article, and independent Director/editor-in-chief review. The intended bounded revision loop ends in an operator-controlled approval or rejection, followed by a separate, explicit publish/export transition.
 
-Automatic Assignment Editor decisions and automatic Director decisions are not implemented. Future work includes rejection UI, publication, and retrieval hardening.
+Automatic Assignment Editor decisions and automatic Director decisions are not implemented. Future work includes publication and retrieval hardening.
 
 ## Core concepts
 
@@ -175,7 +176,7 @@ pnpm build
 
 ## Project status and limitations
 
-StoryRail is a development-oriented pre-alpha. It currently has no authentication, migrations are external/manual, and some anti-bot publishers remain inaccessible through Firecrawl. Supervised Assignment proposals, manual Assignment, bounded Writer drafting/revision, Director review, and operator approval/request-changes decisions are implemented. Rejection UI and publishing are not.
+StoryRail is a development-oriented pre-alpha. It currently has no authentication, migrations are external/manual, and some anti-bot publishers remain inaccessible through Firecrawl. Supervised Assignment proposals, manual Assignment, bounded Writer drafting/revision, Director review, operator approval/request-changes decisions, and explicit operator rejection are implemented. Publishing is not.
 
 ## Technical documentation
 

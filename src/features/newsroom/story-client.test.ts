@@ -570,6 +570,7 @@ describe("story-client", () => {
     );
     const client = createStoryClient({ fetch });
 
+    await client.rejectStory(STORY.id, "No longer in scope.");
     await client.submitReview(STORY.id);
     await client.runDirectorReview(STORY.id);
     await client.recordReviewDecision(STORY.id, {
@@ -581,24 +582,56 @@ describe("story-client", () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
+      `/api/stories/${STORY.id}/rejections`,
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ reason: "No longer in scope." }),
+      }),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
       `/api/stories/${STORY.id}/review-submissions`,
       expect.objectContaining({ method: "POST", body: "{}" }),
     );
     expect(fetch).toHaveBeenNthCalledWith(
-      2,
+      3,
       `/api/stories/${STORY.id}/director-reviews`,
       expect.objectContaining({ method: "POST", body: "{}" }),
     );
-    expect(JSON.parse(String(fetch.mock.calls[2]![1]?.body))).toEqual({
+    expect(JSON.parse(String(fetch.mock.calls[3]![1]?.body))).toEqual({
       directorRunId: "director-run-38",
       decision: "request_changes",
       reason: "Support the timeline.",
     });
     expect(fetch).toHaveBeenNthCalledWith(
-      4,
+      5,
       `/api/stories/${STORY.id}/writer-revisions`,
       expect.objectContaining({ method: "POST", body: "{}" }),
     );
+  });
+
+  it("decodes a completed Story rejection and its operator transition receipt", async () => {
+    const rejected = { ...STORY, state: "rejected", updatedAt: "rejected" } as const;
+    const transitionReceipt = {
+      transitionId: "transition-43",
+      storyId: STORY.id,
+      previousState: "intake",
+      nextState: "rejected",
+      actor: { type: "operator", operatorId: "operator-43" },
+      reason: "No longer in scope.",
+      occurredAt: "rejected",
+      revisionCycle: 0,
+    } as const;
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(201, { ok: true, story: rejected, transitionReceipt }),
+    );
+
+    await expect(
+      createStoryClient({ fetch }).rejectStory(STORY.id, transitionReceipt.reason),
+    ).resolves.toEqual({
+      kind: "completed",
+      value: { story: rejected, transitionReceipt },
+    });
   });
 
   it("exports only the focused browser client surface", async () => {

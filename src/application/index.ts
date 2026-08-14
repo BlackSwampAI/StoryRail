@@ -10,6 +10,7 @@ export * from "./story-creation";
 export * from "./story-inspection";
 export * from "./story-listing";
 export * from "./story-persistence";
+export * from "./story-rejections";
 export * from "./story-source-attachment";
 export * from "./story-source-persistence";
 export * from "./model";

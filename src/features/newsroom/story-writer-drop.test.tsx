@@ -97,6 +97,10 @@ function requests(): StoryClient {
       kind: "unavailable",
       message: STORY_REQUEST_UNAVAILABLE_MESSAGE,
     })),
+    rejectStory: vi.fn<StoryClient["rejectStory"]>(async () => ({
+      kind: "unavailable",
+      message: STORY_REQUEST_UNAVAILABLE_MESSAGE,
+    })),
     submitReview: vi.fn<StoryClient["submitReview"]>(async () => ({
       kind: "unavailable",
       message: STORY_REQUEST_UNAVAILABLE_MESSAGE,

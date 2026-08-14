@@ -1838,6 +1838,7 @@
 .primaryAction:focus-visible,
 .secondaryAction:focus-visible,
 .tertiaryAction:focus-visible,
+.dangerAction:focus-visible,
 .secondaryPanel > summary:focus-visible {
   outline: 3px solid #8ee4c2;
   outline-offset: 3px;
@@ -2011,7 +2012,8 @@
 
 .primaryAction,
 .secondaryAction,
-.tertiaryAction {
+.tertiaryAction,
+.dangerAction {
   min-height: 2.8rem;
   border-radius: 0.65rem;
   padding: 0.65rem 1rem;
@@ -2043,11 +2045,104 @@
   color: #9bcab7;
 }
 
+.dangerAction {
+  border: 1px solid #b96860;
+  background: #642f2b;
+  color: #fff4f1;
+}
+
+.dangerAction:hover:not(:disabled) {
+  background: #7a3934;
+}
+
 .primaryAction:disabled,
 .secondaryAction:disabled,
 .tertiaryAction:disabled {
   cursor: wait;
   opacity: 0.6;
+}
+
+.dangerAction:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.rejectionPanel {
+  margin-top: 1rem;
+  border: 1px solid #603b36;
+  border-radius: 0.85rem;
+  background: #1d1210;
+  padding: 1rem 1.15rem;
+}
+
+.rejectionResult {
+  margin-top: 1rem;
+  border: 1px solid #603b36;
+  border-radius: 0.85rem;
+  background: #1d1210;
+  padding: 1rem 1.15rem;
+}
+
+.rejectionResult h2 {
+  margin: 0;
+  color: #f3d7d2;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.15rem;
+  font-weight: 500;
+}
+
+.rejectionResult > p {
+  margin: 0.55rem 0 1rem;
+  color: #ead6d2;
+  line-height: 1.55;
+}
+
+.rejectionSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.rejectionPanel h2 {
+  margin: 0;
+  color: #f3d7d2;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.15rem;
+  font-weight: 500;
+}
+
+.rejectionPanel p {
+  margin: 0.4rem 0 0;
+  color: #c7aaa5;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.rejectionForm {
+  display: grid;
+  gap: 1rem;
+}
+
+.rejectionForm label {
+  display: grid;
+  gap: 0.5rem;
+  color: #f3d7d2;
+  font-weight: 700;
+}
+
+.rejectionForm textarea {
+  min-height: 6rem;
+  border: 1px solid #754a44;
+  border-radius: 0.6rem;
+  background: #0f0908;
+  padding: 0.75rem;
+  color: #fff4f1;
+  font: inherit;
+}
+
+.rejectionForm .taskActions {
+  margin-top: 0;
 }
 
 .proposalLead,

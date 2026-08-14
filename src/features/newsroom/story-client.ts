@@ -63,6 +63,12 @@ export interface StoryClient {
   readonly generateAssignmentProposal: (storyId: string) => Promise<StoryClientResult<AgentRun>>;
   readonly createWriterDraft: (storyId: string) => Promise<StoryClientResult<AgentRun>>;
   readonly createWriterRevision: (storyId: string) => Promise<StoryClientResult<AgentRun>>;
+  readonly rejectStory: (
+    storyId: string,
+    reason: string,
+  ) => Promise<
+    StoryClientResult<{ readonly story: Story; readonly transitionReceipt: StoryTransitionReceipt }>
+  >;
   readonly submitReview: (
     storyId: string,
   ) => Promise<
@@ -1174,6 +1180,42 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
           422: new Set(["WRITER_EVIDENCE_UNAVAILABLE"]),
         },
       ),
+    async rejectStory(storyId, reason) {
+      try {
+        const response = await dependencies.fetch(
+          `/api/stories/${encodeURIComponent(storyId)}/rejections`,
+          {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ reason }),
+          },
+        );
+        const body: unknown = await response.json();
+        if (
+          isRecord(body) &&
+          response.status === 201 &&
+          body.ok === true &&
+          hasExactKeys(body, ["ok", "story", "transitionReceipt"]) &&
+          isStory(body.story) &&
+          isTransition(body.transitionReceipt)
+        )
+          return {
+            kind: "completed",
+            value: { story: body.story, transitionReceipt: body.transitionReceipt },
+          };
+        if (
+          isRecord(body) &&
+          body.ok === false &&
+          isApplicationError(body.error) &&
+          response.status >= 400 &&
+          response.status < 500
+        )
+          return { kind: "application-failure", error: body.error };
+        return unavailable();
+      } catch {
+        return unavailable();
+      }
+    },
     async submitReview(storyId) {
       try {
         const response = await dependencies.fetch(

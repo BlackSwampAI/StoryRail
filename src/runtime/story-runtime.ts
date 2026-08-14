@@ -11,6 +11,7 @@ import {
 } from "@/adapters/review-persistence";
 import { createPostgresStoryListingRepository } from "@/adapters/story-listing";
 import { createPostgresStoryRepository } from "@/adapters/story-persistence";
+import { createPostgresStoryRejectionPersistence } from "@/adapters/story-rejection-persistence";
 import { createPostgresStorySourceAttachmentRepository } from "@/adapters/story-source-persistence";
 import { createPostgresSourceInboxRepository } from "@/adapters/source-inbox";
 import { createPostgresSourceTriageDecisionRepository } from "@/adapters/source-triage-persistence";
@@ -26,6 +27,7 @@ import {
   type RecordSourceTriageDecisionWorkflow,
 } from "@/application/source-triage";
 import { createCreateStory, type CreateStoryWorkflow } from "@/application/story-creation";
+import { createRejectStory, type RejectStoryWorkflow } from "@/application/story-rejections";
 import {
   createSubmitStoryReview,
   type SubmitStoryReviewResult,
@@ -61,6 +63,7 @@ export interface StoryRuntime {
   readonly createCustomWriterProfile: CreateCustomWriterProfileWorkflow;
   readonly listAgentProfiles: AgentProfileRepository["list"];
   readonly assignStory: AssignStoryWorkflow;
+  readonly rejectStory: RejectStoryWorkflow;
   readonly submitStoryReview: (command: {
     readonly storyId: import("@/domain/editorial").StoryId;
     readonly submittedBy: OperatorActor;
@@ -113,6 +116,7 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
   const assignmentPersistence = createPostgresAssignmentPersistence({ pool });
   const reviewSubmissionPersistence = createPostgresReviewSubmissionPersistence({ pool });
   const reviewDecisionPersistence = createPostgresReviewDecisionPersistence({ pool });
+  const storyRejectionPersistence = createPostgresStoryRejectionPersistence({ pool });
   const createStory = createCreateStory({
     storyRepository,
     createStoryId: () => storyId(createUuid()),
@@ -155,6 +159,12 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
     createTransitionId: () => transitionId(createUuid()),
     now,
   });
+  const rejectStory = createRejectStory({
+    inspections: inspectionRepository,
+    persistence: storyRejectionPersistence,
+    createTransitionId: () => transitionId(createUuid()),
+    now,
+  });
   let closePromise: Promise<void> | undefined;
 
   return Object.freeze({
@@ -167,6 +177,7 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
     createCustomWriterProfile,
     listAgentProfiles,
     assignStory,
+    rejectStory,
     submitStoryReview,
     recordStoryReviewDecision,
     close() {

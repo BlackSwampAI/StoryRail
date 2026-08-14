@@ -1,5 +1,5 @@
 import { DragDropProvider } from "@dnd-kit/react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { StoryInspection } from "@/application/story-inspection";
 import type { StoryClient } from "./story-client";
@@ -20,6 +20,7 @@ const requests: StoryClient = {
   generateAssignmentProposal: vi.fn(unavailable),
   createWriterDraft: vi.fn(unavailable),
   createWriterRevision: vi.fn(unavailable),
+  rejectStory: vi.fn(unavailable),
   submitReview: vi.fn(unavailable),
   runDirectorReview: vi.fn(unavailable),
   recordReviewDecision: vi.fn(unavailable),
@@ -145,6 +146,186 @@ function inspection(): StoryInspection {
 }
 
 describe("Director review workspace", () => {
+  it("requires a deliberate reason before requesting operator rejection", async () => {
+    const rejectStory = vi.fn<StoryClient["rejectStory"]>(async () => ({
+      kind: "application-failure",
+      error: { code: "STORY_REJECTION_CONFLICT", message: "Story changed." },
+    }));
+    render(
+      <DragDropProvider>
+        <StoryWorkspace
+          inspection={inspection()}
+          requests={{ ...requests, rejectStory }}
+          staff={{ kind: "loaded", profiles: [] }}
+          onAssigned={vi.fn()}
+          onWriterCompleted={vi.fn()}
+          onReviewStateChanged={vi.fn()}
+        />
+      </DragDropProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Reject Story" }));
+    const confirm = screen.getByRole("button", { name: "Reject Story" });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Rejection reason"), {
+      target: { value: "The reporting no longer supports this Story." },
+    });
+    expect(confirm).toBeEnabled();
+    fireEvent.click(confirm);
+
+    expect(rejectStory).toHaveBeenCalledWith(
+      "story-38",
+      "The reporting no longer supports this Story.",
+    );
+    expect(await screen.findByText("Story changed.")).toBeVisible();
+  });
+
+  it("cancels inline rejection without submitting or retaining the draft reason", () => {
+    const rejectStory = vi.fn<StoryClient["rejectStory"]>();
+    render(
+      <DragDropProvider>
+        <StoryWorkspace
+          inspection={inspection()}
+          requests={{ ...requests, rejectStory }}
+          staff={{ kind: "loaded", profiles: [] }}
+          onAssigned={vi.fn()}
+          onWriterCompleted={vi.fn()}
+          onReviewStateChanged={vi.fn()}
+        />
+      </DragDropProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Reject Story" }));
+    fireEvent.change(screen.getByLabelText("Rejection reason"), {
+      target: { value: "Draft reason" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(rejectStory).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText("Rejection reason")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reject Story" }));
+    expect(screen.getByLabelText("Rejection reason")).toHaveValue("");
+  });
+
+  it("reports the rejected Story and receipt immediately while authoritative refresh proceeds", async () => {
+    const reviewed = inspection();
+    const rejectedStory = { ...reviewed.story, state: "rejected" as const, updatedAt: "rejected" };
+    const transitionReceipt = {
+      transitionId: "transition-43",
+      storyId: reviewed.story.id,
+      previousState: "in_review" as const,
+      nextState: "rejected" as const,
+      actor: { type: "operator" as const, operatorId: "operator-43" },
+      reason: "The reporting no longer supports publication.",
+      occurredAt: "rejected",
+      revisionCycle: reviewed.story.revisionCycle,
+    };
+    const rejectStory = vi.fn<StoryClient["rejectStory"]>(async () => ({
+      kind: "completed",
+      value: { story: rejectedStory, transitionReceipt } as never,
+    }));
+    const inspectStory = vi.fn<StoryClient["inspectStory"]>(
+      async () => new Promise<never>(() => undefined),
+    );
+    const onReviewStateChanged = vi.fn();
+    render(
+      <DragDropProvider>
+        <StoryWorkspace
+          inspection={reviewed}
+          requests={{ ...requests, rejectStory, inspectStory }}
+          staff={{ kind: "loaded", profiles: [] }}
+          onAssigned={vi.fn()}
+          onWriterCompleted={vi.fn()}
+          onReviewStateChanged={onReviewStateChanged}
+        />
+      </DragDropProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Reject Story" }));
+    fireEvent.change(screen.getByLabelText("Rejection reason"), {
+      target: { value: transitionReceipt.reason },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Reject Story" }));
+
+    await waitFor(() =>
+      expect(onReviewStateChanged).toHaveBeenCalledWith({
+        ...reviewed,
+        story: rejectedStory,
+        transitions: [...reviewed.transitions, transitionReceipt],
+      }),
+    );
+    expect(inspectStory).toHaveBeenCalledWith(reviewed.story.id);
+  });
+
+  it("shows a durable rejection reason while preserving Article and audit access", () => {
+    const reviewed = inspection();
+    const rejected = {
+      ...reviewed,
+      story: { ...reviewed.story, state: "rejected" as const, updatedAt: "rejected" },
+      transitions: [
+        {
+          transitionId: "transition-43",
+          storyId: reviewed.story.id,
+          previousState: "in_review" as const,
+          nextState: "rejected" as const,
+          actor: { type: "operator" as const, operatorId: "operator-43" },
+          reason: "The reporting no longer supports publication.",
+          occurredAt: "rejected",
+          revisionCycle: reviewed.story.revisionCycle,
+        },
+      ],
+    };
+    render(
+      <DragDropProvider>
+        <StoryWorkspace
+          inspection={rejected as unknown as StoryInspection}
+          requests={requests}
+          staff={{ kind: "loaded", profiles: [] }}
+          onAssigned={vi.fn()}
+          onWriterCompleted={vi.fn()}
+          onReviewStateChanged={vi.fn()}
+        />
+      </DragDropProvider>,
+    );
+
+    const rejectionHeading = screen.getByRole("heading", { name: "Story rejected" });
+    const articleHeading = screen.getByRole("heading", { name: "Article headline" });
+    expect(rejectionHeading).toBeVisible();
+    expect(
+      rejectionHeading.compareDocumentPosition(articleHeading) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      screen.getAllByText("The reporting no longer supports publication.").length,
+    ).toBeGreaterThan(0);
+    expect(articleHeading).toBeVisible();
+    expect(screen.getByText("Evidence")).toBeVisible();
+    expect(screen.getByText("History & Audit")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Reject Story" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Run Director" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Record decision" })).not.toBeInTheDocument();
+  });
+
+  it.each(["approved", "rejected", "published"] as const)(
+    "does not offer rejection from %s",
+    (state) => {
+      const value = inspection();
+      render(
+        <DragDropProvider>
+          <StoryWorkspace
+            inspection={{ ...value, story: { ...value.story, state } }}
+            requests={requests}
+            staff={{ kind: "loaded", profiles: [] }}
+            onAssigned={vi.fn()}
+            onWriterCompleted={vi.fn()}
+            onReviewStateChanged={vi.fn()}
+          />
+        </DragDropProvider>,
+      );
+
+      expect(screen.queryByRole("button", { name: "Reject Story" })).not.toBeInTheDocument();
+    },
+  );
+
   it("shows text review checks and explicit editable operator decision controls", () => {
     render(
       <DragDropProvider>
@@ -361,6 +542,7 @@ describe("Director review workspace", () => {
     expect(pending).toHaveAttribute("aria-busy", "true");
     expect(screen.getByRole("heading", { name: "Article headline" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Run Writer Revision" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reject Story" })).toBeDisabled();
   });
 
   it("uses the shared pending surface for Director review", async () => {
@@ -387,6 +569,7 @@ describe("Director review workspace", () => {
       await screen.findByRole("status", { name: "Director is reviewing the Article…" }),
     ).toHaveAttribute("aria-busy", "true");
     expect(screen.queryByRole("button", { name: "Run Director" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reject Story" })).toBeDisabled();
   });
 
   it("uses the shared pending surface for the initial Writer", async () => {
