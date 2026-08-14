@@ -737,12 +737,16 @@ export function StoryWorkspace({
   const [reviewSubmissionPending, setReviewSubmissionPending] = useState(false);
   const [directorPending, setDirectorPending] = useState(false);
   const [decisionPending, setDecisionPending] = useState(false);
+  const [rejectionPending, setRejectionPending] = useState(false);
+  const [rejectionOpen, setRejectionOpen] = useState(false);
   const [editingAssignment, setEditingAssignment] = useState(false);
   const [proposalReady, setProposalReady] = useState(durableProposal !== undefined);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
   const [proposalStatus, setProposalStatus] = useState<string | null>(null);
   const [writerStatus, setWriterStatus] = useState<string | null>(null);
   const [reviewStatus, setReviewStatus] = useState<string | null>(null);
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [rejectionStatus, setRejectionStatus] = useState<string | null>(null);
   const [runs, setRuns] = useState<readonly AgentRun[]>(agentRuns);
   const latestProposal = [...runs]
     .reverse()
@@ -796,6 +800,15 @@ export function StoryWorkspace({
     existingDecision?.decision ?? null,
   );
   const [decisionReason, setDecisionReason] = useState(existingDecision?.reason ?? "");
+  const rejectionTransition = [...inspection.transitions]
+    .reverse()
+    .find((transition) => transition.nextState === "rejected");
+  const editorialMutationPending =
+    assignmentPending ||
+    writerPending ||
+    reviewSubmissionPending ||
+    directorPending ||
+    decisionPending;
   const assignmentEligible = isWriterDropEligible(inspection);
   const { ref: assignmentDropRef, isDropTarget } = useDroppable({
     id: WRITER_ASSIGNMENT_DROP_ID,
@@ -1067,6 +1080,35 @@ export function StoryWorkspace({
     }
   }
 
+  async function rejectStory() {
+    if (rejectionPending || rejectionReason.trim().length === 0) return;
+    setRejectionPending(true);
+    setRejectionStatus(null);
+    try {
+      const result = await requests.rejectStory(story.id, rejectionReason);
+      if (result.kind !== "completed") {
+        setRejectionStatus(
+          result.kind === "application-failure" ? result.error.message : result.message,
+        );
+        return;
+      }
+      const rejectedInspection: StoryInspection = {
+        ...inspection,
+        story: result.value.story,
+        transitions: [...inspection.transitions, result.value.transitionReceipt],
+      };
+      onReviewStateChanged(rejectedInspection);
+      const refreshed = await requests.inspectStory(story.id);
+      if (refreshed.kind === "completed") onReviewStateChanged(refreshed.value);
+      else
+        setRejectionStatus(
+          "Rejection saved, but authoritative inspection refresh is unavailable. Reopen the Story.",
+        );
+    } finally {
+      setRejectionPending(false);
+    }
+  }
+
   const latestRevision = article?.revisions.at(-1);
   return (
     <article className={styles.storyWorkspace} aria-labelledby="workspace-story-title">
@@ -1089,6 +1131,23 @@ export function StoryWorkspace({
         <p role="status" className={styles.workspaceNotice}>
           {notice}
         </p>
+      ) : null}
+
+      {story.state === "rejected" && rejectionTransition ? (
+        <section className={styles.rejectionResult} aria-labelledby="story-rejected-heading">
+          <h2 id="story-rejected-heading">Story rejected</h2>
+          <p>{rejectionTransition.reason}</p>
+          <dl className={styles.auditGrid}>
+            <div>
+              <dt>Rejected by</dt>
+              <dd>{actorLabel(rejectionTransition.actor)}</dd>
+            </div>
+            <div>
+              <dt>Rejected at</dt>
+              <dd>{rejectionTransition.occurredAt}</dd>
+            </div>
+          </dl>
+        </section>
       ) : null}
 
       <section
@@ -1600,6 +1659,84 @@ export function StoryWorkspace({
           </div>
         )}
       </section>
+
+      {["intake", "assigned", "in_progress", "in_review", "changes_requested"].includes(
+        story.state,
+      ) ? (
+        <section className={styles.rejectionPanel} aria-labelledby="story-rejection-heading">
+          {!rejectionOpen ? (
+            <div className={styles.rejectionSummary}>
+              <div>
+                <h2 id="story-rejection-heading">Reject this Story</h2>
+                <p>End editorial work on this Story with an attributable operator reason.</p>
+              </div>
+              <button
+                type="button"
+                className={styles.secondaryAction}
+                disabled={editorialMutationPending}
+                onClick={() => setRejectionOpen(true)}
+              >
+                Reject Story
+              </button>
+            </div>
+          ) : (
+            <form
+              className={styles.rejectionForm}
+              onSubmit={(event) => {
+                event.preventDefault();
+                void rejectStory();
+              }}
+            >
+              <div>
+                <h2 id="story-rejection-heading">Confirm Story rejection</h2>
+                <p>
+                  Rejected is terminal. Existing Sources, assignments, Articles, agent runs, and
+                  audit records will be preserved.
+                </p>
+              </div>
+              <label>
+                Rejection reason
+                <textarea
+                  value={rejectionReason}
+                  onChange={(event) => setRejectionReason(event.target.value)}
+                  required
+                  disabled={rejectionPending || editorialMutationPending}
+                />
+              </label>
+              <div className={styles.taskActions}>
+                <button
+                  type="submit"
+                  className={styles.dangerAction}
+                  disabled={
+                    rejectionPending ||
+                    editorialMutationPending ||
+                    rejectionReason.trim().length === 0
+                  }
+                >
+                  {rejectionPending ? "Rejecting Story…" : "Reject Story"}
+                </button>
+                <button
+                  type="button"
+                  className={styles.secondaryAction}
+                  disabled={rejectionPending}
+                  onClick={() => {
+                    setRejectionOpen(false);
+                    setRejectionReason("");
+                    setRejectionStatus(null);
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+              {rejectionStatus ? (
+                <p role="alert" className={styles.inlineAlert}>
+                  {rejectionStatus}
+                </p>
+              ) : null}
+            </form>
+          )}
+        </section>
+      ) : null}
 
       <div className={styles.secondaryPanels}>
         <EvidencePanel inspection={inspection} />

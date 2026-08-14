@@ -21,6 +21,7 @@ These terms form StoryRail's shared editorial language.
 - **Agent Profile:** An immutable configuration snapshot for one bounded first-class editorial persona: its role, name, instructions, optional provider-neutral model selection, and built-in/custom status. A profile contains no credentials and does not imply that an agent has executed.
 - **Director review:** A strict advisory evaluation of one exact Article revision against its Assignment and the exact evidence references recorded by its Writer AgentRun. It records a recommendation, summary, five checks, and optional revision instructions without mutating editorial state.
 - **ReviewDecision:** One durable operator-owned approval or request-changes decision for an Article revision. It references the exact successful Director AgentRun and is committed atomically with the Story transition and receipt; the operator may override the recommendation.
+- **Rejection:** A separate, explicit operator-owned terminal Story transition from `intake`, `assigned`, `in_progress`, `in_review`, or `changes_requested`. It requires an editorial reason, stores that reason on the existing transition receipt, and preserves all existing work and audit records; it is not a ReviewDecision or separate domain entity.
 - **Publication:** A separate, explicit act that sends an approved article to an export or publication destination.
 - **Desk/queue:** An operator-facing view of stories awaiting attention, action, or resolution.
 - **Assignment editor:** The role that assesses a story and prepares or refines its assignment.
