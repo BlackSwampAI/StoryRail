@@ -52,7 +52,17 @@ function mockFetch(response: Response) {
   return vi.fn<typeof globalThis.fetch>(async () => response);
 }
 
-function successfulBody(markdown = "# Extracted report") {
+// Stands in for a real article. The adapter rejects near-empty renderings as extraction
+// artifacts, so fixtures meaning "a successful extraction" must carry article-length content.
+const ARTICLE_MARKDOWN = [
+  "# Extracted report",
+  "",
+  "Officials published the quarterly figures on Tuesday, describing a steady rise in",
+  "applications across every district that reported on time. The office said the",
+  "remaining districts would file within the week.",
+].join("\n");
+
+function successfulBody(markdown = ARTICLE_MARKDOWN) {
   return {
     success: true,
     data: {
@@ -200,8 +210,12 @@ describe("Firecrawl request contract", () => {
 
 describe("Firecrawl successful response mapping", () => {
   it("does not reject ordinary reporting that mentions verification", async () => {
-    const markdown =
-      "# Election report\n\nOfficials described verification rules and CAPTCHA accessibility in detail.";
+    const markdown = [
+      "# Election report",
+      "",
+      "Officials described verification rules and CAPTCHA accessibility in detail, and said",
+      "the guidance would be reissued before the next cycle so county clerks could plan.",
+    ].join("\n");
     const extractor = createFirecrawlSourceExtractor({
       apiKey: makeApiKey(),
       fetch: mockFetch(jsonResponse(successfulBody(markdown))),
@@ -278,7 +292,7 @@ describe("Firecrawl successful response mapping", () => {
     [{ title: "", language: "" }, "", ""],
   ])("maps absent or non-string metadata conservatively", async (metadata, title, language) => {
     const fetchImplementation = mockFetch(
-      jsonResponse({ success: true, data: { markdown: "# Report", metadata } }),
+      jsonResponse({ success: true, data: { markdown: ARTICLE_MARKDOWN, metadata } }),
     );
     const extractor = createFirecrawlSourceExtractor({
       apiKey: makeApiKey(),
@@ -291,7 +305,7 @@ describe("Firecrawl successful response mapping", () => {
       ok: true,
       document: {
         format: "markdown",
-        content: "# Report",
+        content: ARTICLE_MARKDOWN,
         title,
         byline: null,
         publishedAt: null,
@@ -309,7 +323,7 @@ describe("Firecrawl successful response mapping", () => {
         requestId: "provider-request",
         cache: { hit: true },
         data: {
-          markdown: "# Report",
+          markdown: ARTICLE_MARKDOWN,
           html: "<h1>Report</h1>",
           sourceURL: "https://provider.example/source",
           resolvedURL: "https://provider.example/resolved",
@@ -335,7 +349,7 @@ describe("Firecrawl successful response mapping", () => {
       ok: true,
       document: {
         format: "markdown",
-        content: "# Report",
+        content: ARTICLE_MARKDOWN,
         title: "Report",
         byline: null,
         publishedAt: null,
@@ -456,6 +470,104 @@ describe("Firecrawl failure mapping", () => {
     });
     expect(JSON.stringify(result)).not.toContain(apiKey);
     expect(fetchImplementation).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["not found", 404, { code: "RESPONSE_REJECTED", retryable: false }],
+    ["gone", 410, { code: "RESPONSE_REJECTED", retryable: false }],
+    ["forbidden", 403, { code: "RESPONSE_REJECTED", retryable: false }],
+    ["rate limited", 429, { code: "RETRIEVAL_FAILED", retryable: true }],
+    ["bad gateway", 502, { code: "RETRIEVAL_FAILED", retryable: true }],
+    ["gateway timeout", 504, { code: "RETRIEVAL_TIMED_OUT", retryable: true }],
+  ])(
+    "records an upstream %s page as a failed extraction rather than evidence",
+    async (_case, statusCode, expected) => {
+      const extractor = createFirecrawlSourceExtractor({
+        apiKey: makeApiKey(),
+        fetch: mockFetch(
+          jsonResponse({
+            success: true,
+            data: {
+              markdown: "# 404 Not Found",
+              metadata: { title: "404 Not Found", statusCode, error: "Not Found" },
+            },
+          }),
+        ),
+      });
+
+      await expect(extractor.extract(makeSource())).resolves.toEqual({
+        ok: false,
+        failure: expected,
+      });
+    },
+  );
+
+  it("accepts an upstream success status alongside article content", async () => {
+    const extractor = createFirecrawlSourceExtractor({
+      apiKey: makeApiKey(),
+      fetch: mockFetch(
+        jsonResponse({
+          success: true,
+          data: {
+            markdown: ARTICLE_MARKDOWN,
+            metadata: { title: "Report title", language: "en", statusCode: 200 },
+          },
+        }),
+      ),
+    });
+
+    await expect(extractor.extract(makeSource())).resolves.toMatchObject({
+      ok: true,
+      document: { content: ARTICLE_MARKDOWN },
+    });
+  });
+
+  it.each([
+    ["absent", undefined],
+    ["non-numeric", "404"],
+    ["fractional", 404.5],
+  ])("ignores a %s upstream status and judges the content instead", async (_case, statusCode) => {
+    const extractor = createFirecrawlSourceExtractor({
+      apiKey: makeApiKey(),
+      fetch: mockFetch(
+        jsonResponse({
+          success: true,
+          data: { markdown: ARTICLE_MARKDOWN, metadata: { title: "Report title", statusCode } },
+        }),
+      ),
+    });
+
+    await expect(extractor.extract(makeSource())).resolves.toMatchObject({ ok: true });
+  });
+
+  it("rejects a rendering too short to be an article", async () => {
+    const extractor = createFirecrawlSourceExtractor({
+      apiKey: makeApiKey(),
+      fetch: mockFetch(jsonResponse(successfulBody("# 404 Not Found"))),
+    });
+
+    await expect(extractor.extract(makeSource())).resolves.toEqual({
+      ok: false,
+      failure: { code: "EXTRACTION_FAILED", retryable: false },
+    });
+  });
+
+  it("keeps a short but genuine article", async () => {
+    const brief = [
+      "# Council approves the levy",
+      "",
+      "The council approved the levy on Tuesday by a vote of five to two, sending it to the",
+      "November ballot without further amendment.",
+    ].join("\n");
+    const extractor = createFirecrawlSourceExtractor({
+      apiKey: makeApiKey(),
+      fetch: mockFetch(jsonResponse(successfulBody(brief))),
+    });
+
+    await expect(extractor.extract(makeSource())).resolves.toMatchObject({
+      ok: true,
+      document: { content: brief },
+    });
   });
 
   it("maps malformed JSON to a stable extraction failure", async () => {
