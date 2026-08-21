@@ -1,14 +1,12 @@
 name: OpenWiki Update
 
 on:
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - "openwiki/**"
-      - "AGENTS.md"
-      - "CLAUDE.md"
-      - ".github/workflows/openwiki-update.yml"
+  # Refresh on a schedule rather than after every merge. A per-merge trigger raced the
+  # merges themselves and produced a documentation pull request per change; one nightly
+  # run batches them. This also matches the "scheduled OpenWiki workflow" that AGENTS.md
+  # and CLAUDE.md already describe.
+  schedule:
+    - cron: "0 9 * * *"
   workflow_dispatch:
 
 permissions:
