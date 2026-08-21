@@ -43,7 +43,11 @@ jobs:
         env:
           OPENWIKI_PROVIDER: openrouter
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          OPENWIKI_MODEL_ID: z-ai/glm-5.2
+          # A zero-cost model, so refreshing documentation never depends on the account
+          # balance. Pin a specific one rather than the `openrouter/free` router: the router
+          # picks a different model per request, which breaks OpenWiki's multi-turn agent loop
+          # partway through. This model carries a 262k context and tool calling.
+          OPENWIKI_MODEL_ID: nvidia/nemotron-3-super-120b-a12b:free
 
       - name: Create OpenWiki update pull request
         uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
