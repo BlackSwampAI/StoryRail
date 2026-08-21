@@ -23,7 +23,7 @@ The application layer (`src/application`) contains the use-case workflows that o
 
 ## Evidence-preparation workflow
 
-`prepareSourceEvidence` loads a successful raw extraction, sends its untrusted metadata and Markdown through the structured-model port, validates the returned document, and appends an immutable successful or failed preparation attempt. Preparation is explicit: it does not run during intake, replace raw evidence, or resolve Source triage. The current adapter is LangChain-backed OpenRouter, but the application boundary is provider-neutral.
+`prepareSourceEvidence` loads a successful raw extraction, sends its untrusted metadata and Markdown through the structured-model port, validates the returned document, and appends an immutable successful or failed preparation attempt. Preparation is explicit: it does not run during intake, replace raw evidence, or resolve Source triage. The workflow now tracks how much of the raw extraction was submitted to the model (after capping to fit model limits) via the `capEvidenceMarkdown` helper function. The current adapter is LangChain-backed OpenRouter, but the application boundary is provider-neutral.
 
 ## Story workflows
 

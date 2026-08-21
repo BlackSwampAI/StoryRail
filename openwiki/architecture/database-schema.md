@@ -133,6 +133,23 @@ The `article_revisions` table drops its `revision_number = 1` check and replaces
 
 Five generated columns on `agent_runs` — `writer_revision_article_id`, `writer_revision_previous_id`, `writer_revision_decision_id`, `writer_revision_director_run_id`, and `writer_revision_decision_value` (populated only for a Writer `article_revision` run, otherwise `NULL`) — back `agent_runs_writer_revision_decision_fk`, a composite foreign key from the run's decision snapshot to `review_decisions`. This enforces at the database level that a Writer revision run can only reference a real, matching operator `request_changes` decision and the Director run behind it.
 
+## Migration 0049 — preparation input measurement
+
+`database/migrations/0049-preparation-input-measurement.sql` updates the `storyrail.source_evidence_preparations` table to record how much of the raw extraction the model was shown during preparation.
+
+### storyrail.source_evidence_preparations changes
+
+Adds a JSONB `input` field to the `payload` containing:
+- `rawCharacters`: the character count of the raw extraction content
+- `submittedCharacters`: the number of characters actually submitted to the model (after capping)
+
+For existing rows written before this migration, the migration backfills both values with the full raw extraction length, reflecting the prior behavior of submitting the entire extraction.
+
+The migration also adds a `CHECK` constraint to ensure:
+- The `input` object is present
+- Both fields are non-negative integers
+- `submittedCharacters` ≤ `rawCharacters`
+
 ## Integration test lifecycle
 
-The PostgreSQL integration tests (`src/adapters/source-persistence/postgres-source-repositories.test.ts` and the Story/attachment/assignment/run/article/review contracts) connect via `STORYRAIL_TEST_DATABASE_URL`, verify the database name is exactly `storyrail_test`, drop and recreate the `storyrail` schema, apply migrations `0012`, `0017`, `0018`, `0024`, `0025`, `0027`, `0028`, `0030`, `0031`, `0038`, and `0041` in order, and truncate the editorial tables (plus delete non-built-in Agent Profiles) between cases. The suite never creates or drops a database.
+The PostgreSQL integration tests (`src/adapters/source-persistence/postgres-source-repositories.test.ts` and the Story/attachment/assignment/run/article/review contracts) connect via `STORYRAIL_TEST_DATABASE_URL`, verify the database name is exactly `storyrail_test`, drop and recreate the `storyrail` schema, apply migrations `0012`, `0017`, `0018`, `0024`, `0025`, `0027`, `0028`, `0030`, `0031`, `0038`, `0041`, and `0049` in order, and truncate the editorial tables (plus delete non-built-in Agent Profiles) between cases. The suite never creates or drops a database.
