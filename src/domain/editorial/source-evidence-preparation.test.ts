@@ -15,6 +15,7 @@ const common = {
   extractionId: sourceExtractionId("extraction-25"),
   model: { provider: "openrouter", model: "operator/chosen-model" },
   preparer: { key: "storyrail_evidence_preparer", version: "1" },
+  input: { rawCharacters: 512, submittedCharacters: 512 },
   requestedBy: { type: "operator", operatorId: operatorId("operator-25") } as const,
   startedAt: "opaque started timestamp",
   completedAt: "opaque completed timestamp",
@@ -44,6 +45,7 @@ describe("recordSourceEvidencePreparation", () => {
         model: common.model,
         preparer: common.preparer,
         requestedBy: common.requestedBy,
+        input: common.input,
         startedAt: common.startedAt,
         completedAt: common.completedAt,
         outcome: "succeeded",
@@ -101,5 +103,43 @@ describe("recordSourceEvidencePreparation", () => {
         failure: { code: "MODEL_REQUEST_FAILED", retryable: true },
       }),
     ).toMatchObject({ ok: false, error: { code: "PREPARATION_PROVIDER_REQUIRED" } });
+  });
+
+  it.each([
+    ["a fractional raw length", { rawCharacters: 10.5, submittedCharacters: 10 }],
+    ["a fractional submitted length", { rawCharacters: 10, submittedCharacters: 4.5 }],
+    ["a negative raw length", { rawCharacters: -1, submittedCharacters: 0 }],
+    ["a negative submitted length", { rawCharacters: 10, submittedCharacters: -1 }],
+    ["more submitted than raw", { rawCharacters: 10, submittedCharacters: 11 }],
+  ])("rejects %s", (_case, input) => {
+    expect(
+      recordSourceEvidencePreparation({
+        ...common,
+        input,
+        outcome: "failed",
+        failure: { code: "MODEL_REQUEST_TIMED_OUT", retryable: true },
+      }),
+    ).toEqual({
+      ok: false,
+      error: {
+        code: "PREPARATION_INPUT_MEASUREMENT_INVALID",
+        message:
+          "Preparation input lengths must be non-negative integers, and the submitted length cannot exceed the raw length.",
+      },
+    });
+  });
+
+  it("accepts evidence that was truncated for the model", () => {
+    const result = recordSourceEvidencePreparation({
+      ...common,
+      input: { rawCharacters: 500_000, submittedCharacters: 120_000 },
+      outcome: "failed",
+      failure: { code: "MODEL_REQUEST_TIMED_OUT", retryable: true },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      preparation: { input: { rawCharacters: 500_000, submittedCharacters: 120_000 } },
+    });
   });
 });

@@ -2,7 +2,10 @@ import { OpenRouterAuthError, OpenRouterError } from "@langchain/openrouter";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-import { createOpenRouterStructuredModel } from "./openrouter-structured-model";
+import {
+  createOpenRouterStructuredModel,
+  DEFAULT_MAXIMUM_INPUT_CHARACTERS,
+} from "./openrouter-structured-model";
 
 const schema = z.object({ content: z.string().min(1), title: z.string().nullable() }).strict();
 
@@ -82,5 +85,27 @@ describe("OpenRouter structured model adapter", () => {
     const result = await model.generateStructured({ systemPrompt: "safe", input: {}, schema });
     expect(result).toEqual({ ok: false, failure: { code, retryable } });
     expect(JSON.stringify(result)).not.toContain("secret provider body");
+  });
+
+  it("declares a conservative input budget callers can read instead of assuming one", () => {
+    const model = createOpenRouterStructuredModel({
+      apiKey: "secret-key",
+      model: "publisher/model-slug",
+      createChatModel: vi.fn(() => ({ withStructuredOutput: vi.fn(() => ({ invoke: vi.fn() })) })),
+    });
+
+    expect(model.limits).toEqual({ maximumInputCharacters: DEFAULT_MAXIMUM_INPUT_CHARACTERS });
+    expect(DEFAULT_MAXIMUM_INPUT_CHARACTERS).toBeGreaterThan(0);
+  });
+
+  it("lets a caller that knows its model raise the declared budget", () => {
+    const model = createOpenRouterStructuredModel({
+      apiKey: "secret-key",
+      model: "publisher/wide-context-model",
+      maximumInputCharacters: 400_000,
+      createChatModel: vi.fn(() => ({ withStructuredOutput: vi.fn(() => ({ invoke: vi.fn() })) })),
+    });
+
+    expect(model.limits.maximumInputCharacters).toBe(400_000);
   });
 });

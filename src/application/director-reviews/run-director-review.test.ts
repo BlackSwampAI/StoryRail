@@ -125,6 +125,7 @@ function fixture() {
     extractionId: sourceExtractionId(`raw-${id}`),
     model: { provider: "openrouter", model: "prep" },
     preparer: { key: "prep", version: "1" },
+    input: { rawCharacters: 512, submittedCharacters: 512 },
     requestedBy: actor,
     startedAt: "start",
     completedAt: "end",
@@ -190,6 +191,7 @@ describe("run Director review", () => {
     }));
     const model: StructuredModel = {
       descriptor: { provider: "openrouter", model: "director-model" },
+      limits: { maximumInputCharacters: 60_000 },
       generateStructured: generateStructured as StructuredModel["generateStructured"],
     };
     const appended: AgentRun[] = [];
@@ -248,6 +250,7 @@ describe("run Director review", () => {
         ok: true,
         model: {
           descriptor: { provider: "openrouter", model: "director" },
+          limits: { maximumInputCharacters: 60_000 },
           generateStructured,
         } as never,
       }),
@@ -300,6 +303,7 @@ describe("run Director review", () => {
         ok: true,
         model: {
           descriptor: { provider: "openrouter", model: "director" },
+          limits: { maximumInputCharacters: 60_000 },
           generateStructured,
         } as StructuredModel,
       }),

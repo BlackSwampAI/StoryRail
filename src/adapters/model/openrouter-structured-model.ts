@@ -25,10 +25,22 @@ interface OpenRouterChatModel {
   ): StructuredRunnable;
 }
 
+/**
+ * OpenRouter fronts many models with different context windows, so the adapter cannot know a
+ * per-model figure without a catalogue lookup. This is a deliberately conservative floor that
+ * every model it routes to can accept; callers with a known model may raise it.
+ *
+ * The value is bounded by throughput rather than context: the largest evidence observed to
+ * prepare successfully inside the request timeout was about 69,000 characters, so the floor
+ * sits below that with room for reasoning variance.
+ */
+export const DEFAULT_MAXIMUM_INPUT_CHARACTERS = 60_000;
+
 export interface CreateOpenRouterStructuredModelOptions {
   readonly apiKey: string;
   readonly model: string;
   readonly timeoutMilliseconds?: number;
+  readonly maximumInputCharacters?: number;
   readonly createChatModel?: (configuration: {
     readonly apiKey: string;
     readonly model: string;
@@ -99,6 +111,9 @@ export function createOpenRouterStructuredModel(
 
   return Object.freeze({
     descriptor: Object.freeze({ provider: "openrouter", model: modelSlug }),
+    limits: Object.freeze({
+      maximumInputCharacters: options.maximumInputCharacters ?? DEFAULT_MAXIMUM_INPUT_CHARACTERS,
+    }),
     async generateStructured<Output>(
       request: StructuredModelRequest<Output>,
     ): Promise<StructuredModelResult<Output>> {

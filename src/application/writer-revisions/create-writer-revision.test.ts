@@ -191,6 +191,7 @@ function fixture(): StoryInspection {
             extractionId: "extraction-41" as never,
             model: { provider: "openrouter", model: "preparer" },
             preparer: { key: "prepare", version: "1" },
+            input: { rawCharacters: 512, submittedCharacters: 512 },
             requestedBy: operator,
             startedAt: "prepare-start",
             completedAt: "prepare-end",
@@ -223,6 +224,7 @@ describe("createWriterRevision", () => {
     });
     const model: StructuredModel = {
       descriptor: { provider: "openrouter", model: "writer" },
+      limits: { maximumInputCharacters: 60_000 },
       generateStructured: generateStructured as StructuredModel["generateStructured"],
     };
     const persist = vi.fn<WriterRevisionPersistence["persist"]>(async (command) => ({

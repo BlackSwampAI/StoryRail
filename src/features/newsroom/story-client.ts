@@ -192,6 +192,18 @@ function isExtraction(value: unknown): value is SourceExtraction {
   );
 }
 
+function isPreparationInput(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ["rawCharacters", "submittedCharacters"]) &&
+    Number.isInteger(value.rawCharacters) &&
+    Number.isInteger(value.submittedCharacters) &&
+    (value.rawCharacters as number) >= 0 &&
+    (value.submittedCharacters as number) >= 0 &&
+    (value.submittedCharacters as number) <= (value.rawCharacters as number)
+  );
+}
+
 function isPreparation(value: unknown): value is SourceEvidencePreparation {
   if (
     !isRecord(value) ||
@@ -207,6 +219,7 @@ function isPreparation(value: unknown): value is SourceEvidencePreparation {
     !isString(value.preparer.key) ||
     !isString(value.preparer.version) ||
     !isActor(value.requestedBy) ||
+    !isPreparationInput(value.input) ||
     !isString(value.startedAt) ||
     !isString(value.completedAt)
   )
@@ -218,6 +231,7 @@ function isPreparation(value: unknown): value is SourceEvidencePreparation {
     "model",
     "preparer",
     "requestedBy",
+    "input",
     "startedAt",
     "completedAt",
     "outcome",

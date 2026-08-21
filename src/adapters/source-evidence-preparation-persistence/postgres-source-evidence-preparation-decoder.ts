@@ -77,6 +77,18 @@ function isFailure(value: unknown): boolean {
   );
 }
 
+function isInputMeasurement(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    exact(value, ["rawCharacters", "submittedCharacters"]) &&
+    Number.isInteger(value.rawCharacters) &&
+    Number.isInteger(value.submittedCharacters) &&
+    (value.rawCharacters as number) >= 0 &&
+    (value.submittedCharacters as number) >= 0 &&
+    (value.submittedCharacters as number) <= (value.rawCharacters as number)
+  );
+}
+
 export function decodePostgresSourceEvidencePreparation(
   payload: unknown,
   invariantError: () => Error,
@@ -89,6 +101,7 @@ export function decodePostgresSourceEvidencePreparation(
     !isDescriptor(payload.model, ["provider", "model"]) ||
     !isDescriptor(payload.preparer, ["key", "version"]) ||
     !isActor(payload.requestedBy) ||
+    !isInputMeasurement(payload.input) ||
     typeof payload.startedAt !== "string" ||
     typeof payload.completedAt !== "string"
   ) {
@@ -101,6 +114,7 @@ export function decodePostgresSourceEvidencePreparation(
     "model",
     "preparer",
     "requestedBy",
+    "input",
     "startedAt",
     "completedAt",
     "outcome",

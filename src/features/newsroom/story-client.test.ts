@@ -64,6 +64,7 @@ const PREPARATION = {
   extractionId: SUCCESSFUL_EXTRACTION.id,
   model: { provider: "openrouter", model: "operator/model" },
   preparer: { key: "storyrail_evidence_preparer", version: "1" },
+  input: { rawCharacters: 512, submittedCharacters: 512 },
   requestedBy: { type: "operator", operatorId: "operator-0021" },
   startedAt: "opaque-preparation-started",
   completedAt: "opaque-preparation-completed",

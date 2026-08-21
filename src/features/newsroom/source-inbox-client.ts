@@ -114,6 +114,17 @@ function isExtraction(value: unknown): value is SourceExtraction {
     typeof value.failure.retryable === "boolean"
   );
 }
+function isInputMeasurement(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    exact(value, ["rawCharacters", "submittedCharacters"]) &&
+    Number.isInteger(value.rawCharacters) &&
+    Number.isInteger(value.submittedCharacters) &&
+    (value.rawCharacters as number) >= 0 &&
+    (value.submittedCharacters as number) >= 0 &&
+    (value.submittedCharacters as number) <= (value.rawCharacters as number)
+  );
+}
 function isPreparation(value: unknown): value is SourceEvidencePreparation {
   if (
     !isRecord(value) ||
@@ -131,6 +142,7 @@ function isPreparation(value: unknown): value is SourceEvidencePreparation {
     typeof value.preparer.key !== "string" ||
     typeof value.preparer.version !== "string" ||
     !isActor(value.requestedBy) ||
+    !isInputMeasurement(value.input) ||
     typeof value.startedAt !== "string" ||
     typeof value.completedAt !== "string"
   )
@@ -142,6 +154,7 @@ function isPreparation(value: unknown): value is SourceEvidencePreparation {
     "model",
     "preparer",
     "requestedBy",
+    "input",
     "startedAt",
     "completedAt",
     "outcome",

@@ -8,6 +8,7 @@ const payload = {
   extractionId: "extraction-25",
   model: { provider: "openrouter", model: "operator/model" },
   preparer: { key: "storyrail_evidence_preparer", version: "1" },
+  input: { rawCharacters: 512, submittedCharacters: 512 },
   requestedBy: { type: "operator", operatorId: "operator-25" },
   startedAt: "opaque-started",
   completedAt: "opaque-completed",

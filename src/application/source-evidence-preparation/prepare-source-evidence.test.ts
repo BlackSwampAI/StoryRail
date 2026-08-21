@@ -21,6 +21,7 @@ import {
 } from "@/domain/editorial";
 
 import {
+  capEvidenceMarkdown,
   createPrepareSourceEvidence,
   EVIDENCE_PREPARATION_SYSTEM_PROMPT,
 } from "./prepare-source-evidence";
@@ -58,6 +59,7 @@ function harness(
     readonly extractions?: readonly SourceExtraction[];
     readonly modelResult?: StructuredModelResult<unknown>;
     readonly appendError?: Error;
+    readonly maximumInputCharacters?: number;
   } = {},
 ) {
   const generated = vi.fn(async (_request: unknown) => {
@@ -77,6 +79,7 @@ function harness(
   });
   const model: StructuredModel = {
     descriptor: { provider: "openrouter", model: "operator/model" },
+    limits: { maximumInputCharacters: options.maximumInputCharacters ?? 60_000 },
     async generateStructured<Output>(request: StructuredModelRequest<Output>) {
       return generated(request) as Promise<StructuredModelResult<Output>>;
     },
@@ -219,6 +222,91 @@ describe("prepareSourceEvidence", () => {
     expect(test.stored).toHaveLength(1);
   });
 
+  it("submits short evidence whole and records that nothing was withheld", async () => {
+    const test = harness();
+    await test.prepare({
+      sourceId: source.id,
+      extractionId: extraction.id,
+      requestedBy: source.submittedBy,
+    });
+
+    const raw = extraction.document.content;
+    expect(test.generated.mock.calls[0]?.[0]).toMatchObject({
+      input: { rawMarkdown: raw },
+    });
+    expect(test.stored[0]?.input).toEqual({
+      rawCharacters: raw.length,
+      submittedCharacters: raw.length,
+    });
+  });
+
+  it("submits only a prefix of oversized evidence and records both lengths", async () => {
+    const paragraph = "Officials reported the figures again and again. ".repeat(40);
+    const long = [paragraph, paragraph, paragraph].join("\n\n");
+    const oversized: SuccessfulSourceExtraction = {
+      ...extraction,
+      document: { ...extraction.document, content: long },
+    };
+    const test = harness({ extractions: [oversized], maximumInputCharacters: 2_000 });
+
+    await test.prepare({
+      sourceId: source.id,
+      extractionId: extraction.id,
+      requestedBy: source.submittedBy,
+    });
+
+    const submitted = (test.generated.mock.calls[0]?.[0] as { input: { rawMarkdown: string } })
+      .input.rawMarkdown;
+    expect(submitted.length).toBeLessThanOrEqual(2_000);
+    expect(long.startsWith(submitted)).toBe(true);
+    expect(test.stored[0]?.input).toEqual({
+      rawCharacters: long.length,
+      submittedCharacters: submitted.length,
+    });
+    expect(test.stored[0]?.input.submittedCharacters).toBeLessThan(long.length);
+  });
+
+  it("records the withheld evidence on a failed attempt too", async () => {
+    const long = "Officials reported the figures. ".repeat(200);
+    const oversized: SuccessfulSourceExtraction = {
+      ...extraction,
+      document: { ...extraction.document, content: long },
+    };
+    const test = harness({
+      extractions: [oversized],
+      maximumInputCharacters: 1_000,
+      modelResult: { ok: false, failure: { code: "MODEL_REQUEST_TIMED_OUT", retryable: true } },
+    });
+
+    await test.prepare({
+      sourceId: source.id,
+      extractionId: extraction.id,
+      requestedBy: source.submittedBy,
+    });
+
+    expect(test.stored[0]).toMatchObject({ outcome: "failed" });
+    expect(test.stored[0]?.input.rawCharacters).toBe(long.length);
+    expect(test.stored[0]?.input.submittedCharacters).toBeLessThan(long.length);
+  });
+
+  it("never alters the immutable raw extraction while capping", async () => {
+    const long = "Officials reported the figures. ".repeat(200);
+    const original = long;
+    const oversized: SuccessfulSourceExtraction = {
+      ...extraction,
+      document: { ...extraction.document, content: long },
+    };
+    const test = harness({ extractions: [oversized], maximumInputCharacters: 500 });
+
+    await test.prepare({
+      sourceId: source.id,
+      extractionId: extraction.id,
+      requestedBy: source.submittedBy,
+    });
+
+    expect(oversized.document.content).toBe(original);
+  });
+
   it("never claims success when persistence fails", async () => {
     const test = harness({ appendError: new Error("database unavailable") });
     await expect(
@@ -228,5 +316,49 @@ describe("prepareSourceEvidence", () => {
         requestedBy: source.submittedBy,
       }),
     ).rejects.toThrow("database unavailable");
+  });
+});
+
+describe("capEvidenceMarkdown", () => {
+  it("returns markdown at or under the budget unchanged", () => {
+    expect(capEvidenceMarkdown("short", 10)).toBe("short");
+    expect(capEvidenceMarkdown("exactlyten", 10)).toBe("exactlyten");
+  });
+
+  it("cuts at the last paragraph break inside the budget", () => {
+    const markdown = ["a".repeat(60), "b".repeat(60), "c".repeat(60)].join("\n\n");
+    const capped = capEvidenceMarkdown(markdown, 130);
+
+    expect(capped).toBe(["a".repeat(60), "b".repeat(60)].join("\n\n"));
+    expect(markdown.startsWith(capped)).toBe(true);
+  });
+
+  it("falls back to a hard cut when no break falls late enough", () => {
+    const markdown = "a".repeat(50) + "\n\n" + "b".repeat(500);
+    const capped = capEvidenceMarkdown(markdown, 400);
+
+    expect(capped).toHaveLength(400);
+    expect(markdown.startsWith(capped)).toBe(true);
+  });
+
+  it("takes the budget from the model boundary rather than a fixed figure", async () => {
+    const long = "Officials reported the figures. ".repeat(200);
+    const oversized: SuccessfulSourceExtraction = {
+      ...extraction,
+      document: { ...extraction.document, content: long },
+    };
+    const narrow = harness({ extractions: [oversized], maximumInputCharacters: 400 });
+    const wide = harness({ extractions: [oversized], maximumInputCharacters: 4_000 });
+
+    for (const test of [narrow, wide]) {
+      await test.prepare({
+        sourceId: source.id,
+        extractionId: extraction.id,
+        requestedBy: source.submittedBy,
+      });
+    }
+
+    expect(narrow.stored[0]?.input.submittedCharacters).toBeLessThanOrEqual(400);
+    expect(wide.stored[0]?.input.submittedCharacters).toBeGreaterThan(400);
   });
 });

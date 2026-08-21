@@ -8,6 +8,7 @@ import { resolveDirectorModel } from "./director-runtime";
 
 const createModel = (model: string): StructuredModel => ({
   descriptor: { provider: "openrouter", model },
+  limits: { maximumInputCharacters: 60_000 },
   generateStructured: (async () => ({
     ok: false as const,
     failure: { code: "MODEL_REQUEST_FAILED" as const, retryable: true },

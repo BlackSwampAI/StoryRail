@@ -57,6 +57,14 @@ function actorLabel(actor: EditorialActor): string {
     : `agent: ${actor.role}, run ${actor.runId}`;
 }
 
+// Prepared Evidence derived from part of the raw extraction is still valid evidence, but the
+// operator has to be able to tell it apart from a preparation that saw the whole page.
+function truncatedShare(input: SourceEvidencePreparation["input"]): string | null {
+  if (input.submittedCharacters >= input.rawCharacters) return null;
+  const percent = Math.round((input.submittedCharacters / input.rawCharacters) * 100);
+  return `The model read the first ${input.submittedCharacters.toLocaleString()} of ${input.rawCharacters.toLocaleString()} characters (${percent}%) of the raw extraction.`;
+}
+
 function PreparationRecord({
   preparation,
   attemptNumber,
@@ -67,6 +75,9 @@ function PreparationRecord({
         <h6>Prepared evidence attempt {attemptNumber}</h6>
         <span>{preparation.outcome === "succeeded" ? "Succeeded" : "Failed"}</span>
       </header>
+      {truncatedShare(preparation.input) ? (
+        <p className={styles.noExtraction}>{truncatedShare(preparation.input)}</p>
+      ) : null}
       {preparation.outcome === "succeeded" ? (
         <>
           <dl className={styles.receiptFacts}>
@@ -108,6 +119,8 @@ function PreparationRecord({
           Preparer: {preparation.preparer.key} / {preparation.preparer.version}
         </p>
         <p>Requested by: {actorLabel(preparation.requestedBy)}</p>
+        <p>Raw evidence characters: {preparation.input.rawCharacters}</p>
+        <p>Characters submitted to the model: {preparation.input.submittedCharacters}</p>
         <p>Started: {preparation.startedAt}</p>
         <p>Completed: {preparation.completedAt}</p>
         <p>Outcome: {preparation.outcome}</p>
