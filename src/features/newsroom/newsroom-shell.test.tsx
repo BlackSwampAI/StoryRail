@@ -258,7 +258,7 @@ describe("NewsroomShell", () => {
     fireEvent.change(await screen.findByLabelText("Angle"), { target: { value: "Manual angle" } });
     fireEvent.click(screen.getByRole("button", { name: "Ask Assignment Editor" }));
     expect(
-      await screen.findByText(/^Assignment Editor failed: MODEL_REQUEST_FAILED/),
+      await screen.findByText(/^Assignment Editor failed\..*\(MODEL_REQUEST_FAILED\)$/),
     ).toBeVisible();
     expect(screen.getByDisplayValue("Manual angle")).toBeVisible();
     expect(screen.getByRole("button", { name: "Ask Assignment Editor" })).toBeEnabled();
@@ -844,7 +844,7 @@ describe("NewsroomShell", () => {
     const runWriter = await screen.findByRole("button", { name: "Run Writer" });
     expect(screen.queryByLabelText("Writer")).not.toBeInTheDocument();
     fireEvent.click(runWriter);
-    expect(await screen.findByText(/Writer failed: MODEL_REQUEST_FAILED/)).toBeVisible();
+    expect(await screen.findByText(/^Writer failed\..*\(MODEL_REQUEST_FAILED\)$/)).toBeVisible();
     expect(screen.getByRole("button", { name: "Run Writer" })).toBeEnabled();
     expect(requests.createWriterDraft).toHaveBeenCalledWith(assigned.id);
     fireEvent.click(screen.getByText("History & Audit"));

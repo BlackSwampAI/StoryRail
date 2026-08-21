@@ -7,6 +7,9 @@ import type {
 
 export const MODEL_FAILURE_CODES = [
   "MODEL_AUTHENTICATION_FAILED",
+  // The account reached a billing or quota limit. Distinct from an authentication failure —
+  // the credential is valid — and from a rejected response, because the operator owns the fix.
+  "MODEL_QUOTA_EXHAUSTED",
   "MODEL_REQUEST_TIMED_OUT",
   "MODEL_REQUEST_FAILED",
   "MODEL_RESPONSE_REJECTED",

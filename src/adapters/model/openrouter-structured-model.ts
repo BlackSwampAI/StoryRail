@@ -75,6 +75,11 @@ function mapFailure<Output>(error: unknown): StructuredModelResult<Output> {
     if (error.statusCode === 408 || error.statusCode === 504) {
       return failed("MODEL_REQUEST_TIMED_OUT", true);
     }
+    // Payment Required means the credential works but the account cannot fund the request.
+    // Reporting that as a rejected response sends the operator looking at the wrong thing.
+    if (error.statusCode === 402) {
+      return failed("MODEL_QUOTA_EXHAUSTED", false);
+    }
     if (error.statusCode !== undefined && error.statusCode >= 400 && error.statusCode < 500) {
       return failed("MODEL_RESPONSE_REJECTED", false);
     }

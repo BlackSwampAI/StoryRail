@@ -14,6 +14,7 @@ import type {
 } from "@/domain/editorial";
 
 import styles from "./newsroom-shell.module.css";
+import { modelFailureExplanation } from "./model-failure";
 import { SafeMarkdown } from "./safe-markdown";
 import {
   sourceInboxClient,
@@ -104,7 +105,8 @@ function PreparationRecord({
       ) : (
         <div className={styles.extractionFailure}>
           <h6>Evidence preparation failed</h6>
-          <p>
+          <p>{modelFailureExplanation(preparation.failure.code)}</p>
+          <p className={styles.formHint}>
             {preparation.failure.code} · retryable: {preparation.failure.retryable ? "yes" : "no"}
           </p>
         </div>

@@ -14,6 +14,7 @@ import {
 
 import { ArticleReader } from "./article-reader";
 import { EditorialTaskPending } from "./editorial-task-pending";
+import { modelFailureMessage } from "./model-failure";
 import { STORY_STATE_LABELS } from "./newsroom-state";
 import { WRITER_ASSIGNMENT_DROP_ID, WRITER_DRAG_TYPE, type StaffState } from "./newsroom-staff";
 import styles from "./newsroom-shell.module.css";
@@ -869,9 +870,7 @@ export function StoryWorkspace({
         return;
       }
       if (result.value.outcome === "failed") {
-        setProposalStatus(
-          `Assignment Editor failed: ${result.value.failure.code}. Retryable: ${result.value.failure.retryable ? "yes" : "no"}.`,
-        );
+        setProposalStatus(modelFailureMessage("Assignment Editor", result.value.failure));
         return;
       }
       setWriterProfileId(result.value.proposal.writerProfileId);
@@ -934,9 +933,7 @@ export function StoryWorkspace({
       setRuns((current) => [...current, result.value]);
       if (result.value.role !== "writer" || result.value.outcome === "failed") {
         if (result.value.role === "writer")
-          setWriterStatus(
-            `Writer failed: ${result.value.failure.code}. Retryable: ${result.value.failure.retryable ? "yes" : "no"}.`,
-          );
+          setWriterStatus(modelFailureMessage("Writer", result.value.failure));
         return;
       }
       const refreshed = await requests.inspectStory(story.id);
@@ -975,9 +972,7 @@ export function StoryWorkspace({
           result.value.operation === "article_revision" &&
           result.value.outcome === "failed"
         )
-          setWriterStatus(
-            `Writer failed: ${result.value.failure.code}. Retryable: ${result.value.failure.retryable ? "yes" : "no"}.`,
-          );
+          setWriterStatus(modelFailureMessage("Writer", result.value.failure));
         return;
       }
       const refreshed = await requests.inspectStory(story.id);
@@ -1037,9 +1032,7 @@ export function StoryWorkspace({
         return;
       }
       if (result.value.outcome === "failed") {
-        setReviewStatus(
-          `Director failed: ${result.value.failure.code}. Retryable: ${result.value.failure.retryable ? "yes" : "no"}.`,
-        );
+        setReviewStatus(modelFailureMessage("Director review", result.value.failure));
         return;
       }
       setOperatorDecision(result.value.review.recommendation);

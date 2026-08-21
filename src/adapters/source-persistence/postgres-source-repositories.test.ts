@@ -102,6 +102,10 @@ const preparationInputMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0049-preparation-input-measurement.sql",
 );
+const modelQuotaMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0053-model-quota-failure-code.sql",
+);
 
 const OPERATOR: OperatorActor = {
   type: "operator",
@@ -314,6 +318,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let directorReviewMigrationSql: string;
   let writerRevisionMigrationSql: string;
   let preparationInputMigrationSql: string;
+  let modelQuotaMigrationSql: string;
   let destructiveSetupAllowed = false;
 
   beforeAll(async () => {
@@ -329,6 +334,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     directorReviewMigrationSql = await readFile(directorReviewMigrationPath, "utf8");
     writerRevisionMigrationSql = await readFile(writerRevisionMigrationPath, "utf8");
     preparationInputMigrationSql = await readFile(preparationInputMigrationPath, "utf8");
+    modelQuotaMigrationSql = await readFile(modelQuotaMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -357,6 +363,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await client.query(directorReviewMigrationSql);
       await client.query(writerRevisionMigrationSql);
       await client.query(preparationInputMigrationSql);
+      await client.query(modelQuotaMigrationSql);
     } finally {
       client.release();
     }
