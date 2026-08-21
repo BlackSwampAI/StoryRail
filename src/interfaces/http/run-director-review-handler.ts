@@ -1,4 +1,6 @@
-import type { RunDirectorReviewResult } from "@/application/director-reviews";
+import { after as scheduleAfterResponse } from "next/server";
+
+import type { RunDirectorReviewFailure } from "@/application/director-reviews";
 import { operatorId, storyId, type OperatorActor } from "@/domain/editorial";
 import { DirectorRuntimeConfigurationError, type DirectorRuntime } from "@/runtime";
 import type { StoryRouteContext } from "./attach-source-to-story-handler";
@@ -7,8 +9,7 @@ const HEADERS = { "Cache-Control": "no-store", "Content-Type": "application/json
 const respond = (body: unknown, status: number) =>
   new Response(JSON.stringify(body), { status, headers: HEADERS });
 const error = (code: string, message: string) => ({ ok: false, error: { code, message } });
-function status(result: RunDirectorReviewResult): number {
-  if (result.ok) return 201;
+function status(result: RunDirectorReviewFailure): number {
   switch (result.error.code) {
     case "STORY_NOT_FOUND":
       return 404;
@@ -32,7 +33,10 @@ function status(result: RunDirectorReviewResult): number {
 export function createRunDirectorReviewHttpHandler(dependencies: {
   readonly getRuntime: () => DirectorRuntime;
   readonly environment?: Readonly<Partial<NodeJS.ProcessEnv>>;
+  /** Injectable so the handler can be exercised outside a Next.js request scope. */
+  readonly after?: (task: () => Promise<void>) => void;
 }) {
+  const after = dependencies.after ?? scheduleAfterResponse;
   return async (request: Request, context: StoryRouteContext): Promise<Response> => {
     if (
       request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() !==
@@ -66,10 +70,18 @@ export function createRunDirectorReviewHttpHandler(dependencies: {
         operatorId: operatorId(configured.trim()),
       };
       const parameters = await context.params;
-      const result = await dependencies
+      const started = await dependencies
         .getRuntime()
         .runDirectorReview({ storyId: storyId(parameters.storyId), requestedBy });
-      return respond(result, status(result));
+      if (!started.ok) return respond(started, status(started));
+
+      // The run is durable and its identity is returned now; the model call finishes after
+      // the response so a slow provider cannot hold the request open.
+      const { completion } = started;
+      after(async () => {
+        await completion;
+      });
+      return respond({ ok: true, runId: started.runId }, 202);
     } catch (caught) {
       if (caught instanceof DirectorRuntimeConfigurationError)
         return respond(error("DIRECTOR_UNAVAILABLE", "Director execution is not configured."), 503);

@@ -1,4 +1,6 @@
-import type { GenerateAssignmentProposalResult } from "@/application/assignment-proposals";
+import type { GenerateAssignmentProposalFailure } from "@/application/assignment-proposals";
+import { after as scheduleAfterResponse } from "next/server";
+
 import { operatorId, storyId, type OperatorActor } from "@/domain/editorial";
 import { AssignmentEditorRuntimeConfigurationError, type AssignmentEditorRuntime } from "@/runtime";
 
@@ -9,8 +11,7 @@ const respond = (body: unknown, status: number) =>
   new Response(JSON.stringify(body), { status, headers: HEADERS });
 const error = (code: string, message: string) => ({ ok: false, error: { code, message } });
 
-function status(result: GenerateAssignmentProposalResult): number {
-  if (result.ok) return 201;
+function status(result: GenerateAssignmentProposalFailure): number {
   switch (result.error.code) {
     case "STORY_NOT_FOUND":
       return 404;
@@ -28,7 +29,10 @@ function status(result: GenerateAssignmentProposalResult): number {
 export function createGenerateAssignmentProposalHttpHandler(dependencies: {
   readonly getRuntime: () => AssignmentEditorRuntime;
   readonly environment?: NodeJS.ProcessEnv;
+  /** Injectable so the handler can be exercised outside a Next.js request scope. */
+  readonly after?: (task: () => Promise<void>) => void;
 }) {
+  const after = dependencies.after ?? scheduleAfterResponse;
   return async (request: Request, context: StoryRouteContext): Promise<Response> => {
     if (
       request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() !==
@@ -67,11 +71,20 @@ export function createGenerateAssignmentProposalHttpHandler(dependencies: {
         operatorId: operatorId(configuredOperator),
       };
       const parameters = await context.params;
-      const result = await dependencies.getRuntime().generateAssignmentProposal({
+      const started = await dependencies.getRuntime().generateAssignmentProposal({
         storyId: storyId(parameters.storyId),
         requestedBy,
       });
-      return respond(result, status(result));
+      if (!started.ok) return respond(started, status(started));
+
+      // The run is durable and its identity is returned now; the model call finishes after the
+      // response so a slow provider cannot hold the request open. Failures are recorded on the
+      // run itself, which the caller follows by inspecting the Story.
+      const { completion } = started;
+      after(async () => {
+        await completion;
+      });
+      return respond({ ok: true, runId: started.runId }, 202);
     } catch (caught) {
       if (caught instanceof AssignmentEditorRuntimeConfigurationError) {
         return respond(

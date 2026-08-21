@@ -9,12 +9,12 @@ import { createOpenRouterStructuredModel } from "@/adapters/model";
 import { createPostgresStoryInspectionRepository } from "@/adapters/story-inspection";
 import {
   createWriterDraft,
-  type CreateWriterDraftResult,
+  type StartCreateWriterDraftResult,
   type WriterModelResolution,
 } from "@/application/writer-drafts";
 import {
   createWriterRevision,
-  type CreateWriterRevisionResult,
+  type StartCreateWriterRevisionResult,
 } from "@/application/writer-revisions";
 import {
   agentRunId,
@@ -34,11 +34,11 @@ export interface WriterRuntime {
   readonly createWriterDraft: (command: {
     readonly storyId: StoryId;
     readonly requestedBy: EditorialActor;
-  }) => Promise<CreateWriterDraftResult>;
+  }) => Promise<StartCreateWriterDraftResult>;
   readonly createWriterRevision: (command: {
     readonly storyId: StoryId;
     readonly requestedBy: EditorialActor;
-  }) => Promise<CreateWriterRevisionResult>;
+  }) => Promise<StartCreateWriterRevisionResult>;
   close(): Promise<void>;
 }
 

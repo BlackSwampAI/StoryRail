@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { settleAgentRun } from "@/test/settle-agent-run";
+
 import { createReferenceAgentProfileRepository } from "@/application/agent-profiles/agent-profile-repository.contract";
 import { createReferenceAgentRunRepository } from "@/application/agent-runs/agent-run-repository.contract";
 import type { StructuredModel, StructuredModelRequest } from "@/application/model";
@@ -194,7 +196,7 @@ function setup(
 describe("generateAssignmentProposal", () => {
   it("makes exactly one safe structured request and persists exact prepared-evidence provenance", async () => {
     const { workflow, generateStructured, runs } = setup();
-    const result = await workflow({ storyId: story.id, requestedBy: actor });
+    const result = await settleAgentRun(workflow({ storyId: story.id, requestedBy: actor }));
     expect(result).toMatchObject({
       ok: true,
       run: {
@@ -246,7 +248,7 @@ describe("generateAssignmentProposal", () => {
     };
     const rawOnly = { ...inspected.sources[0]!, preparations: [] };
     const { workflow } = setup({ ...inspected, sources: [rawOnly, unavailable] });
-    const result = await workflow({ storyId: story.id, requestedBy: actor });
+    const result = await settleAgentRun(workflow({ storyId: story.id, requestedBy: actor }));
     expect(result).toMatchObject({
       ok: true,
       run: {
@@ -277,7 +279,9 @@ describe("generateAssignmentProposal", () => {
       createAgentRunId: () => agentRunId("unused"),
       now: () => "unused",
     });
-    await expect(workflow({ storyId: story.id, requestedBy: actor })).resolves.toMatchObject({
+    await expect(
+      settleAgentRun(workflow({ storyId: story.id, requestedBy: actor })),
+    ).resolves.toMatchObject({
       ok: false,
       error: { code: "STORY_NOT_FOUND" },
     });
@@ -289,7 +293,9 @@ describe("generateAssignmentProposal", () => {
       ...inspection(),
       story: { ...story, state: "assigned" },
     });
-    await expect(workflow({ storyId: story.id, requestedBy: actor })).resolves.toMatchObject({
+    await expect(
+      settleAgentRun(workflow({ storyId: story.id, requestedBy: actor })),
+    ).resolves.toMatchObject({
       ok: false,
       error: { code: "ASSIGNMENT_PROPOSAL_NOT_ALLOWED" },
     });
@@ -315,7 +321,7 @@ describe("generateAssignmentProposal", () => {
     };
     const alreadyAssigned = setup(assignedInspection);
     await expect(
-      alreadyAssigned.workflow({ storyId: story.id, requestedBy: actor }),
+      settleAgentRun(alreadyAssigned.workflow({ storyId: story.id, requestedBy: actor })),
     ).resolves.toMatchObject({
       ok: false,
       error: { code: "ASSIGNMENT_PROPOSAL_NOT_ALLOWED" },
@@ -334,13 +340,13 @@ describe("generateAssignmentProposal", () => {
     };
     const evidenceSetup = setup(emptyEvidence);
     await expect(
-      evidenceSetup.workflow({ storyId: story.id, requestedBy: actor }),
+      settleAgentRun(evidenceSetup.workflow({ storyId: story.id, requestedBy: actor })),
     ).resolves.toMatchObject({ ok: false, error: { code: "ASSIGNMENT_EDITOR_EVIDENCE_REQUIRED" } });
     expect(evidenceSetup.generateStructured).not.toHaveBeenCalled();
 
     const writerSetup = setup(inspection(), undefined, [editor]);
     await expect(
-      writerSetup.workflow({ storyId: story.id, requestedBy: actor }),
+      settleAgentRun(writerSetup.workflow({ storyId: story.id, requestedBy: actor })),
     ).resolves.toMatchObject({
       ok: false,
       error: { code: "WRITER_PROFILE_REQUIRED" },
@@ -355,7 +361,7 @@ describe("generateAssignmentProposal", () => {
     ]) {
       const configured = setup(inspection(), undefined, profiles);
       await expect(
-        configured.workflow({ storyId: story.id, requestedBy: actor }),
+        settleAgentRun(configured.workflow({ storyId: story.id, requestedBy: actor })),
       ).resolves.toMatchObject({
         ok: false,
         error: { code: "ASSIGNMENT_EDITOR_PROFILE_UNAVAILABLE" },
@@ -382,7 +388,9 @@ describe("generateAssignmentProposal", () => {
       },
     ]) {
       const { workflow, runs } = setup(inspection(), output);
-      await expect(workflow({ storyId: story.id, requestedBy: actor })).resolves.toMatchObject({
+      await expect(
+        settleAgentRun(workflow({ storyId: story.id, requestedBy: actor })),
+      ).resolves.toMatchObject({
         ok: true,
         run: {
           outcome: "failed",
@@ -400,7 +408,7 @@ describe("generateAssignmentProposal", () => {
       failure: { code: "MODEL_REQUEST_TIMED_OUT", retryable: true },
     });
     await expect(
-      configured.workflow({ storyId: story.id, requestedBy: actor }),
+      settleAgentRun(configured.workflow({ storyId: story.id, requestedBy: actor })),
     ).resolves.toMatchObject({
       ok: true,
       run: { outcome: "failed", failure: { code: "MODEL_REQUEST_TIMED_OUT", retryable: true } },

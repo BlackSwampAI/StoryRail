@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { AgentRunRepository } from "@/application/agent-runs";
+import type { AgentRunRepository, StartAgentRun } from "@/application/agent-runs";
 import type { StructuredModel } from "@/application/model";
 import type { StoryInspectionRepository } from "@/application/story-inspection";
 import {
@@ -81,6 +81,17 @@ export type CreateWriterDraftResult =
       };
     };
 
+export type CreateWriterDraftFailure = Extract<CreateWriterDraftResult, { readonly ok: false }>;
+
+/**
+ * Resolves once the run is durably recorded as in flight. The model call continues in
+ * `completion`, so preconditions still fail fast while the wait no longer blocks the caller.
+ */
+export type StartCreateWriterDraftResult = StartAgentRun<
+  CreateWriterDraftResult,
+  CreateWriterDraftFailure
+>;
+
 export function createWriterDraft(dependencies: {
   readonly inspections: StoryInspectionRepository;
   readonly runs: AgentRunRepository;
@@ -95,7 +106,7 @@ export function createWriterDraft(dependencies: {
   return async (command: {
     readonly storyId: StoryId;
     readonly requestedBy: EditorialActor;
-  }): Promise<CreateWriterDraftResult> => {
+  }): Promise<StartCreateWriterDraftResult> => {
     const inspected = await dependencies.inspections.inspect(command.storyId);
     if (!inspected.ok)
       return {
@@ -241,91 +252,97 @@ export function createWriterDraft(dependencies: {
         };
       throw new Error("A non-Director AgentRun received a Director uniqueness conflict.");
     }
-    const generated = await resolved.model
-      .generateStructured({
-        systemPrompt: writerSystemPrompt(writerProfile.instructions),
-        input: {
-          story: {
-            id: story.id,
-            title: story.title,
-            state: story.state,
-            revisionCycle: story.revisionCycle,
+    // The run is durable now, so the caller can stop waiting. Only the model call and the
+    // completion it produces continue past this point.
+    const completion = (async (): Promise<CreateWriterDraftResult> => {
+      const generated = await resolved.model
+        .generateStructured({
+          systemPrompt: writerSystemPrompt(writerProfile.instructions),
+          input: {
+            story: {
+              id: story.id,
+              title: story.title,
+              state: story.state,
+              revisionCycle: story.revisionCycle,
+            },
+            assignment,
+            evidence: selected.map(({ reference, document }) => ({ ...reference, document })),
+            unavailableSourceIds,
           },
-          assignment,
-          evidence: selected.map(({ reference, document }) => ({ ...reference, document })),
-          unavailableSourceIds,
-        },
-        schema: writerDraftOutputSchema,
-      })
-      .catch(() => ({
-        ok: false as const,
-        failure: { code: "MODEL_REQUEST_FAILED" as const, retryable: true },
-      }));
-    const completedAt = dependencies.now();
-    const common = { ...identity, completedAt };
-    const parsed = generated.ok ? writerDraftOutputSchema.safeParse(generated.output) : null;
-    if (!generated.ok || !parsed?.success) {
-      const candidate: AgentRun = {
-        ...common,
-        outcome: "failed",
-        failure: generated.ok
-          ? { code: "MODEL_OUTPUT_INVALID", retryable: false }
-          : generated.failure,
-      };
-      const recorded = recordAgentRun(candidate);
-      if (!recorded.ok) throw new Error("The application produced an invalid Writer AgentRun.");
-      const appended = await dependencies.runs.complete(recorded.run);
-      if (!appended.ok) throw new Error("The in-flight Writer AgentRun could not be completed.");
-      if (appended.run.role !== "writer" || appended.run.operation !== "article_draft")
-        throw new Error("The durable AgentRun role changed unexpectedly.");
-      return { ok: true, run: appended.run };
-    }
+          schema: writerDraftOutputSchema,
+        })
+        .catch(() => ({
+          ok: false as const,
+          failure: { code: "MODEL_REQUEST_FAILED" as const, retryable: true },
+        }));
+      const completedAt = dependencies.now();
+      const common = { ...identity, completedAt };
+      const parsed = generated.ok ? writerDraftOutputSchema.safeParse(generated.output) : null;
+      if (!generated.ok || !parsed?.success) {
+        const candidate: AgentRun = {
+          ...common,
+          outcome: "failed",
+          failure: generated.ok
+            ? { code: "MODEL_OUTPUT_INVALID", retryable: false }
+            : generated.failure,
+        };
+        const recorded = recordAgentRun(candidate);
+        if (!recorded.ok) throw new Error("The application produced an invalid Writer AgentRun.");
+        const appended = await dependencies.runs.complete(recorded.run);
+        if (!appended.ok) throw new Error("The in-flight Writer AgentRun could not be completed.");
+        if (appended.run.role !== "writer" || appended.run.operation !== "article_draft")
+          throw new Error("The durable AgentRun role changed unexpectedly.");
+        return { ok: true, run: appended.run };
+      }
 
-    const articleId = dependencies.createArticleId();
-    const revisionId = dependencies.createRevisionId();
-    const occurredAt = dependencies.now();
-    const actor = { type: "agent" as const, role: "writer" as const, runId: id };
-    const articleResult = createArticle({
-      id: articleId,
-      storyId: story.id,
-      assignmentId: assignment.id,
-      createdAt: occurredAt,
-    });
-    const revisionResult = createFirstArticleRevision({
-      id: revisionId,
-      articleId,
-      revisionNumber: 1,
-      writerProfileId: writerProfile.id,
-      agentRunId: id,
-      ...parsed.data,
-      createdBy: actor,
-      createdAt: occurredAt,
-    });
-    const transition = transitionStory({
-      story,
-      nextState: "in_progress",
-      actor,
-      reason: "Writer created the initial Article draft.",
-      transitionId: dependencies.createTransitionId(),
-      occurredAt,
-    });
-    if (!articleResult.ok || !revisionResult.ok || !transition.ok)
-      throw new Error("The application produced invalid Writer draft state.");
-    const runResult = recordAgentRun({ ...common, outcome: "succeeded", articleId, revisionId });
-    if (
-      !runResult.ok ||
-      runResult.run.role !== "writer" ||
-      runResult.run.operation !== "article_draft" ||
-      runResult.run.outcome !== "succeeded"
-    )
-      throw new Error("The application produced an invalid successful Writer AgentRun.");
-    return dependencies.persistence.persist({
-      expectedStory: story,
-      run: runResult.run,
-      article: articleResult.article,
-      revision: revisionResult.revision,
-      story: transition.story,
-      transitionReceipt: transition.receipt,
-    });
+      const articleId = dependencies.createArticleId();
+      const revisionId = dependencies.createRevisionId();
+      const occurredAt = dependencies.now();
+      const actor = { type: "agent" as const, role: "writer" as const, runId: id };
+      const articleResult = createArticle({
+        id: articleId,
+        storyId: story.id,
+        assignmentId: assignment.id,
+        createdAt: occurredAt,
+      });
+      const revisionResult = createFirstArticleRevision({
+        id: revisionId,
+        articleId,
+        revisionNumber: 1,
+        writerProfileId: writerProfile.id,
+        agentRunId: id,
+        ...parsed.data,
+        createdBy: actor,
+        createdAt: occurredAt,
+      });
+      const transition = transitionStory({
+        story,
+        nextState: "in_progress",
+        actor,
+        reason: "Writer created the initial Article draft.",
+        transitionId: dependencies.createTransitionId(),
+        occurredAt,
+      });
+      if (!articleResult.ok || !revisionResult.ok || !transition.ok)
+        throw new Error("The application produced invalid Writer draft state.");
+      const runResult = recordAgentRun({ ...common, outcome: "succeeded", articleId, revisionId });
+      if (
+        !runResult.ok ||
+        runResult.run.role !== "writer" ||
+        runResult.run.operation !== "article_draft" ||
+        runResult.run.outcome !== "succeeded"
+      )
+        throw new Error("The application produced an invalid successful Writer AgentRun.");
+      return dependencies.persistence.persist({
+        expectedStory: story,
+        run: runResult.run,
+        article: articleResult.article,
+        revision: revisionResult.revision,
+        story: transition.story,
+        transitionReceipt: transition.receipt,
+      });
+    })();
+
+    return { ok: true, runId: started.run.id, completion };
   };
 }

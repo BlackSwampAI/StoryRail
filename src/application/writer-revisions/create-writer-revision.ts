@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { AgentRunRepository } from "@/application/agent-runs";
+import type { AgentRunRepository, StartAgentRun } from "@/application/agent-runs";
 import type { StoryInspectionRepository } from "@/application/story-inspection";
 import type { WriterModelResolution } from "@/application/writer-drafts";
 import {
@@ -74,6 +74,20 @@ export type CreateWriterRevisionResult =
       };
     };
 
+export type CreateWriterRevisionFailure = Extract<
+  CreateWriterRevisionResult,
+  { readonly ok: false }
+>;
+
+/**
+ * Resolves once the run is durably recorded as in flight. The model call continues in
+ * `completion`, so preconditions still fail fast while the wait no longer blocks the caller.
+ */
+export type StartCreateWriterRevisionResult = StartAgentRun<
+  CreateWriterRevisionResult,
+  CreateWriterRevisionFailure
+>;
+
 export function createWriterRevision(dependencies: {
   readonly inspections: StoryInspectionRepository;
   readonly runs: AgentRunRepository;
@@ -87,7 +101,7 @@ export function createWriterRevision(dependencies: {
   return async (command: {
     readonly storyId: StoryId;
     readonly requestedBy: EditorialActor;
-  }): Promise<CreateWriterRevisionResult> => {
+  }): Promise<StartCreateWriterRevisionResult> => {
     const inspected = await dependencies.inspections.inspect(command.storyId);
     if (!inspected.ok)
       return {
@@ -297,82 +311,88 @@ export function createWriterRevision(dependencies: {
         };
       throw new Error("A non-Director AgentRun received a Director uniqueness conflict.");
     }
-    const generated = await resolved.model
-      .generateStructured({
-        systemPrompt: writerRevisionSystemPrompt(writerProfile.instructions),
-        input: {
-          ...input,
-          evidence: selected.map(({ reference, document }) => ({ ...reference, document })),
-        },
-        schema: writerRevisionOutputSchema,
-      })
-      .catch(() => ({
-        ok: false as const,
-        failure: { code: "MODEL_REQUEST_FAILED" as const, retryable: true },
-      }));
-    const completedAt = dependencies.now();
-    const common = { ...identity, completedAt };
-    const parsed = generated.ok ? writerRevisionOutputSchema.safeParse(generated.output) : null;
-    if (!generated.ok || !parsed?.success) {
-      const recorded = recordAgentRun({
-        ...common,
-        outcome: "failed",
-        failure: generated.ok
-          ? { code: "MODEL_OUTPUT_INVALID", retryable: false }
-          : generated.failure,
-      });
-      if (!recorded.ok)
-        throw new Error("The application produced an invalid Writer revision AgentRun.");
-      const appended = await dependencies.runs.complete(recorded.run);
-      if (!appended.ok) throw new Error("The in-flight Writer AgentRun could not be completed.");
-      if (appended.run.role !== "writer" || appended.run.operation !== "article_revision")
-        throw new Error("The durable AgentRun operation changed unexpectedly.");
-      return { ok: true, run: appended.run };
-    }
+    // The run is durable now, so the caller can stop waiting. Only the model call and the
+    // completion it produces continue past this point.
+    const completion = (async (): Promise<CreateWriterRevisionResult> => {
+      const generated = await resolved.model
+        .generateStructured({
+          systemPrompt: writerRevisionSystemPrompt(writerProfile.instructions),
+          input: {
+            ...input,
+            evidence: selected.map(({ reference, document }) => ({ ...reference, document })),
+          },
+          schema: writerRevisionOutputSchema,
+        })
+        .catch(() => ({
+          ok: false as const,
+          failure: { code: "MODEL_REQUEST_FAILED" as const, retryable: true },
+        }));
+      const completedAt = dependencies.now();
+      const common = { ...identity, completedAt };
+      const parsed = generated.ok ? writerRevisionOutputSchema.safeParse(generated.output) : null;
+      if (!generated.ok || !parsed?.success) {
+        const recorded = recordAgentRun({
+          ...common,
+          outcome: "failed",
+          failure: generated.ok
+            ? { code: "MODEL_OUTPUT_INVALID", retryable: false }
+            : generated.failure,
+        });
+        if (!recorded.ok)
+          throw new Error("The application produced an invalid Writer revision AgentRun.");
+        const appended = await dependencies.runs.complete(recorded.run);
+        if (!appended.ok) throw new Error("The in-flight Writer AgentRun could not be completed.");
+        if (appended.run.role !== "writer" || appended.run.operation !== "article_revision")
+          throw new Error("The durable AgentRun operation changed unexpectedly.");
+        return { ok: true, run: appended.run };
+      }
 
-    const revisionId = dependencies.createRevisionId();
-    const occurredAt = dependencies.now();
-    const actor = { type: "agent" as const, role: "writer" as const, runId: id };
-    const nextRevision = createArticleRevision({
-      id: revisionId,
-      articleId: article.article.id,
-      revisionNumber: (revision.revisionNumber + 1) as 2 | 3,
-      writerProfileId: writerProfile.id,
-      agentRunId: id,
-      ...parsed.data,
-      createdBy: actor,
-      createdAt: occurredAt,
-    });
-    const transition = transitionStory({
-      story,
-      nextState: "in_progress",
-      actor,
-      reason: `Writer created Article Revision ${revision.revisionNumber + 1}.`,
-      transitionId: dependencies.createTransitionId(),
-      occurredAt,
-    });
-    if (!nextRevision.ok || !transition.ok)
-      throw new Error("The application produced invalid Writer revision state.");
-    const runResult = recordAgentRun({
-      ...common,
-      outcome: "succeeded",
-      articleId: article.article.id,
-      revisionId,
-    });
-    if (
-      !runResult.ok ||
-      runResult.run.role !== "writer" ||
-      runResult.run.operation !== "article_revision" ||
-      runResult.run.outcome !== "succeeded"
-    )
-      throw new Error("The application produced an invalid successful Writer revision AgentRun.");
-    return dependencies.persistence.persist({
-      expectedStory: story,
-      expectedRevision: revision,
-      run: runResult.run,
-      revision: nextRevision.revision,
-      story: transition.story,
-      transitionReceipt: transition.receipt,
-    });
+      const revisionId = dependencies.createRevisionId();
+      const occurredAt = dependencies.now();
+      const actor = { type: "agent" as const, role: "writer" as const, runId: id };
+      const nextRevision = createArticleRevision({
+        id: revisionId,
+        articleId: article.article.id,
+        revisionNumber: (revision.revisionNumber + 1) as 2 | 3,
+        writerProfileId: writerProfile.id,
+        agentRunId: id,
+        ...parsed.data,
+        createdBy: actor,
+        createdAt: occurredAt,
+      });
+      const transition = transitionStory({
+        story,
+        nextState: "in_progress",
+        actor,
+        reason: `Writer created Article Revision ${revision.revisionNumber + 1}.`,
+        transitionId: dependencies.createTransitionId(),
+        occurredAt,
+      });
+      if (!nextRevision.ok || !transition.ok)
+        throw new Error("The application produced invalid Writer revision state.");
+      const runResult = recordAgentRun({
+        ...common,
+        outcome: "succeeded",
+        articleId: article.article.id,
+        revisionId,
+      });
+      if (
+        !runResult.ok ||
+        runResult.run.role !== "writer" ||
+        runResult.run.operation !== "article_revision" ||
+        runResult.run.outcome !== "succeeded"
+      )
+        throw new Error("The application produced an invalid successful Writer revision AgentRun.");
+      return dependencies.persistence.persist({
+        expectedStory: story,
+        expectedRevision: revision,
+        run: runResult.run,
+        revision: nextRevision.revision,
+        story: transition.story,
+        transitionReceipt: transition.receipt,
+      });
+    })();
+
+    return { ok: true, runId: started.run.id, completion };
   };
 }

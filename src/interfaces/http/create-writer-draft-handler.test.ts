@@ -20,7 +20,7 @@ describe("Writer draft HTTP handler", () => {
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(getRuntime).not.toHaveBeenCalled();
   });
-  it("returns a durable failed run as a completed execution record", async () => {
+  it("accepts a started run and returns its identity without waiting for the model", async () => {
     const run = {
       id: "run",
       storyId: "story-31",
@@ -30,13 +30,19 @@ describe("Writer draft HTTP handler", () => {
       outcome: "failed",
     };
     const runtime = {
-      createWriterDraft: vi.fn(async () => ({ ok: true as const, run })),
+      createWriterDraft: vi.fn(async () => ({
+        ok: true as const,
+        runId: run.id,
+        completion: Promise.resolve({ ok: true as const, run }),
+      })),
       createWriterRevision: vi.fn(),
       close: vi.fn(),
     };
+    const scheduled: (() => Promise<void>)[] = [];
     const response = await createWriterDraftHttpHandler({
       getRuntime: () => runtime as never,
       environment: { STORYRAIL_OPERATOR_ID: "operator" },
+      after: (task) => scheduled.push(task),
     })(
       new Request("http://test/api", {
         method: "POST",
@@ -45,7 +51,10 @@ describe("Writer draft HTTP handler", () => {
       }),
       context,
     );
-    expect(response.status).toBe(201);
-    expect(await response.json()).toMatchObject({ ok: true, run: { outcome: "failed" } });
+    // The response is produced while the model call is still outstanding.
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ ok: true, runId: run.id });
+    expect(scheduled).toHaveLength(1);
+    await Promise.all(scheduled.map((task) => task()));
   });
 });

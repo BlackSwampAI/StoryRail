@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+
+import { settleAgentRun } from "@/test/settle-agent-run";
 import type { StructuredModel } from "@/application/model";
 import {
   agentProfileId,
@@ -216,7 +218,7 @@ describe("run Director review", () => {
       now: vi.fn().mockReturnValueOnce("start").mockReturnValue("end"),
     });
     await expect(
-      workflow({ storyId: facts.inspection.story.id, requestedBy: facts.actor }),
+      settleAgentRun(workflow({ storyId: facts.inspection.story.id, requestedBy: facts.actor })),
     ).resolves.toMatchObject({ ok: true, run: { outcome: "succeeded" } });
     expect(generateStructured).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -262,7 +264,7 @@ describe("run Director review", () => {
       now: () => "now",
     });
     await expect(
-      workflow({ storyId: inspection.story.id, requestedBy: facts.actor }),
+      settleAgentRun(workflow({ storyId: inspection.story.id, requestedBy: facts.actor })),
     ).resolves.toMatchObject({ ok: false, error: { code: "DIRECTOR_EVIDENCE_UNAVAILABLE" } });
     expect(generateStructured).not.toHaveBeenCalled();
   });
@@ -323,7 +325,7 @@ describe("run Director review", () => {
     });
 
     await expect(
-      workflow({ storyId: facts.inspection.story.id, requestedBy: facts.actor }),
+      settleAgentRun(workflow({ storyId: facts.inspection.story.id, requestedBy: facts.actor })),
     ).resolves.toMatchObject({
       ok: true,
       run: {
@@ -332,7 +334,7 @@ describe("run Director review", () => {
       },
     });
     await expect(
-      workflow({ storyId: facts.inspection.story.id, requestedBy: facts.actor }),
+      settleAgentRun(workflow({ storyId: facts.inspection.story.id, requestedBy: facts.actor })),
     ).resolves.toMatchObject({ ok: true, run: { outcome: "succeeded" } });
     // Each attempt is recorded as in flight before the model is called, then completed.
     expect(appended.map(({ outcome }) => outcome)).toEqual([
