@@ -127,6 +127,69 @@ describe("sourceInboxClient", () => {
     expect(fetch).toHaveBeenCalledOnce();
   });
 
+  it("posts an empty body to the Source extractions endpoint and restores the attempt", async () => {
+    const fetch = vi.fn(
+      async () => new Response(JSON.stringify({ ok: true, extraction }), { status: 201 }),
+    );
+    await expect(createSourceInboxClient(fetch).retryExtraction(source.id)).resolves.toEqual({
+      kind: "completed",
+      value: extraction,
+    });
+    expect(fetch).toHaveBeenCalledWith("/api/sources/source%2Fa%20b/extractions", {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: "{}",
+    });
+  });
+
+  it("treats a recorded extraction failure as a completed attempt", async () => {
+    const failed = {
+      id: "extraction-24-failed",
+      sourceId: source.id,
+      extractor: { key: "provider", version: "1" },
+      requestedBy: actor,
+      startedAt: "opaque-start",
+      completedAt: "opaque-complete",
+      outcome: "failed",
+      failure: { code: "RESPONSE_REJECTED", retryable: false },
+    } as const;
+    const fetch = vi.fn(
+      async () => new Response(JSON.stringify({ ok: true, extraction: failed }), { status: 201 }),
+    );
+    await expect(createSourceInboxClient(fetch).retryExtraction(source.id)).resolves.toEqual({
+      kind: "completed",
+      value: failed,
+    });
+  });
+
+  it("surfaces a known extraction application failure", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ ok: false, error: { code: "SOURCE_NOT_FOUND", message: "missing" } }),
+          { status: 404 },
+        ),
+    );
+    await expect(createSourceInboxClient(fetch).retryExtraction(source.id)).resolves.toEqual({
+      kind: "application-failure",
+      error: { code: "SOURCE_NOT_FOUND", message: "missing" },
+    });
+  });
+
+  it("rejects a retried extraction belonging to another Source", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ ok: true, extraction: { ...extraction, sourceId: "other-source" } }),
+          { status: 201 },
+        ),
+    );
+    await expect(createSourceInboxClient(fetch).retryExtraction(source.id)).resolves.toMatchObject({
+      kind: "unavailable",
+    });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
   it("fails safely on malformed evidence and does not retry", async () => {
     const fetch = vi.fn(
       async () =>

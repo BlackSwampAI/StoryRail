@@ -12,7 +12,11 @@ import {
   type UrlSource,
 } from "@/domain/editorial";
 
-import type { SourceInboxClient, SourceInboxClientResult } from "./source-inbox-client";
+import {
+  SOURCE_INBOX_UNAVAILABLE_MESSAGE,
+  type SourceInboxClient,
+  type SourceInboxClientResult,
+} from "./source-inbox-client";
 import type {
   RequestSourceEvidenceUrl,
   SourceEvidenceUrlResult,
@@ -78,10 +82,25 @@ const FAILED_PREPARATION = {
   outcome: "failed",
   failure: { code: "MODEL_OUTPUT_INVALID", retryable: true },
 } satisfies SourceEvidencePreparation;
+const FAILED_EXTRACTION = {
+  id: sourceExtractionId("extraction-24-failed"),
+  sourceId: SOURCE.id,
+  extractor: { key: "controlled", version: "1" },
+  requestedBy: ACTOR,
+  startedAt: "2026-08-10T12:00:01.000Z",
+  completedAt: "2026-08-10T12:00:02.000Z",
+  outcome: "failed",
+  failure: { code: "RESPONSE_REJECTED", retryable: false },
+} satisfies SourceExtraction;
 const COMPLETED = {
   kind: "completed",
   source: SOURCE,
   extraction: EXTRACTION,
+} satisfies SourceEvidenceUrlResult;
+const EXTRACTION_FAILED = {
+  kind: "completed",
+  source: SOURCE,
+  extraction: FAILED_EXTRACTION,
 } satisfies SourceEvidenceUrlResult;
 
 function request(result: SourceEvidenceUrlResult = COMPLETED) {
@@ -92,6 +111,10 @@ function inbox(
   prepareResult: SourceInboxClientResult<SourceEvidencePreparation> = {
     kind: "completed",
     value: PREPARATION,
+  },
+  retryResult: SourceInboxClientResult<SourceExtraction> = {
+    kind: "completed",
+    value: EXTRACTION,
   },
 ): SourceInboxClient {
   return {
@@ -104,6 +127,7 @@ function inbox(
       message: "The Source Inbox request could not be completed.",
     })),
     prepareEvidence: vi.fn<SourceInboxClient["prepareEvidence"]>(async () => prepareResult),
+    retryExtraction: vi.fn<SourceInboxClient["retryExtraction"]>(async () => retryResult),
   };
 }
 
@@ -383,6 +407,81 @@ describe("SourceEvidenceWorkspace", () => {
     await waitFor(() =>
       expect(within(history as HTMLElement).getAllByText("Succeeded")).toHaveLength(2),
     );
+  });
+
+  it("offers extraction retry as the primary action after a recorded extraction failure", async () => {
+    render(
+      <SourceEvidenceWorkspace
+        requestSourceEvidence={request(EXTRACTION_FAILED)}
+        inboxRequests={inbox()}
+      />,
+    );
+    submit();
+
+    expect(await screen.findByRole("heading", { name: "Extraction failed" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Try extraction again" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Review in Source Inbox" })).toBeVisible();
+  });
+
+  it("continues into preparation when a retried extraction succeeds", async () => {
+    const inboxRequests = inbox();
+    render(
+      <SourceEvidenceWorkspace
+        requestSourceEvidence={request(EXTRACTION_FAILED)}
+        inboxRequests={inboxRequests}
+      />,
+    );
+    submit();
+    fireEvent.click(await screen.findByRole("button", { name: "Try extraction again" }));
+
+    expect(await screen.findByRole("heading", { name: "Prepared Evidence" })).toBeVisible();
+    expect(inboxRequests.retryExtraction).toHaveBeenCalledWith(SOURCE.id);
+    expect(inboxRequests.prepareEvidence).toHaveBeenCalledWith(SOURCE.id, EXTRACTION.id);
+  });
+
+  it("keeps the Source retryable when the retried extraction fails again", async () => {
+    const inboxRequests = inbox(undefined, {
+      kind: "completed",
+      value: FAILED_EXTRACTION,
+    });
+    render(
+      <SourceEvidenceWorkspace
+        requestSourceEvidence={request(EXTRACTION_FAILED)}
+        inboxRequests={inboxRequests}
+      />,
+    );
+    submit();
+    fireEvent.click(await screen.findByRole("button", { name: "Try extraction again" }));
+
+    expect(await screen.findByRole("heading", { name: "Extraction failed" })).toBeVisible();
+    expect(inboxRequests.prepareEvidence).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Try extraction again" })).toBeEnabled();
+  });
+
+  it("reports a retry that never reached the newsroom without discarding the Source", async () => {
+    const inboxRequests = inbox(undefined, {
+      kind: "unavailable",
+      message: SOURCE_INBOX_UNAVAILABLE_MESSAGE,
+    });
+    render(
+      <SourceEvidenceWorkspace
+        requestSourceEvidence={request(EXTRACTION_FAILED)}
+        inboxRequests={inboxRequests}
+      />,
+    );
+    submit();
+    fireEvent.click(await screen.findByRole("button", { name: "Try extraction again" }));
+
+    expect(
+      await screen.findByRole("heading", { name: SOURCE_INBOX_UNAVAILABLE_MESSAGE }),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "No new extraction attempt was recorded. The Source and its earlier history are unchanged.",
+      ),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Try extraction again" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Review in Source Inbox" })).toBeVisible();
   });
 
   it("returns to a clean intake form when the operator chooses Add another Source", async () => {

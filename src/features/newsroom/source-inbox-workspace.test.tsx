@@ -46,6 +46,21 @@ const extraction = {
   },
 } satisfies SourceExtraction;
 const item = { source, extractions: [extraction], preparations: [] } as const;
+const failedExtraction = {
+  id: sourceExtractionId("extraction-24-failed"),
+  sourceId: source.id,
+  extractor: { key: "controlled", version: "1" },
+  requestedBy: actor,
+  startedAt: "start",
+  completedAt: "complete",
+  outcome: "failed",
+  failure: { code: "RESPONSE_REJECTED", retryable: false },
+} satisfies SourceExtraction;
+const unextractedItem = { source, extractions: [failedExtraction], preparations: [] } as const;
+const retriedExtraction = {
+  ...extraction,
+  id: sourceExtractionId("extraction-24-retried"),
+} satisfies SourceExtraction;
 const preparation = {
   id: sourceEvidencePreparationId("preparation-25"),
   sourceId: source.id,
@@ -103,6 +118,10 @@ function clients() {
     prepareEvidence: vi.fn<SourceInboxClient["prepareEvidence"]>(async () => ({
       kind: "completed",
       value: preparation,
+    })),
+    retryExtraction: vi.fn<SourceInboxClient["retryExtraction"]>(async () => ({
+      kind: "completed",
+      value: retriedExtraction,
     })),
   };
   const stories: StoryClient = {
@@ -259,6 +278,66 @@ describe("SourceInboxWorkspace", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Prepare evidence" }));
     expect(multipleInbox.prepareEvidence).toHaveBeenCalledWith(source.id, newerExtraction.id);
+  });
+
+  it("offers extraction retry when no successful extraction exists", async () => {
+    const { inbox, stories } = clients();
+    const unextracted: SourceInboxClient = {
+      ...inbox,
+      listPendingSources: vi.fn<SourceInboxClient["listPendingSources"]>(async () => ({
+        kind: "completed",
+        value: [unextractedItem],
+      })),
+    };
+    renderInbox(unextracted, stories);
+
+    expect(
+      await screen.findByText("No successful extraction is available to prepare."),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Try extraction again" }));
+    expect(unextracted.retryExtraction).toHaveBeenCalledWith(source.id);
+  });
+
+  it("prepares the recovered evidence after a successful extraction retry", async () => {
+    const { inbox, stories } = clients();
+    const unextracted: SourceInboxClient = {
+      ...inbox,
+      listPendingSources: vi.fn<SourceInboxClient["listPendingSources"]>(async () => ({
+        kind: "completed",
+        value: [unextractedItem],
+      })),
+    };
+    renderInbox(unextracted, stories);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Try extraction again" }));
+
+    await waitFor(() =>
+      expect(unextracted.prepareEvidence).toHaveBeenCalledWith(source.id, retriedExtraction.id),
+    );
+  });
+
+  it("reports a repeated extraction failure without discarding the Source", async () => {
+    const { inbox, stories } = clients();
+    const unextracted: SourceInboxClient = {
+      ...inbox,
+      listPendingSources: vi.fn<SourceInboxClient["listPendingSources"]>(async () => ({
+        kind: "completed",
+        value: [unextractedItem],
+      })),
+      retryExtraction: vi.fn<SourceInboxClient["retryExtraction"]>(async () => ({
+        kind: "completed",
+        value: failedExtraction,
+      })),
+    };
+    renderInbox(unextracted, stories);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Try extraction again" }));
+
+    expect(
+      await screen.findByText("Extraction failed again: RESPONSE_REJECTED · retryable: no"),
+    ).toBeVisible();
+    expect(unextracted.prepareEvidence).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Create new Story" })).toBeVisible();
   });
 
   it("keeps the latest successful evidence primary when a later attempt failed", async () => {
