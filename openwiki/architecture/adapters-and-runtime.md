@@ -18,10 +18,13 @@ Adapters implement the application-layer repository ports against external syste
 - Descriptor: `{ key: "firecrawl", version: "v2" }`.
 - Requires a non-empty API key at construction (`FirecrawlSourceExtractorConfigurationError`).
 - Maps HTTP status to domain failure codes: 408/504 → `RETRIEVAL_TIMED_OUT` (retryable), 429/500/502/503 → `RETRIEVAL_FAILED` (retryable), 413 → `CONTENT_TOO_LARGE`, 415 → `UNSUPPORTED_CONTENT_TYPE`, other → `RESPONSE_REJECTED`.
-- Expects `{ success: true, data: { markdown, metadata } }`; missing/empty markdown → `EXTRACTION_FAILED`.
+- Expects `{ success: true, data: { markdown, metadata } }`; the body is mapped by `mapSuccessfulBody`, which gates the result before any content is built into an `ExtractedSourceDocument`.
+- Upstream-failure gate (`upstreamFailure`): Firecrawl answers 200 with `success: true` even when the fetched page answered with an error, reporting the upstream status in `metadata.statusCode`. When that status is an integer and not 2xx, the result is `mapHttpFailure(status)` — the same status→code map as the HTTP-layer path (408/504 → `RETRIEVAL_TIMED_OUT`, 429/500/502/503 → `RETRIEVAL_FAILED`, 413 → `CONTENT_TOO_LARGE`, 415 → `UNSUPPORTED_CONTENT_TYPE`, other → `RESPONSE_REJECTED`). Absent, non-numeric, or fractional status codes are ignored so the content is judged instead.
+- Missing or empty markdown → `EXTRACTION_FAILED`.
+- Obvious challenge/interstitial Markdown (reCAPTCHA, browser-check, `challenge-platform` markers) → `RESPONSE_REJECTED`. The scrape request sends `proxy: "auto"`, `onlyMainContent: true`, and `maxAge: 0` so each attempt re-fetches the live page.
+- Minimum-content floor (`MINIMUM_EXTRACTED_CONTENT_LENGTH = 120`): after the challenge-page check, Markdown whose trimmed length is below 120 chars → `EXTRACTION_FAILED`. The floor is deliberately far below real articles so only empty shells are rejected.
 - Builds an `ExtractedSourceDocument` with `format: "markdown"`, the markdown content, optional `title` and `language` from metadata, and null `byline`/`publishedAt`.
 - Accepts an injectable `fetch` implementation for testing.
-- Sends `proxy: "auto"` and rejects obvious challenge/interstitial Markdown as a failed `RESPONSE_REJECTED` extraction.
 
 ### Structured model: OpenRouter
 
