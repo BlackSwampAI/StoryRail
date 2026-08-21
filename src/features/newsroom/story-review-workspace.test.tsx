@@ -638,3 +638,170 @@ describe("Director review workspace", () => {
     expect(screen.queryByRole("button", { name: "Ask Assignment Editor" })).not.toBeInTheDocument();
   });
 });
+
+describe("in-flight agent runs", () => {
+  function runningDirectorRun(base: StoryInspection) {
+    const [existing] = base.agentRuns;
+    if (!existing) throw new Error("The fixture must provide a Director run to adapt.");
+    const { review: _review, ...common } = existing as never as {
+      review: unknown;
+    } & Record<string, unknown>;
+    return { ...common, completedAt: null, outcome: "running" };
+  }
+
+  function inReview(): StoryInspection {
+    const reviewed = inspection();
+    return { ...reviewed, story: { ...reviewed.story, state: "in_review" } } as StoryInspection;
+  }
+
+  it("shows the Director as running from the durable record alone", async () => {
+    const base = inReview();
+    const running = {
+      ...base,
+      agentRuns: [runningDirectorRun(base)],
+    } as unknown as StoryInspection;
+
+    render(
+      <DragDropProvider>
+        <StoryWorkspace
+          inspection={running}
+          requests={requests}
+          staff={{ kind: "loaded", profiles: [] }}
+          onAssigned={vi.fn()}
+          onWriterCompleted={vi.fn()}
+          onReviewStateChanged={vi.fn()}
+        />
+      </DragDropProvider>,
+    );
+
+    // Nothing was clicked: the workspace rejoins a run that was already under way.
+    expect(await screen.findByText("Director is reviewing the Article…")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Run Director" })).not.toBeInTheDocument();
+  });
+
+  it("follows an in-flight run and reports the Story once it settles", async () => {
+    const base = inReview();
+    const running = {
+      ...base,
+      agentRuns: [runningDirectorRun(base)],
+    } as unknown as StoryInspection;
+    const inspectStory = vi.fn(async () => ({ kind: "completed" as const, value: base }));
+    const onWriterCompleted = vi.fn();
+
+    render(
+      <DragDropProvider>
+        <StoryWorkspace
+          inspection={running}
+          requests={{ ...requests, inspectStory }}
+          staff={{ kind: "loaded", profiles: [] }}
+          onAssigned={vi.fn()}
+          onWriterCompleted={onWriterCompleted}
+          onReviewStateChanged={vi.fn()}
+        />
+      </DragDropProvider>,
+    );
+
+    await waitFor(() => expect(inspectStory).toHaveBeenCalledWith(base.story.id), {
+      timeout: 5_000,
+    });
+    await waitFor(() => expect(onWriterCompleted).toHaveBeenCalledWith(base), { timeout: 5_000 });
+  });
+
+  it("shows the proposal a followed run produced, without a click", async () => {
+    const base = inspection();
+    const proposalRun = {
+      id: "assignment-run-57",
+      storyId: base.story.id,
+      profileId: "storyrail-assignment-editor-v1",
+      role: "assignment_editor",
+      operation: "assignment_proposal",
+      model: { provider: "openrouter", model: "editor-model" },
+      prompt: { key: "storyrail_assignment_editor", version: "1" },
+      requestedBy: { type: "operator", operatorId: "operator-38" },
+      startedAt: "start",
+      input: {
+        story: { id: base.story.id, title: base.story.title, state: "intake", revisionCycle: 0 },
+        evidence: [
+          {
+            sourceId: "source-38",
+            relevance: "Relevant",
+            evidenceKind: "raw",
+            evidenceId: "extraction-38",
+          },
+        ],
+        unavailableSourceIds: [],
+        writerProfileIds: ["writer-38"],
+      },
+    };
+    const intake = {
+      ...base,
+      story: { ...base.story, state: "intake" },
+      assignment: null,
+      article: null,
+    } as unknown as StoryInspection;
+    const running = {
+      ...intake,
+      agentRuns: [{ ...proposalRun, completedAt: null, outcome: "running" }],
+    } as unknown as StoryInspection;
+    const settled = {
+      ...intake,
+      agentRuns: [
+        {
+          ...proposalRun,
+          completedAt: "end",
+          outcome: "succeeded",
+          proposal: {
+            writerProfileId: "writer-38",
+            angle: "A followed angle",
+            brief: "A followed brief",
+            constraints: null,
+            reason: "Because the evidence supports it",
+          },
+        },
+      ],
+    } as unknown as StoryInspection;
+    const inspectStory = vi.fn(async () => ({ kind: "completed" as const, value: settled }));
+
+    render(
+      <DragDropProvider>
+        <StoryWorkspace
+          inspection={running}
+          requests={{ ...requests, inspectStory }}
+          staff={{ kind: "loaded", profiles: [] }}
+          onAssigned={vi.fn()}
+          onWriterCompleted={vi.fn()}
+          onReviewStateChanged={vi.fn()}
+        />
+      </DragDropProvider>,
+    );
+
+    expect(
+      await screen.findByText("Assignment Editor is preparing a recommendation…"),
+    ).toBeVisible();
+    // The suggestion card appears on its own, driven by the run the workspace followed.
+    expect(
+      await screen.findByText("Assignment Editor suggestion", {}, { timeout: 5_000 }),
+    ).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Angle" })).toBeVisible();
+  });
+
+  it("stops inspecting once no run is in flight", async () => {
+    const inspectStory = vi.fn(async () => ({ kind: "completed" as const, value: inReview() }));
+
+    render(
+      <DragDropProvider>
+        <StoryWorkspace
+          inspection={inReview()}
+          requests={{ ...requests, inspectStory }}
+          staff={{ kind: "loaded", profiles: [] }}
+          onAssigned={vi.fn()}
+          onWriterCompleted={vi.fn()}
+          onReviewStateChanged={vi.fn()}
+        />
+      </DragDropProvider>,
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    expect(inspectStory).not.toHaveBeenCalled();
+  });
+});
