@@ -69,6 +69,8 @@ describe("OpenRouter structured model adapter", () => {
     [new OpenRouterAuthError("secret provider body", 401), "MODEL_AUTHENTICATION_FAILED", false],
     [new OpenRouterError("secret provider body", 408), "MODEL_REQUEST_TIMED_OUT", true],
     [new OpenRouterError("secret provider body", 400), "MODEL_RESPONSE_REJECTED", false],
+    // A valid credential that cannot fund the request is the operator's account to fix.
+    [new OpenRouterError("secret provider body", 402), "MODEL_QUOTA_EXHAUSTED", false],
     [new Error("secret provider body"), "MODEL_REQUEST_FAILED", true],
   ] as const)("maps provider failure safely", async (providerError, code, retryable) => {
     const model = createOpenRouterStructuredModel({
