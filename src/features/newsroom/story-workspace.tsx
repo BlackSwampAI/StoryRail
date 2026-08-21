@@ -1,7 +1,7 @@
 "use client";
 
 import { useDragDropMonitor, useDragOperation, useDroppable } from "@dnd-kit/react";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { StoryInspection } from "@/application/story-inspection";
 import {
@@ -11,6 +11,15 @@ import {
   type EditorialActor,
   type StoryTransitionReceipt,
 } from "@/domain/editorial";
+
+/** How often a Story with an in-flight agent run is re-inspected. */
+const IN_FLIGHT_POLL_INTERVAL_MS = 1_500;
+
+function isSuccessfulProposal(
+  run: AgentRun,
+): run is Extract<AgentRun, { readonly role: "assignment_editor"; readonly outcome: "succeeded" }> {
+  return run.role === "assignment_editor" && run.outcome === "succeeded";
+}
 
 import { ArticleReader } from "./article-reader";
 import { EditorialTaskPending } from "./editorial-task-pending";
@@ -764,16 +773,29 @@ export function StoryWorkspace({
   const [rejectionReason, setRejectionReason] = useState("");
   const [rejectionStatus, setRejectionStatus] = useState<string | null>(null);
   const [runs, setRuns] = useState<readonly AgentRun[]>(agentRuns);
-  const latestProposal = [...runs]
-    .reverse()
-    .find(
-      (
-        run,
-      ): run is Extract<
-        AgentRun,
-        { readonly role: "assignment_editor"; readonly outcome: "succeeded" }
-      > => run.role === "assignment_editor" && run.outcome === "succeeded",
-    );
+
+  // A run recorded as in flight is the authority on what is happening, not local component
+  // state. Reopening the Story mid-run therefore rejoins it instead of showing an idle
+  // workspace, and the operator can tell a slow run from a lost one.
+  const runningOperations = useMemo(
+    () =>
+      new Set(
+        runs
+          .filter((run) => run.outcome === "running")
+          .map((run) => `${run.role}/${run.operation}`),
+      ),
+    [runs],
+  );
+  const isRunning = useCallback(
+    (role: AgentRun["role"], operation: AgentRun["operation"]) =>
+      runningOperations.has(`${role}/${operation}`),
+    [runningOperations],
+  );
+  const proposalRunning = proposalPending || isRunning("assignment_editor", "assignment_proposal");
+  const draftRunning = writerPending || isRunning("writer", "article_draft");
+  const revisionRunning = writerPending || isRunning("writer", "article_revision");
+  const directorRunning = directorPending || isRunning("editor_in_chief", "article_review");
+  const latestProposal = [...runs].reverse().find(isSuccessfulProposal);
   const [writerProfileId, setWriterProfileId] = useState(
     durableProposal?.proposal.writerProfileId ?? "",
   );
@@ -821,9 +843,10 @@ export function StoryWorkspace({
     .find((transition) => transition.nextState === "rejected");
   const editorialMutationPending =
     assignmentPending ||
-    writerPending ||
+    draftRunning ||
+    revisionRunning ||
     reviewSubmissionPending ||
-    directorPending ||
+    directorRunning ||
     decisionPending;
   const assignmentEligible = isWriterDropEligible(inspection);
   const { ref: assignmentDropRef, isDropTarget } = useDroppable({
@@ -1009,6 +1032,27 @@ export function StoryWorkspace({
     }
   }
 
+  const anythingRunning = runningOperations.size > 0;
+  useEffect(() => {
+    if (!anythingRunning) return;
+    let active = true;
+    const timer = setInterval(() => {
+      void (async () => {
+        const refreshed = await requests.inspectStory(story.id);
+        if (!active || refreshed.kind !== "completed") return;
+        setRuns(refreshed.value.agentRuns);
+        if (refreshed.value.agentRuns.some(isSuccessfulProposal)) setProposalReady(true);
+        if (refreshed.value.agentRuns.every((run) => run.outcome !== "running")) {
+          onWriterCompleted(refreshed.value);
+        }
+      })();
+    }, IN_FLIGHT_POLL_INTERVAL_MS);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [anythingRunning, requests, story.id, onWriterCompleted]);
+
   async function refreshAfterReviewChange(message: string) {
     const refreshed = await requests.inspectStory(story.id);
     if (refreshed.kind === "completed") onReviewStateChanged(refreshed.value);
@@ -1190,7 +1234,7 @@ export function StoryWorkspace({
               writerName={assignment?.writerProfile.name ?? "Writer"}
               headingId="current-task-heading"
             />
-            {story.state === "changes_requested" && writerPending ? (
+            {story.state === "changes_requested" && revisionRunning ? (
               <EditorialTaskPending
                 label="Current task · Writer revision"
                 headline="Writer is revising the Article…"
@@ -1211,7 +1255,7 @@ export function StoryWorkspace({
                   {reviewSubmissionPending ? "Sending to Review…" : "Send to Review"}
                 </button>
               </section>
-            ) : story.state === "in_review" && directorPending ? (
+            ) : story.state === "in_review" && directorRunning ? (
               <EditorialTaskPending
                 label="Current task · Director review"
                 headline="Director is reviewing the Article…"
@@ -1339,7 +1383,7 @@ export function StoryWorkspace({
                     — {existingDecision.reason}
                   </p>
                 ) : null}
-                {story.state === "changes_requested" && !writerPending ? (
+                {story.state === "changes_requested" && !revisionRunning ? (
                   <section className={styles.reviewTask} aria-labelledby="writer-revision-heading">
                     <p className={styles.currentTaskLabel}>Current task · Writer revision</p>
                     <h3 id="writer-revision-heading">
@@ -1384,7 +1428,7 @@ export function StoryWorkspace({
           </div>
         ) : story.state === "intake" && assignment === null ? (
           <>
-            {proposalPending ? (
+            {proposalRunning ? (
               <EditorialTaskPending
                 label="Current task · Assignment Editor"
                 headline="Assignment Editor is preparing a recommendation…"
@@ -1493,10 +1537,10 @@ export function StoryWorkspace({
                     <button
                       type="button"
                       className={styles.tertiaryAction}
-                      disabled={proposalPending}
+                      disabled={proposalRunning}
                       onClick={() => void generateProposal()}
                     >
-                      {proposalPending ? "Assignment Editor is working…" : "Ask Assignment Editor"}
+                      {proposalRunning ? "Assignment Editor is working…" : "Ask Assignment Editor"}
                     </button>
                   )}
                 </header>
@@ -1621,7 +1665,7 @@ export function StoryWorkspace({
             )}
           </>
         ) : story.state === "assigned" && assignment !== null ? (
-          writerPending ? (
+          draftRunning ? (
             <EditorialTaskPending
               label="Current task · Writer"
               headline="Writer is drafting the Article…"
