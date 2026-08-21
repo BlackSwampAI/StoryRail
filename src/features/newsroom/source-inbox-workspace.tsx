@@ -716,7 +716,10 @@ function TriageItem({
         <div>
           <p className={styles.sectionKicker}>Decision completed</p>
           <h3 id={`triage-completed-${item.source.id}`}>{progress.message}</h3>
-          <p>{extractedTitle(item) || item.source.canonicalUrl}</p>
+          {/* Name the Story the operator just decided on, not the publisher's page title. */}
+          <p>
+            {progress.inspection?.story.title ?? extractedTitle(item) ?? item.source.canonicalUrl}
+          </p>
           <div className={styles.handoffActions}>
             {progress.inspection ? (
               <button

@@ -2,7 +2,7 @@
 
 import { DragDropProvider, DragOverlay } from "@dnd-kit/react";
 import Image from "next/image";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { StoryInspection } from "@/application/story-inspection";
 import type { StoryListItem } from "@/application/story-listing";
@@ -56,7 +56,8 @@ export function NewsroomShell({
   agentProfileRequests,
 }: NewsroomShellProps) {
   const requests = storyRequests ?? storyClient;
-  const [expandedQueue, setExpandedQueue] = useState<StoryState | null>("intake");
+  // `undefined` means the operator has not chosen a queue, so the desk picks one for them.
+  const [chosenQueue, setChosenQueue] = useState<StoryState | null | undefined>(undefined);
   const [listing, setListing] = useState<StoryListingState>({ kind: "loading" });
   const [storySelection, setStorySelection] = useState<StorySelection>({ kind: "none" });
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("story");
@@ -136,14 +137,24 @@ export function NewsroomShell({
 
   const items = listing.kind === "loaded" ? listing.items : [];
 
+  // Open the desk where the work actually is. Stories furthest along need an operator decision
+  // soonest, so the last non-empty queue wins until the operator picks one themselves.
+  const suggestedQueue = useMemo(() => {
+    const occupied = STORY_STATES.filter((state) =>
+      items.some(({ story }) => story.state === state),
+    );
+    return occupied.at(-1) ?? "intake";
+  }, [items]);
+  const expandedQueue = chosenQueue === undefined ? suggestedQueue : chosenQueue;
+
   function openWorkspace(mode: WorkspaceMode) {
     setWorkspaceMode(mode);
-    if (mode !== "story") setExpandedQueue(null);
+    if (mode !== "story") setChosenQueue(null);
     if (mode !== "source-inbox") setFocusedSourceId(null);
   }
 
   function toggleQueue(state: StoryState) {
-    setExpandedQueue((current) => (current === state ? null : state));
+    setChosenQueue(expandedQueue === state ? null : state);
     setWorkspaceMode("story");
   }
 
@@ -363,7 +374,7 @@ export function NewsroomShell({
                       story: facts.story,
                       sourceCount: storySelection.inspection.sources.length,
                     });
-                    setExpandedQueue("assigned");
+                    setChosenQueue("assigned");
                     setStorySelection({ kind: "loaded", inspection: returnedInspection });
                     try {
                       const refreshed = await requests.inspectStory(facts.story.id);
@@ -391,7 +402,7 @@ export function NewsroomShell({
                       story: refreshed.story,
                       sourceCount: refreshed.sources.length,
                     });
-                    setExpandedQueue("in_progress");
+                    setChosenQueue("in_progress");
                     setStorySelection({ kind: "loaded", inspection: refreshed });
                   }}
                   onReviewStateChanged={(refreshed) => {
@@ -399,7 +410,7 @@ export function NewsroomShell({
                       story: refreshed.story,
                       sourceCount: refreshed.sources.length,
                     });
-                    setExpandedQueue(refreshed.story.state);
+                    setChosenQueue(refreshed.story.state);
                     setStorySelection({ kind: "loaded", inspection: refreshed });
                   }}
                 />
@@ -443,14 +454,14 @@ export function NewsroomShell({
                 onPendingCountChange={setSourceInboxCount}
                 onStoryKnown={(story, sourceCount) => {
                   upsertStoryListItem({ story, sourceCount });
-                  setExpandedQueue(story.state);
+                  setChosenQueue(story.state);
                 }}
                 onStoryLoaded={(inspection) => {
                   upsertStoryListItem({
                     story: inspection.story,
                     sourceCount: inspection.sources.length,
                   });
-                  setExpandedQueue(inspection.story.state);
+                  setChosenQueue(inspection.story.state);
                   setStorySelection({ kind: "loaded", inspection });
                   setWorkspaceMode("story");
                 }}

@@ -834,8 +834,9 @@ export function StoryWorkspace({
   const existingDecision = [...inspection.reviewDecisions]
     .reverse()
     .find((decision) => decision.revisionId === currentRevisionId);
+  const revisionsExhausted = story.revisionCycle >= 2;
   const [operatorDecision, setOperatorDecision] = useState<"approve" | "request_changes" | null>(
-    existingDecision?.decision ?? null,
+    existingDecision?.decision ?? (revisionsExhausted ? "approve" : null),
   );
   const [decisionReason, setDecisionReason] = useState(existingDecision?.reason ?? "");
   const rejectionTransition = [...inspection.transitions]
@@ -1373,6 +1374,15 @@ export function StoryWorkspace({
                     >
                       {decisionPending ? "Recording decision…" : "Record decision"}
                     </button>
+                    {/* A disabled control should say what it is waiting for. */}
+                    {!decisionPending &&
+                    (!operatorDecision || decisionReason.trim().length === 0) ? (
+                      <p className={styles.formHint}>
+                        {!operatorDecision
+                          ? "Choose Approve or Request changes, then give a reason."
+                          : "A reason is required before the decision can be recorded."}
+                      </p>
+                    ) : null}
                   </form>
                 ) : existingDecision ? (
                   <p className={styles.decisionResult}>
@@ -1722,87 +1732,87 @@ export function StoryWorkspace({
         )}
       </section>
 
-      {["intake", "assigned", "in_progress", "in_review", "changes_requested"].includes(
-        story.state,
-      ) ? (
-        <section className={styles.rejectionPanel} aria-labelledby="story-rejection-heading">
-          {!rejectionOpen ? (
-            <div className={styles.rejectionSummary}>
-              <div>
-                <h2 id="story-rejection-heading">Reject this Story</h2>
-                <p>End editorial work on this Story with an attributable operator reason.</p>
-              </div>
-              <button
-                type="button"
-                className={styles.secondaryAction}
-                disabled={editorialMutationPending}
-                onClick={() => setRejectionOpen(true)}
-              >
-                Reject Story
-              </button>
-            </div>
-          ) : (
-            <form
-              className={styles.rejectionForm}
-              onSubmit={(event) => {
-                event.preventDefault();
-                void rejectStory();
-              }}
-            >
-              <div>
-                <h2 id="story-rejection-heading">Confirm Story rejection</h2>
-                <p>
-                  Rejected is terminal. Existing Sources, assignments, Articles, agent runs, and
-                  audit records will be preserved.
-                </p>
-              </div>
-              <label>
-                Rejection reason
-                <textarea
-                  value={rejectionReason}
-                  onChange={(event) => setRejectionReason(event.target.value)}
-                  required
-                  disabled={rejectionPending || editorialMutationPending}
-                />
-              </label>
-              <div className={styles.taskActions}>
-                <button
-                  type="submit"
-                  className={styles.dangerAction}
-                  disabled={
-                    rejectionPending ||
-                    editorialMutationPending ||
-                    rejectionReason.trim().length === 0
-                  }
-                >
-                  {rejectionPending ? "Rejecting Story…" : "Reject Story"}
-                </button>
-                <button
-                  type="button"
-                  className={styles.secondaryAction}
-                  disabled={rejectionPending}
-                  onClick={() => {
-                    setRejectionOpen(false);
-                    setRejectionReason("");
-                    setRejectionStatus(null);
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
-              {rejectionStatus ? (
-                <p role="alert" className={styles.inlineAlert}>
-                  {rejectionStatus}
-                </p>
-              ) : null}
-            </form>
-          )}
-        </section>
-      ) : null}
-
       <div className={styles.secondaryPanels}>
         <EvidencePanel inspection={inspection} />
         <AuditPanel inspection={inspection} runs={runs} />
+
+        {["intake", "assigned", "in_progress", "in_review", "changes_requested"].includes(
+          story.state,
+        ) ? (
+          <section className={styles.rejectionPanel} aria-labelledby="story-rejection-heading">
+            {!rejectionOpen ? (
+              <div className={styles.rejectionSummary}>
+                <div>
+                  <h2 id="story-rejection-heading">Reject this Story</h2>
+                  <p>End editorial work on this Story with an attributable operator reason.</p>
+                </div>
+                <button
+                  type="button"
+                  className={styles.secondaryAction}
+                  disabled={editorialMutationPending}
+                  onClick={() => setRejectionOpen(true)}
+                >
+                  Reject Story
+                </button>
+              </div>
+            ) : (
+              <form
+                className={styles.rejectionForm}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void rejectStory();
+                }}
+              >
+                <div>
+                  <h2 id="story-rejection-heading">Confirm Story rejection</h2>
+                  <p>
+                    Rejected is terminal. Existing Sources, assignments, Articles, agent runs, and
+                    audit records will be preserved.
+                  </p>
+                </div>
+                <label>
+                  Rejection reason
+                  <textarea
+                    value={rejectionReason}
+                    onChange={(event) => setRejectionReason(event.target.value)}
+                    required
+                    disabled={rejectionPending || editorialMutationPending}
+                  />
+                </label>
+                <div className={styles.taskActions}>
+                  <button
+                    type="submit"
+                    className={styles.dangerAction}
+                    disabled={
+                      rejectionPending ||
+                      editorialMutationPending ||
+                      rejectionReason.trim().length === 0
+                    }
+                  >
+                    {rejectionPending ? "Rejecting Story…" : "Reject Story"}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.secondaryAction}
+                    disabled={rejectionPending}
+                    onClick={() => {
+                      setRejectionOpen(false);
+                      setRejectionReason("");
+                      setRejectionStatus(null);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+                {rejectionStatus ? (
+                  <p role="alert" className={styles.inlineAlert}>
+                    {rejectionStatus}
+                  </p>
+                ) : null}
+              </form>
+            )}
+          </section>
+        ) : null}
       </div>
     </article>
   );

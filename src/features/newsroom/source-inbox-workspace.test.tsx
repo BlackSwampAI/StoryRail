@@ -328,6 +328,27 @@ describe("SourceInboxWorkspace", () => {
     expect(screen.queryByText(/The model read the first/)).not.toBeInTheDocument();
   });
 
+  it("names the Story the operator created, not the publisher's page title", async () => {
+    const { inbox, stories } = clients();
+    renderInbox(inbox, stories);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Create new Story" }));
+    fireEvent.change(screen.getByRole("textbox", { name: /Story title/ }), {
+      target: { value: "An operator's own headline" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: /Source relevance/ }), {
+      target: { value: "Relevant evidence." },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: /Editorial decision reason/ }), {
+      target: { value: "Worth pursuing." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create, attach, and record decision" }));
+
+    expect(await screen.findByText("Story created and Source attached.")).toBeVisible();
+    expect(screen.getByText(story.title)).toBeVisible();
+    expect(screen.queryByText("Extracted title")).not.toBeInTheDocument();
+  });
+
   it("offers extraction retry when no successful extraction exists", async () => {
     const { inbox, stories } = clients();
     const unextracted: SourceInboxClient = {
