@@ -578,6 +578,7 @@ describe("NewsroomShell", () => {
       extractionId: extraction.id,
       model: { provider: "openrouter", model: "operator/model" },
       preparer: { key: "storyrail_evidence_preparer", version: "1" },
+      input: { rawCharacters: 512, submittedCharacters: 512 },
       requestedBy: source.submittedBy,
       startedAt: "preparation-started",
       completedAt: "preparation-completed",

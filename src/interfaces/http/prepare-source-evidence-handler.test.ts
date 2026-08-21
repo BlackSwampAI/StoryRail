@@ -16,6 +16,7 @@ const preparation = {
   extractionId: sourceExtractionId("extraction-http-25"),
   model: { provider: "openrouter", model: "operator/model" },
   preparer: { key: "storyrail_evidence_preparer", version: "1" },
+  input: { rawCharacters: 512, submittedCharacters: 512 },
   requestedBy: { type: "operator", operatorId: operatorId("operator-http-25") },
   startedAt: "started",
   completedAt: "completed",

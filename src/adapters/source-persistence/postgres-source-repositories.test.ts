@@ -98,6 +98,10 @@ const writerRevisionMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0041-supervised-writer-revisions.sql",
 );
+const preparationInputMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0049-preparation-input-measurement.sql",
+);
 
 const OPERATOR: OperatorActor = {
   type: "operator",
@@ -200,6 +204,7 @@ function makePreparation(
     extractionId: extraction.id,
     model: { provider: "openrouter", model: `operator/model-${suffix}` },
     preparer: { key: "storyrail_evidence_preparer", version: "1" },
+    input: { rawCharacters: 512, submittedCharacters: 512 },
     requestedBy: OPERATOR,
     startedAt: `opaque-preparation-started-${suffix}`,
     completedAt: `opaque-preparation-completed-${suffix}`,
@@ -308,6 +313,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let writerDraftMigrationSql: string;
   let directorReviewMigrationSql: string;
   let writerRevisionMigrationSql: string;
+  let preparationInputMigrationSql: string;
   let destructiveSetupAllowed = false;
 
   beforeAll(async () => {
@@ -322,6 +328,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     writerDraftMigrationSql = await readFile(writerDraftMigrationPath, "utf8");
     directorReviewMigrationSql = await readFile(directorReviewMigrationPath, "utf8");
     writerRevisionMigrationSql = await readFile(writerRevisionMigrationPath, "utf8");
+    preparationInputMigrationSql = await readFile(preparationInputMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -349,6 +356,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await client.query(writerDraftMigrationSql);
       await client.query(directorReviewMigrationSql);
       await client.query(writerRevisionMigrationSql);
+      await client.query(preparationInputMigrationSql);
     } finally {
       client.release();
     }
@@ -1112,6 +1120,83 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await expect(sourceRepositories.extractions.listBySourceId(source.id)).resolves.toEqual([
         extraction,
       ]);
+    });
+
+    it("restores a preparation written before the input measurement existed", async () => {
+      const source = makeSource("preparation-malformed");
+      const sourceRepositories = createPostgresSourceRepositories({ pool });
+      await sourceRepositories.sources.persist({ source });
+      const upgradeExtraction = makeSuccessfulExtraction(source, "preparation-upgrade");
+      await sourceRepositories.extractions.append({ extraction: upgradeExtraction });
+      const upgradeRepository = createPostgresSourceEvidencePreparationRepository({ pool });
+      const upgradePreparation = makePreparation(source, upgradeExtraction, "upgrade");
+      await upgradeRepository.append(upgradePreparation);
+      const upgradeClient = await pool.connect();
+
+      try {
+        await upgradeClient.query("BEGIN");
+        // Reconstruct a row written before the input measurement existed.
+        await upgradeClient.query(
+          "ALTER TABLE storyrail.source_evidence_preparations DROP CONSTRAINT source_evidence_preparations_payload_input_check",
+        );
+        await upgradeClient.query(
+          `UPDATE storyrail.source_evidence_preparations
+           SET payload = payload - 'input'
+           WHERE preparation_id = $1`,
+          [upgradePreparation.id],
+        );
+        const legacyRepository = createPostgresSourceEvidencePreparationRepository({
+          pool: upgradeClient as unknown as Pool,
+        });
+
+        await expect(legacyRepository.listBySourceId(source.id)).rejects.toMatchObject({
+          name: "PostgresSourceEvidencePreparationInvariantError",
+        });
+
+        // Applying the shipped migration must make the historical row readable again.
+        await upgradeClient.query(
+          preparationInputMigrationSql.replace(/^BEGIN;/m, "").replace(/^COMMIT;/m, ""),
+        );
+        const restored = await legacyRepository.listBySourceId(source.id);
+
+        expect(restored).toHaveLength(1);
+        expect(restored[0]?.input).toEqual({
+          rawCharacters: UNTRUSTED_MARKDOWN.length,
+          submittedCharacters: UNTRUSTED_MARKDOWN.length,
+        });
+      } finally {
+        await upgradeClient.query("ROLLBACK");
+        upgradeClient.release();
+      }
+    });
+
+    it("rejects a persisted input measurement that claims more was submitted than existed", async () => {
+      const source = makeSource("preparation-input-invariant");
+      const sourceRepositories = createPostgresSourceRepositories({ pool });
+      await sourceRepositories.sources.persist({ source });
+      const extraction = makeSuccessfulExtraction(source, "preparation-input-invariant");
+      await sourceRepositories.extractions.append({ extraction });
+      const repository = createPostgresSourceEvidencePreparationRepository({ pool });
+      const preparation = makePreparation(source, extraction, "input-invariant");
+      await repository.append(preparation);
+      const client = await pool.connect();
+
+      try {
+        await client.query("BEGIN");
+        await expect(
+          client.query(
+            `UPDATE storyrail.source_evidence_preparations
+             SET payload = payload || '{"input":{"rawCharacters":10,"submittedCharacters":11}}'::jsonb
+             WHERE preparation_id = $1`,
+            [preparation.id],
+          ),
+        ).rejects.toMatchObject({
+          constraint: "source_evidence_preparations_payload_input_check",
+        });
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
     });
 
     it("fails safely when a persisted preparation payload has an unexpected key", async () => {

@@ -30,6 +30,19 @@ export function recordSourceEvidencePreparation(
   if (preparerVersion.length === 0) {
     return invalid("PREPARER_VERSION_REQUIRED", "An evidence preparer version is required.");
   }
+  const { rawCharacters, submittedCharacters } = command.input;
+  if (
+    !Number.isInteger(rawCharacters) ||
+    !Number.isInteger(submittedCharacters) ||
+    rawCharacters < 0 ||
+    submittedCharacters < 0 ||
+    submittedCharacters > rawCharacters
+  ) {
+    return invalid(
+      "PREPARATION_INPUT_MEASUREMENT_INVALID",
+      "Preparation input lengths must be non-negative integers, and the submitted length cannot exceed the raw length.",
+    );
+  }
   if (command.outcome === "succeeded" && command.document.content.trim().length === 0) {
     return invalid(
       "PREPARED_SOURCE_CONTENT_REQUIRED",
@@ -44,6 +57,7 @@ export function recordSourceEvidencePreparation(
     model: { provider, model },
     preparer: { key: preparerKey, version: preparerVersion },
     requestedBy: structuredClone(command.requestedBy),
+    input: { rawCharacters, submittedCharacters },
     startedAt: command.startedAt,
     completedAt: command.completedAt,
   };

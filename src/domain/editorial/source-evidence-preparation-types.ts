@@ -36,6 +36,16 @@ export interface PreparedSourceDocument {
   readonly language: string | null;
 }
 
+/**
+ * What the model was actually shown. Raw evidence may exceed the preparation input budget, in
+ * which case only a prefix is submitted; recording both lengths keeps the attempt honest about
+ * how much of the immutable raw extraction it could see.
+ */
+export interface PreparationInputMeasurement {
+  readonly rawCharacters: number;
+  readonly submittedCharacters: number;
+}
+
 interface SourceEvidencePreparationCommon {
   readonly id: SourceEvidencePreparationId;
   readonly sourceId: SourceId;
@@ -43,6 +53,7 @@ interface SourceEvidencePreparationCommon {
   readonly model: ModelDescriptor;
   readonly preparer: EvidencePreparerDescriptor;
   readonly requestedBy: EditorialActor;
+  readonly input: PreparationInputMeasurement;
   readonly startedAt: string;
   readonly completedAt: string;
 }
@@ -70,6 +81,7 @@ interface RecordPreparationCommandCommon {
   readonly model: ModelDescriptor;
   readonly preparer: EvidencePreparerDescriptor;
   readonly requestedBy: EditorialActor;
+  readonly input: PreparationInputMeasurement;
   readonly startedAt: string;
   readonly completedAt: string;
 }
@@ -89,6 +101,7 @@ export type SourceEvidencePreparationValidationCode =
   | "PREPARATION_MODEL_REQUIRED"
   | "PREPARER_KEY_REQUIRED"
   | "PREPARER_VERSION_REQUIRED"
+  | "PREPARATION_INPUT_MEASUREMENT_INVALID"
   | "PREPARED_SOURCE_CONTENT_REQUIRED";
 
 export type RecordSourceEvidencePreparationResult =

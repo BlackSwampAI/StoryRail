@@ -100,6 +100,7 @@ function fixture() {
               extractionId: sourceExtractionId("raw-a"),
               model: { provider: "openrouter", model: "prep" },
               preparer: { key: "prep", version: "1" },
+              input: { rawCharacters: 512, submittedCharacters: 512 },
               requestedBy: assignment.assignedBy,
               startedAt: "start",
               completedAt: "end",
@@ -144,6 +145,7 @@ describe("createWriterDraft", () => {
     });
     const model: StructuredModel = {
       descriptor: { provider: "openrouter", model: "default-writer" },
+      limits: { maximumInputCharacters: 60_000 },
       generateStructured: generateStructured as StructuredModel["generateStructured"],
     };
     const persist = vi.fn<WriterDraftPersistence["persist"]>(async (command) => ({
@@ -202,6 +204,7 @@ describe("createWriterDraft", () => {
     const persist = vi.fn();
     const model: StructuredModel = {
       descriptor: { provider: "openrouter", model: "writer" },
+      limits: { maximumInputCharacters: 60_000 },
       generateStructured: vi.fn(async () => ({
         ok: false as const,
         failure: { code: "MODEL_REQUEST_FAILED" as const, retryable: true },

@@ -105,6 +105,7 @@ function inspection(): StoryInspection {
             extractionId: extractionIdentity,
             model: { provider: "openrouter", model: "preparer/model" },
             preparer: { key: "storyrail_evidence_preparer", version: "1" },
+            input: { rawCharacters: 512, submittedCharacters: 512 },
             requestedBy: actor,
             startedAt: "failed-started",
             completedAt: "failed-completed",
@@ -117,6 +118,7 @@ function inspection(): StoryInspection {
             extractionId: extractionIdentity,
             model: { provider: "openrouter", model: "preparer/model" },
             preparer: { key: "storyrail_evidence_preparer", version: "1" },
+            input: { rawCharacters: 512, submittedCharacters: 512 },
             requestedBy: actor,
             startedAt: "prepared-started",
             completedAt: "prepared-completed",
@@ -172,6 +174,7 @@ function setup(
   );
   const model: StructuredModel = {
     descriptor: { provider: "openrouter", model: "assignment/model" },
+    limits: { maximumInputCharacters: 60_000 },
     generateStructured: generateStructured as StructuredModel["generateStructured"],
   };
   const runs = createReferenceAgentRunRepository();

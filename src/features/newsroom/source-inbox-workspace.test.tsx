@@ -67,6 +67,7 @@ const preparation = {
   extractionId: extraction.id,
   model: { provider: "openrouter", model: "operator/model" },
   preparer: { key: "storyrail_evidence_preparer", version: "1" },
+  input: { rawCharacters: 512, submittedCharacters: 512 },
   requestedBy: actor,
   startedAt: "preparation-started",
   completedAt: "preparation-completed",
@@ -280,6 +281,53 @@ describe("SourceInboxWorkspace", () => {
     expect(multipleInbox.prepareEvidence).toHaveBeenCalledWith(source.id, newerExtraction.id);
   });
 
+  it("says so when the model only read part of the raw extraction", async () => {
+    const { inbox, stories } = clients();
+    const partial = {
+      ...preparation,
+      input: { rawCharacters: 480_000, submittedCharacters: 120_000 },
+    } satisfies SourceEvidencePreparation;
+    const partialInbox: SourceInboxClient = {
+      ...inbox,
+      listPendingSources: vi.fn<SourceInboxClient["listPendingSources"]>(async () => ({
+        kind: "completed",
+        value: [{ ...item, preparations: [partial] }],
+      })),
+    };
+    renderInbox(partialInbox, stories);
+
+    const history = (await screen.findByText(/Preparation history/)).closest("details");
+    fireEvent.click(within(history as HTMLElement).getByText(/Preparation history/));
+
+    expect(
+      await screen.findByText(
+        "The model read the first 120,000 of 480,000 characters (25%) of the raw extraction.",
+      ),
+    ).toBeVisible();
+  });
+
+  it("stays silent when the model read the whole raw extraction", async () => {
+    const { inbox, stories } = clients();
+    const whole = {
+      ...preparation,
+      input: { rawCharacters: 4_096, submittedCharacters: 4_096 },
+    } satisfies SourceEvidencePreparation;
+    const wholeInbox: SourceInboxClient = {
+      ...inbox,
+      listPendingSources: vi.fn<SourceInboxClient["listPendingSources"]>(async () => ({
+        kind: "completed",
+        value: [{ ...item, preparations: [whole] }],
+      })),
+    };
+    renderInbox(wholeInbox, stories);
+
+    const history = (await screen.findByText(/Preparation history/)).closest("details");
+    fireEvent.click(within(history as HTMLElement).getByText(/Preparation history/));
+
+    expect(await screen.findByText(/Prepared evidence attempt 1/)).toBeVisible();
+    expect(screen.queryByText(/The model read the first/)).not.toBeInTheDocument();
+  });
+
   it("offers extraction retry when no successful extraction exists", async () => {
     const { inbox, stories } = clients();
     const unextracted: SourceInboxClient = {
@@ -348,6 +396,7 @@ describe("SourceInboxWorkspace", () => {
       extractionId: extraction.id,
       model: { provider: "openrouter", model: "operator/model" },
       preparer: { key: "storyrail_evidence_preparer", version: "1" },
+      input: { rawCharacters: 512, submittedCharacters: 512 },
       requestedBy: actor,
       startedAt: "failed-preparation-started",
       completedAt: "failed-preparation-completed",
