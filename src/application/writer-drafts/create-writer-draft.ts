@@ -191,6 +191,56 @@ export function createWriterDraft(dependencies: {
     if (!resolved.ok) return { ok: false, error: { ...resolved.error, storyId: story.id } };
     const id = dependencies.createAgentRunId();
     const startedAt = dependencies.now();
+
+    const input = {
+      story: {
+        id: story.id,
+        title: story.title,
+        state: story.state,
+        revisionCycle: story.revisionCycle,
+      },
+      assignment: {
+        id: assignment.id,
+        storyId: assignment.storyId,
+        writerProfileId: assignment.writerProfileId,
+        sourceIds: assignment.sourceIds,
+        angle: assignment.angle,
+        brief: assignment.brief,
+        constraints: assignment.constraints,
+      },
+      evidence: selected.map(({ reference }) => reference),
+      unavailableSourceIds,
+    };
+
+    const identity = {
+      id,
+      storyId: story.id,
+      profileId: writerProfile.id,
+      role: "writer" as const,
+      operation: "article_draft" as const,
+      model: resolved.model.descriptor,
+      prompt: WRITER_DRAFT_PROMPT,
+      requestedBy: command.requestedBy,
+      startedAt,
+      input,
+    };
+
+    // Record the run before the model is called so an in-flight run is durable.
+    const started = recordAgentRun({ ...identity, completedAt: null, outcome: "running" });
+    if (!started.ok) throw new Error("The application produced an invalid Writer draft AgentRun.");
+    const appendedStart = await dependencies.runs.append(started.run);
+    if (!appendedStart.ok) {
+      if (appendedStart.error.code === "AGENT_RUN_ID_CONFLICT")
+        return {
+          ok: false,
+          error: {
+            code: "AGENT_RUN_ID_CONFLICT",
+            message: appendedStart.error.message,
+            runId: appendedStart.error.runId,
+          },
+        };
+      throw new Error("A non-Director AgentRun received a Director uniqueness conflict.");
+    }
     const generated = await resolved.model
       .generateStructured({
         systemPrompt: writerSystemPrompt(writerProfile.instructions),
@@ -212,38 +262,7 @@ export function createWriterDraft(dependencies: {
         failure: { code: "MODEL_REQUEST_FAILED" as const, retryable: true },
       }));
     const completedAt = dependencies.now();
-    const input = {
-      story: {
-        id: story.id,
-        title: story.title,
-        state: story.state,
-        revisionCycle: story.revisionCycle,
-      },
-      assignment: {
-        id: assignment.id,
-        storyId: assignment.storyId,
-        writerProfileId: assignment.writerProfileId,
-        sourceIds: assignment.sourceIds,
-        angle: assignment.angle,
-        brief: assignment.brief,
-        constraints: assignment.constraints,
-      },
-      evidence: selected.map(({ reference }) => reference),
-      unavailableSourceIds,
-    };
-    const common = {
-      id,
-      storyId: story.id,
-      profileId: writerProfile.id,
-      role: "writer" as const,
-      operation: "article_draft" as const,
-      model: resolved.model.descriptor,
-      prompt: WRITER_DRAFT_PROMPT,
-      requestedBy: command.requestedBy,
-      startedAt,
-      completedAt,
-      input,
-    };
+    const common = { ...identity, completedAt };
     const parsed = generated.ok ? writerDraftOutputSchema.safeParse(generated.output) : null;
     if (!generated.ok || !parsed?.success) {
       const candidate: AgentRun = {
@@ -255,19 +274,8 @@ export function createWriterDraft(dependencies: {
       };
       const recorded = recordAgentRun(candidate);
       if (!recorded.ok) throw new Error("The application produced an invalid Writer AgentRun.");
-      const appended = await dependencies.runs.append(recorded.run);
-      if (!appended.ok) {
-        if (appended.error.code === "AGENT_RUN_ID_CONFLICT")
-          return {
-            ok: false,
-            error: {
-              code: "AGENT_RUN_ID_CONFLICT",
-              message: appended.error.message,
-              runId: appended.error.runId,
-            },
-          };
-        throw new Error("A non-Director AgentRun received a Director uniqueness conflict.");
-      }
+      const appended = await dependencies.runs.complete(recorded.run);
+      if (!appended.ok) throw new Error("The in-flight Writer AgentRun could not be completed.");
       if (appended.run.role !== "writer" || appended.run.operation !== "article_draft")
         throw new Error("The durable AgentRun role changed unexpectedly.");
       return { ok: true, run: appended.run };

@@ -45,12 +45,13 @@ interface AssignmentProposalAgentRunCommon {
   readonly prompt: { readonly key: string; readonly version: string };
   readonly requestedBy: EditorialActor;
   readonly startedAt: string;
-  readonly completedAt: string;
+  readonly completedAt: string | null;
   readonly input: AssignmentProposalAgentRunInput;
 }
 
 export type AssignmentProposalAgentRun = AssignmentProposalAgentRunCommon &
   (
+    | { readonly outcome: "running" }
     | { readonly outcome: "succeeded"; readonly proposal: AssignmentProposal }
     | {
         readonly outcome: "failed";
@@ -83,12 +84,13 @@ interface WriterArticleDraftAgentRunCommon {
   readonly prompt: { readonly key: string; readonly version: string };
   readonly requestedBy: EditorialActor;
   readonly startedAt: string;
-  readonly completedAt: string;
+  readonly completedAt: string | null;
   readonly input: WriterArticleDraftAgentRunInput;
 }
 
 export type WriterArticleDraftAgentRun = WriterArticleDraftAgentRunCommon &
   (
+    | { readonly outcome: "running" }
     | {
         readonly outcome: "succeeded";
         readonly articleId: ArticleId;
@@ -120,12 +122,13 @@ interface WriterArticleRevisionAgentRunCommon {
   readonly prompt: { readonly key: string; readonly version: string };
   readonly requestedBy: EditorialActor;
   readonly startedAt: string;
-  readonly completedAt: string;
+  readonly completedAt: string | null;
   readonly input: WriterArticleRevisionAgentRunInput;
 }
 
 export type WriterArticleRevisionAgentRun = WriterArticleRevisionAgentRunCommon &
   (
+    | { readonly outcome: "running" }
     | {
         readonly outcome: "succeeded";
         readonly articleId: ArticleId;
@@ -168,12 +171,13 @@ interface DirectorArticleReviewAgentRunCommon {
   readonly prompt: { readonly key: string; readonly version: string };
   readonly requestedBy: EditorialActor;
   readonly startedAt: string;
-  readonly completedAt: string;
+  readonly completedAt: string | null;
   readonly input: DirectorArticleReviewAgentRunInput;
 }
 
 export type DirectorArticleReviewAgentRun = DirectorArticleReviewAgentRunCommon &
   (
+    | { readonly outcome: "running" }
     | { readonly outcome: "succeeded"; readonly review: DirectorReviewRecommendation }
     | {
         readonly outcome: "failed";

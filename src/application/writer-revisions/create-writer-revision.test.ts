@@ -236,7 +236,11 @@ describe("createWriterRevision", () => {
     }));
     const workflow = createWriterRevision({
       inspections: { inspect: vi.fn(async () => ({ ok: true as const, inspection })) },
-      runs: { append: vi.fn(), listByStoryId: vi.fn() },
+      runs: {
+        append: vi.fn(async (run) => ({ ok: true as const, run })),
+        complete: vi.fn(async (run) => ({ ok: true as const, run })),
+        listByStoryId: vi.fn(),
+      },
       persistence: { persist },
       resolveModel: () => ({ ok: true, model }),
       createAgentRunId: () => agentRunId("writer-run-2-41"),

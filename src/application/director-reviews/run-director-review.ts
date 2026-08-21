@@ -249,6 +249,25 @@ export function createRunDirectorReview(dependencies: {
       evidence: writerRun.input.evidence,
       unavailableSourceIds: writerRun.input.unavailableSourceIds,
     };
+    const identity = {
+      id,
+      storyId: story.id,
+      profileId: profile.id,
+      role: "editor_in_chief" as const,
+      operation: "article_review" as const,
+      model: resolved.model.descriptor,
+      prompt: DIRECTOR_REVIEW_PROMPT,
+      requestedBy: command.requestedBy,
+      startedAt,
+      input,
+    };
+
+    // Record the run before the model is called so an in-flight review is durable.
+    const started = recordAgentRun({ ...identity, completedAt: null, outcome: "running" });
+    if (!started.ok) throw new Error("The application produced an invalid Director AgentRun.");
+    const appendedStart = await dependencies.runs.append(started.run);
+    if (!appendedStart.ok) return appendedStart;
+
     const generated = await resolved.model
       .generateStructured({
         systemPrompt: directorSystemPrompt(profile.instructions),
@@ -263,19 +282,7 @@ export function createRunDirectorReview(dependencies: {
         failure: { code: "MODEL_REQUEST_FAILED" as const, retryable: true },
       }));
     const completedAt = dependencies.now();
-    const common = {
-      id,
-      storyId: story.id,
-      profileId: profile.id,
-      role: "editor_in_chief" as const,
-      operation: "article_review" as const,
-      model: resolved.model.descriptor,
-      prompt: DIRECTOR_REVIEW_PROMPT,
-      requestedBy: command.requestedBy,
-      startedAt,
-      completedAt,
-      input,
-    };
+    const common = { ...identity, completedAt };
     const parsed = generated.ok ? directorReviewOutputSchema.safeParse(generated.output) : null;
     const validated = parsed?.success ? createDirectorReview(parsed.data) : null;
     const candidate: AgentRun =
@@ -290,8 +297,19 @@ export function createRunDirectorReview(dependencies: {
           };
     const recorded = recordAgentRun(candidate);
     if (!recorded.ok) throw new Error("The application produced an invalid Director AgentRun.");
-    const appended = await dependencies.runs.append(recorded.run);
-    if (!appended.ok) return appended;
+    const appended = await dependencies.runs.complete(recorded.run);
+    if (!appended.ok) {
+      if (appended.error.code === "DIRECTOR_REVIEW_ALREADY_SUCCEEDED")
+        return {
+          ok: false,
+          error: {
+            code: "DIRECTOR_REVIEW_ALREADY_SUCCEEDED",
+            message: appended.error.message,
+            runId: appended.error.runId,
+          },
+        };
+      throw new Error("The in-flight Director AgentRun could not be completed.");
+    }
     if (appended.run.role !== "editor_in_chief")
       throw new Error("The durable AgentRun role changed unexpectedly.");
     return { ok: true, run: appended.run };

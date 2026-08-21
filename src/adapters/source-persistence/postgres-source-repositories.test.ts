@@ -106,6 +106,10 @@ const modelQuotaMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0053-model-quota-failure-code.sql",
 );
+const inFlightRunMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0054-agent-run-in-flight.sql",
+);
 
 const OPERATOR: OperatorActor = {
   type: "operator",
@@ -319,6 +323,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let writerRevisionMigrationSql: string;
   let preparationInputMigrationSql: string;
   let modelQuotaMigrationSql: string;
+  let inFlightRunMigrationSql: string;
   let destructiveSetupAllowed = false;
 
   beforeAll(async () => {
@@ -335,6 +340,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     writerRevisionMigrationSql = await readFile(writerRevisionMigrationPath, "utf8");
     preparationInputMigrationSql = await readFile(preparationInputMigrationPath, "utf8");
     modelQuotaMigrationSql = await readFile(modelQuotaMigrationPath, "utf8");
+    inFlightRunMigrationSql = await readFile(inFlightRunMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -364,6 +370,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await client.query(writerRevisionMigrationSql);
       await client.query(preparationInputMigrationSql);
       await client.query(modelQuotaMigrationSql);
+      await client.query(inFlightRunMigrationSql);
     } finally {
       client.release();
     }
@@ -511,6 +518,93 @@ describePostgres("PostgreSQL persistence repositories", () => {
   });
 
   describe("AgentRuns", () => {
+    it("completes a run that is still in flight and refuses to reopen it", async () => {
+      const story = makeStory("agent-run-in-flight");
+      await createPostgresStoryRepository({ pool }).persist({ story });
+      const repository = createPostgresAgentRunRepository({ pool });
+      const { proposal: _proposal, ...started } = makeAgentRun(story, "in-flight") as never as {
+        proposal: unknown;
+      } & Record<string, unknown>;
+      const inFlight = { ...started, completedAt: null, outcome: "running" } as unknown as AgentRun;
+
+      await expect(repository.append(inFlight)).resolves.toMatchObject({
+        ok: true,
+        run: { outcome: "running", completedAt: null },
+      });
+
+      const finished = makeAgentRun(story, "in-flight");
+      await expect(repository.complete(finished)).resolves.toMatchObject({
+        ok: true,
+        run: { outcome: "succeeded" },
+      });
+
+      // A completed run is terminal: completing it again must not rewrite the outcome.
+      await expect(repository.complete(finished)).resolves.toMatchObject({
+        ok: false,
+        error: { code: "AGENT_RUN_NOT_RUNNING" },
+      });
+      await expect(repository.listByStoryId(story.id)).resolves.toMatchObject([
+        { outcome: "succeeded" },
+      ]);
+    });
+
+    it("refuses to move a completed run back to running at the database boundary", async () => {
+      const story = makeStory("agent-run-one-way");
+      await createPostgresStoryRepository({ pool }).persist({ story });
+      const repository = createPostgresAgentRunRepository({ pool });
+      const run = makeAgentRun(story, "one-way");
+      await repository.append(run);
+      const client = await pool.connect();
+
+      try {
+        await client.query("BEGIN");
+        await expect(
+          client.query(
+            `UPDATE storyrail.agent_runs SET outcome = 'running',
+             payload = payload || '{"outcome":"running","completedAt":null}'::jsonb
+             WHERE run_id = $1`,
+            [run.id],
+          ),
+        ).rejects.toMatchObject({ message: expect.stringContaining("already complete") });
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    });
+
+    it("refuses to rewrite the input snapshot while completing a run", async () => {
+      const story = makeStory("agent-run-input-immutable");
+      await createPostgresStoryRepository({ pool }).persist({ story });
+      const repository = createPostgresAgentRunRepository({ pool });
+      const { proposal: _proposal, ...started } = makeAgentRun(
+        story,
+        "input-immutable",
+      ) as never as { proposal: unknown } & Record<string, unknown>;
+      const inFlight = { ...started, completedAt: null, outcome: "running" } as unknown as AgentRun;
+      await repository.append(inFlight);
+      const client = await pool.connect();
+
+      try {
+        await client.query("BEGIN");
+        await expect(
+          client.query(
+            `UPDATE storyrail.agent_runs SET outcome = 'failed',
+             payload = payload
+               || '{"outcome":"failed","completedAt":"t1"}'::jsonb
+               || jsonb_build_object('failure', '{"code":"MODEL_REQUEST_FAILED","retryable":true}'::jsonb)
+               || jsonb_build_object('input', payload -> 'input' || '{"tampered":true}'::jsonb)
+             WHERE run_id = $1`,
+            [inFlight.id],
+          ),
+        ).rejects.toMatchObject({
+          message: expect.stringContaining("may only record its completion"),
+        });
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    });
+
     it("rejects malformed payload shape and profile-role disagreement at the database boundary", async () => {
       const story = makeStory("agent-run-checks");
       await createPostgresStoryRepository({ pool }).persist({ story });
@@ -562,6 +656,11 @@ describePostgres("PostgreSQL persistence repositories", () => {
         await client.query("BEGIN");
         await client.query(
           "ALTER TABLE storyrail.agent_runs DROP CONSTRAINT agent_runs_payload_exact_shape_check",
+        );
+        // The one-way completion trigger exists to stop exactly this; disable it so the test
+        // can still manufacture a malformed persisted row.
+        await client.query(
+          "ALTER TABLE storyrail.agent_runs DISABLE TRIGGER agent_runs_completion_is_one_way",
         );
         await client.query(
           `UPDATE storyrail.agent_runs SET payload = payload || '{"unexpected":true}'::jsonb
@@ -820,6 +919,21 @@ describePostgres("PostgreSQL persistence repositories", () => {
         occurredAt: completedAt,
         revisionCycle: 0,
       };
+      // Writer runs are recorded in flight before the model is called; the atomic draft
+      // persistence completes that existing run rather than inserting a new one.
+      const {
+        articleId: _articleId,
+        revisionId: _revisionId,
+        ...startedRun
+      } = run as never as {
+        articleId: unknown;
+        revisionId: unknown;
+      } & Record<string, unknown>;
+      await createPostgresAgentRunRepository({ pool }).append({
+        ...startedRun,
+        completedAt: null,
+        outcome: "running",
+      } as unknown as AgentRun);
       await expect(
         createPostgresWriterDraftPersistence({ pool }).persist({
           expectedStory: assigned.story,

@@ -2,7 +2,11 @@ import { isDeepStrictEqual } from "node:util";
 
 import type { Pool, QueryResultRow } from "pg";
 
-import type { AgentRunRepository, AppendAgentRunResult } from "@/application/agent-runs";
+import type {
+  AgentRunRepository,
+  AppendAgentRunResult,
+  CompleteAgentRunResult,
+} from "@/application/agent-runs";
 
 import {
   decodePostgresAgentRun,
@@ -78,6 +82,50 @@ export function createPostgresAgentRunRepository(options: {
               runId: run.id,
             },
           };
+    },
+    async complete(run): Promise<CompleteAgentRunResult> {
+      // A run now exists before the model answers, so the Director uniqueness guard has to be
+      // applied here as well: appending an in-flight run cannot see a conflict that only a
+      // successful outcome creates.
+      if (run.role === "editor_in_chief" && run.outcome === "succeeded") {
+        const successful = await options.pool.query(
+          `SELECT run_id FROM storyrail.agent_runs
+           WHERE role = 'editor_in_chief' AND operation = 'article_review'
+             AND outcome = 'succeeded' AND review_revision_id = $1 AND run_id <> $2`,
+          [run.input.revision.id, run.id],
+        );
+        if (successful.rows[0]) {
+          return {
+            ok: false,
+            error: {
+              code: "DIRECTOR_REVIEW_ALREADY_SUCCEEDED",
+              message: "The Article Revision already has a successful Director review.",
+              runId: run.id,
+            },
+          };
+        }
+      }
+
+      // The WHERE clause is the guard: only a run still in flight can be completed, so a
+      // concurrent completion or a replayed request cannot rewrite a terminal outcome. The
+      // database trigger enforces the same rule for anything that bypasses this path.
+      const updated = await options.pool.query<AgentRunRow>(
+        `UPDATE storyrail.agent_runs
+         SET outcome = $2, payload = $3::jsonb
+         WHERE run_id = $1 AND outcome = 'running'
+         RETURNING run_id, story_id, profile_id, role, operation, outcome, payload`,
+        [run.id, run.outcome, JSON.stringify(run)],
+      );
+      if (updated.rows[0]) return { ok: true, run: decodePostgresAgentRun(updated.rows[0]) };
+
+      return {
+        ok: false,
+        error: {
+          code: "AGENT_RUN_NOT_RUNNING",
+          message: "Only an AgentRun that is still running can be completed.",
+          runId: run.id,
+        },
+      };
     },
     async listByStoryId(storyId) {
       const result = await options.pool.query<AgentRunRow>(

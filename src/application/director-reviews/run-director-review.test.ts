@@ -205,6 +205,10 @@ describe("run Director review", () => {
           appended.push(run);
           return { ok: true as const, run };
         }),
+        complete: vi.fn(async (run) => {
+          appended.push(run);
+          return { ok: true as const, run };
+        }),
         listByStoryId: vi.fn(),
       },
       resolveModel: () => ({ ok: true, model }),
@@ -245,7 +249,7 @@ describe("run Director review", () => {
     const workflow = createRunDirectorReview({
       inspections: { inspect: vi.fn(async () => ({ ok: true as const, inspection })) },
       profiles: { findById: vi.fn(async () => facts.director), list: vi.fn(), append: vi.fn() },
-      runs: { append: vi.fn(), listByStoryId: vi.fn() },
+      runs: { append: vi.fn(), complete: vi.fn(), listByStoryId: vi.fn() },
       resolveModel: () => ({
         ok: true,
         model: {
@@ -297,6 +301,10 @@ describe("run Director review", () => {
           appended.push(run);
           return { ok: true as const, run };
         }),
+        complete: vi.fn(async (run) => {
+          appended.push(run);
+          return { ok: true as const, run };
+        }),
         listByStoryId: vi.fn(),
       },
       resolveModel: () => ({
@@ -326,7 +334,13 @@ describe("run Director review", () => {
     await expect(
       workflow({ storyId: facts.inspection.story.id, requestedBy: facts.actor }),
     ).resolves.toMatchObject({ ok: true, run: { outcome: "succeeded" } });
-    expect(appended.map(({ outcome }) => outcome)).toEqual(["failed", "succeeded"]);
+    // Each attempt is recorded as in flight before the model is called, then completed.
+    expect(appended.map(({ outcome }) => outcome)).toEqual([
+      "running",
+      "failed",
+      "running",
+      "succeeded",
+    ]);
     expect(facts.inspection.story.state).toBe("in_review");
     expect(facts.inspection.article?.revisions).toHaveLength(1);
     expect(facts.inspection.reviewDecisions).toEqual([]);
