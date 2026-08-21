@@ -39,6 +39,12 @@ type PreparationRequestFailure =
 type IntakeState =
   | { readonly kind: "idle" }
   | { readonly kind: "preserving" }
+  | { readonly kind: "extracting"; readonly source: UrlSource }
+  | {
+      readonly kind: "extraction-retry-failed";
+      readonly source: UrlSource;
+      readonly failure: PreparationRequestFailure;
+    }
   | {
       readonly kind: "preparing";
       readonly source: UrlSource;
@@ -415,11 +421,24 @@ function EvidenceReview({
 }
 
 function reviewableSourceId(state: IntakeState): string | null {
+  if (state.kind === "extraction-retry-failed") return state.source.id;
   if (state.kind !== "result") return null;
   const { result } = state;
   if (result.kind === "completed" || result.kind === "partial-completion") return result.source.id;
   return result.kind === "preservation-conflict" && result.error.code === "DUPLICATE_SOURCE"
     ? result.error.existingSourceId
+    : null;
+}
+
+// Extraction can only be retried where the preserved Source itself is in hand. A duplicate
+// conflict carries an identity but no Source, so that path stays a handoff to the Inbox.
+function retryableSource(state: IntakeState): UrlSource | null {
+  if (state.kind === "extraction-retry-failed") return state.source;
+  if (state.kind !== "result") return null;
+  const { result } = state;
+  if (result.kind === "partial-completion") return result.source;
+  return result.kind === "completed" && result.extraction.outcome === "failed"
+    ? result.source
     : null;
 }
 
@@ -433,8 +452,10 @@ export function SourceEvidenceWorkspace({
   const [state, setState] = useState<IntakeState>({ kind: "idle" });
   const pendingRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const pending = state.kind === "preserving" || state.kind === "preparing";
+  const pending =
+    state.kind === "preserving" || state.kind === "preparing" || state.kind === "extracting";
   const sourceIdForReview = reviewableSourceId(state);
+  const sourceForRetry = retryableSource(state);
 
   async function prepare(
     source: UrlSource,
@@ -470,6 +491,39 @@ export function SourceEvidenceWorkspace({
         extraction,
         preparations: priorPreparations,
         requestFailure: { kind: "unavailable", message: SOURCE_INBOX_UNAVAILABLE_MESSAGE },
+      });
+    } finally {
+      onSourceAvailable?.(source.id);
+      pendingRef.current = false;
+    }
+  }
+
+  // Appends a new extraction attempt to the immutable history. A successful attempt continues
+  // straight into preparation so a recovered Source rejoins the ordinary intake path.
+  async function retryExtraction(source: UrlSource) {
+    if (pendingRef.current) return;
+    pendingRef.current = true;
+    setState({ kind: "extracting", source });
+
+    try {
+      const result = await inboxRequests.retryExtraction(source.id);
+
+      if (result.kind === "completed" && result.value.outcome === "succeeded") {
+        pendingRef.current = false;
+        await prepare(source, result.value, []);
+        return;
+      }
+
+      setState(
+        result.kind === "completed"
+          ? { kind: "result", result: { kind: "completed", source, extraction: result.value } }
+          : { kind: "extraction-retry-failed", source, failure: result },
+      );
+    } catch {
+      setState({
+        kind: "extraction-retry-failed",
+        source,
+        failure: { kind: "unavailable", message: SOURCE_INBOX_UNAVAILABLE_MESSAGE },
       });
     } finally {
       onSourceAvailable?.(source.id);
@@ -594,6 +648,45 @@ export function SourceEvidenceWorkspace({
             </div>
           </article>
         ) : null}
+        {state.kind === "extracting" ? (
+          <article
+            className={`${styles.receipt} ${styles.preparationActive}`}
+            role="status"
+            aria-busy="true"
+            aria-labelledby="extraction-retry-heading"
+          >
+            <p className={styles.sectionKicker}>Source preserved</p>
+            <h2 id="extraction-retry-heading">Extracting again…</h2>
+            <p className={styles.preparationWaitCopy}>
+              StoryRail is making a new extraction attempt. The earlier attempt stays in the
+              Source&rsquo;s history either way.
+            </p>
+            <ul className={`${styles.completionChecklist} ${styles.preparationChecklist}`}>
+              <li data-stage="completed">Source preserved</li>
+              <li className={styles.preparationActiveStage} data-stage="active">
+                Extracting again…
+              </li>
+              <li data-stage="skipped">Evidence preparation not attempted</li>
+            </ul>
+          </article>
+        ) : null}
+        {state.kind === "extraction-retry-failed" ? (
+          <article className={`${styles.receipt} ${styles.receiptRejected}`} role="alert">
+            <p className={styles.sectionKicker}>Extraction was not attempted</p>
+            <h2>
+              {state.failure.kind === "unavailable"
+                ? state.failure.message
+                : state.failure.error.message}
+            </h2>
+            <p>
+              No new extraction attempt was recorded. The Source and its earlier history are
+              unchanged.
+            </p>
+            {state.failure.kind === "application-failure" ? (
+              <ErrorFacts error={state.failure.error} />
+            ) : null}
+          </article>
+        ) : null}
         {state.kind === "review" ? <EvidenceReview {...state} /> : null}
         {state.kind === "result" ? <BasicResult result={state.result} /> : null}
 
@@ -614,6 +707,29 @@ export function SourceEvidenceWorkspace({
             >
               {state.preparations.length === 0 ? "Retry preparation" : "Prepare again"}
             </button>
+            <button type="button" className={styles.secondaryAction} onClick={reset}>
+              Add another Source
+            </button>
+          </div>
+        ) : sourceForRetry !== null ? (
+          <div className={styles.handoffActions}>
+            <button
+              type="button"
+              className={styles.primaryAction}
+              disabled={pending}
+              onClick={() => void retryExtraction(sourceForRetry)}
+            >
+              Try extraction again
+            </button>
+            {sourceIdForReview !== null ? (
+              <button
+                type="button"
+                className={styles.secondaryAction}
+                onClick={() => onReviewInInbox?.(sourceIdForReview)}
+              >
+                Review in Source Inbox
+              </button>
+            ) : null}
             <button type="button" className={styles.secondaryAction} onClick={reset}>
               Add another Source
             </button>

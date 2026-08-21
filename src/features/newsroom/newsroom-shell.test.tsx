@@ -111,6 +111,10 @@ function inboxRequests(): SourceInboxClient {
       kind: "unavailable",
       message: "The Source Inbox request could not be completed.",
     })),
+    retryExtraction: vi.fn<SourceInboxClient["retryExtraction"]>(async () => ({
+      kind: "unavailable",
+      message: "The Source Inbox request could not be completed.",
+    })),
   };
 }
 

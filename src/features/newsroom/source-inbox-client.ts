@@ -34,6 +34,7 @@ export interface SourceInboxClient {
     sourceId: string,
     extractionId: string,
   ): Promise<SourceInboxClientResult<SourceEvidencePreparation>>;
+  retryExtraction(sourceId: string): Promise<SourceInboxClientResult<SourceExtraction>>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -237,6 +238,17 @@ const PREPARATION_ERRORS: Readonly<Record<number, ReadonlySet<string>>> = {
   415: new Set(["UNSUPPORTED_MEDIA_TYPE"]),
   422: new Set(["SOURCE_EXTRACTION_NOT_PREPARABLE"]),
 };
+const EXTRACTION_ERRORS: Readonly<Record<number, ReadonlySet<string>>> = {
+  400: new Set(["INVALID_JSON", "INVALID_REQUEST"]),
+  404: new Set(["SOURCE_NOT_FOUND"]),
+  409: new Set(["SOURCE_EXTRACTION_ID_CONFLICT"]),
+  415: new Set(["UNSUPPORTED_MEDIA_TYPE"]),
+  422: new Set([
+    "SOURCE_EXTRACTOR_KEY_REQUIRED",
+    "SOURCE_EXTRACTOR_VERSION_REQUIRED",
+    "EXTRACTED_SOURCE_CONTENT_REQUIRED",
+  ]),
+};
 const unavailable = (): SourceInboxClientResult<never> => ({
   kind: "unavailable",
   message: SOURCE_INBOX_UNAVAILABLE_MESSAGE,
@@ -315,6 +327,39 @@ export function createSourceInboxClient(fetch: typeof globalThis.fetch): SourceI
           body.ok === false &&
           isError(body.error) &&
           PREPARATION_ERRORS[response.status]?.has(body.error.code) === true
+        ) {
+          return { kind: "application-failure", error: body.error };
+        }
+        return unavailable();
+      } catch {
+        return unavailable();
+      }
+    },
+    async retryExtraction(sourceId) {
+      try {
+        const response = await fetch(`/api/sources/${encodeURIComponent(sourceId)}/extractions`, {
+          method: "POST",
+          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        const body: unknown = await response.json();
+        // A recorded extraction failure is a completed attempt, not a request failure.
+        if (
+          response.status === 201 &&
+          isRecord(body) &&
+          body.ok === true &&
+          isExtraction(body.extraction) &&
+          body.extraction.sourceId === sourceId
+        ) {
+          return { kind: "completed", value: body.extraction };
+        }
+        if (
+          response.status >= 400 &&
+          response.status < 500 &&
+          isRecord(body) &&
+          body.ok === false &&
+          isError(body.error) &&
+          EXTRACTION_ERRORS[response.status]?.has(body.error.code) === true
         ) {
           return { kind: "application-failure", error: body.error };
         }

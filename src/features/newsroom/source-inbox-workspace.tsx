@@ -8,6 +8,7 @@ import type { StoryListItem } from "@/application/story-listing";
 import type {
   EditorialActor,
   SourceEvidencePreparation,
+  SourceExtraction,
   SourceExtractionId,
   Story,
 } from "@/domain/editorial";
@@ -117,18 +118,26 @@ function PreparationRecord({
 
 function Evidence({
   item,
+  extractions,
   preparations,
   preparingExtractionId,
   preparationMessage,
+  extracting,
+  extractionMessage,
   onPrepare,
+  onRetryExtraction,
 }: Readonly<{
   item: SourceInboxItem;
+  extractions: readonly SourceExtraction[];
   preparations: readonly SourceEvidencePreparation[];
   preparingExtractionId: SourceExtractionId | null;
   preparationMessage: string | null;
+  extracting: boolean;
+  extractionMessage: string | null;
   onPrepare: (extractionId: SourceExtractionId) => void;
+  onRetryExtraction: () => void;
 }>) {
-  const latestSuccessfulExtraction = [...item.extractions]
+  const latestSuccessfulExtraction = [...extractions]
     .reverse()
     .find((extraction) => extraction.outcome === "succeeded");
   const latestSuccessfulPreparation = [...preparations]
@@ -178,10 +187,25 @@ function Evidence({
                 : "Prepare evidence"}
             </button>
           ) : (
-            <p>No successful extraction is available to prepare.</p>
+            <>
+              <p>No successful extraction is available to prepare.</p>
+              <button
+                type="button"
+                className={styles.secondaryAction}
+                disabled={extracting}
+                onClick={onRetryExtraction}
+              >
+                {extracting ? "Extracting again…" : "Try extraction again"}
+              </button>
+            </>
           )}
         </div>
       )}
+      {extractionMessage ? (
+        <p className={styles.pendingStatus} role="status">
+          {extractionMessage}
+        </p>
+      ) : null}
       {latestAttemptFailed ? (
         <div className={styles.extractionFailure} role="alert">
           <h5>Latest preparation attempt failed</h5>
@@ -342,8 +366,12 @@ function TriageItem({
     null,
   );
   const [preparationMessage, setPreparationMessage] = useState<string | null>(null);
+  const [extractions, setExtractions] = useState(item.extractions);
+  const [extracting, setExtracting] = useState(false);
+  const [extractionMessage, setExtractionMessage] = useState<string | null>(null);
   const pendingRef = useRef(false);
   const preparationPendingRef = useRef(false);
+  const extractionPendingRef = useRef(false);
   const itemRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -374,6 +402,42 @@ function TriageItem({
     } finally {
       preparationPendingRef.current = false;
       setPreparingExtractionId(null);
+    }
+  }
+
+  // Appends a new extraction attempt. A recovered Source is prepared immediately so the
+  // operator lands on reviewable evidence rather than another button.
+  async function retryExtraction() {
+    if (extractionPendingRef.current) return;
+    extractionPendingRef.current = true;
+    setExtracting(true);
+    setExtractionMessage("Extracting again…");
+    try {
+      const result = await inboxRequests.retryExtraction(item.source.id);
+      if (result.kind === "completed") {
+        setExtractions((current) => [...current, result.value]);
+        if (result.value.outcome === "succeeded") {
+          setExtractionMessage("Extraction recorded");
+          extractionPendingRef.current = false;
+          setExtracting(false);
+          await prepare(result.value.id);
+          return;
+        }
+        setExtractionMessage(
+          `Extraction failed again: ${result.value.failure.code} · retryable: ${
+            result.value.failure.retryable ? "yes" : "no"
+          }`,
+        );
+      } else {
+        setExtractionMessage(
+          result.kind === "application-failure"
+            ? `Extraction was not attempted: ${result.error.message}`
+            : "Extraction outcome is unavailable.",
+        );
+      }
+    } finally {
+      extractionPendingRef.current = false;
+      setExtracting(false);
     }
   }
 
@@ -677,10 +741,14 @@ function TriageItem({
       </details>
       <Evidence
         item={item}
+        extractions={extractions}
         preparations={preparations}
         preparingExtractionId={preparingExtractionId}
         preparationMessage={preparationMessage}
+        extracting={extracting}
+        extractionMessage={extractionMessage}
         onPrepare={(extractionId) => void prepare(extractionId)}
+        onRetryExtraction={() => void retryExtraction()}
       />
       <div className={styles.workspaceSwitch} role="group" aria-label="Triage action">
         <button
