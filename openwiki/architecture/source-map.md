@@ -118,6 +118,7 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 ### `src/interfaces/http` — HTTP handlers
 
 - `preserve-and-extract-url-source-handler.ts`
+- `extract-persisted-source-handler.ts`
 - `create-story-handler.ts`, `list-stories-handler.ts`, `inspect-story-handler.ts`
 - `attach-source-to-story-handler.ts`
 - `list-source-inbox-handler.ts`
@@ -140,6 +141,7 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `api/inbox/route.ts` (GET)
 - `api/sources/[sourceId]/triage/route.ts` (PUT)
 - `api/sources/[sourceId]/preparations/route.ts` (POST)
+- `api/sources/[sourceId]/extractions/route.ts` (POST)
 - `api/stories/route.ts` (GET, POST)
 - `api/stories/[storyId]/route.ts` (GET)
 - `api/stories/[storyId]/sources/route.ts` (POST)

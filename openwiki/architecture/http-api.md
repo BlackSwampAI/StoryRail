@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: HTTP API endpoints
-description: Next.js route handlers for Source intake, Prepared Evidence, Story management, Source inbox, and triage, with request shapes and status code maps.
+description: Next.js route handlers for Source intake, Source extraction retry, Prepared Evidence, Story management, Source inbox, and triage, with request shapes and status code maps.
 tags: [http-api, rest, endpoints, interface]
 ---
 
@@ -24,6 +24,26 @@ Three lazy server providers back the routes:
 - Handler: `src/interfaces/http/prepare-source-evidence-handler.ts`
 - Body: `{ "extractionId": string }`
 - Workflow: explicitly prepares one successful raw extraction through the configured OpenRouter model and appends the successful or failed immutable attempt. It does not replace raw evidence or resolve triage.
+
+## POST /api/sources/[sourceId]/extractions — retry Source extraction
+
+- Route: `src/app/api/sources/[sourceId]/extractions/route.ts`
+- Handler: `src/interfaces/http/extract-persisted-source-handler.ts`
+- Provider: `sourceEvidenceRuntimeProvider`
+- Body: `{}` (exactly an empty object). The Source identity is carried by the route; the body exists only to keep the JSON contract uniform across the Source endpoints. `STORYRAIL_OPERATOR_ID` must be configured or the handler returns 500.
+- Workflow: `extractPersistedSource`. Loads the persisted `UrlSource` by id, runs a new extraction against the same URL, and appends the result (success or failure) to the Source's immutable extraction history. It does not preserve a new Source, replace raw evidence, or resolve triage. The operator actor is derived from `STORYRAIL_OPERATOR_ID`.
+
+A recorded extraction failure is a durable attempt, not a request failure: it appends to the immutable history exactly like a success and is reported as `201` with `{ ok: true, extraction }` where `extraction.outcome` is `"failed"`. The Source and its earlier history are unchanged only when the retry is not attempted (404/409/422/500).
+
+| Status | Condition                                                                                                                                                                |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 201    | Extraction attempt recorded (success or failure outcome)                                                                                                                  |
+| 404    | `SOURCE_NOT_FOUND`                                                                                                                                                        |
+| 409    | `SOURCE_EXTRACTION_ID_CONFLICT`                                                                                                                                            |
+| 422    | `SOURCE_EXTRACTOR_KEY_REQUIRED`, `SOURCE_EXTRACTOR_VERSION_REQUIRED`, `EXTRACTED_SOURCE_CONTENT_REQUIRED`                                                                  |
+| 415    | Missing/invalid `Content-Type`                                                                                                                                             |
+| 400    | Invalid JSON or a body carrying any property (`INVALID_JSON`, `INVALID_REQUEST`)                                                                                          |
+| 500    | Missing `STORYRAIL_OPERATOR_ID` or internal error                                                                                                                          |
 
 ## POST /api/source-evidence/url — preserve and extract a URL Source
 
