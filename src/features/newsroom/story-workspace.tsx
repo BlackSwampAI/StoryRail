@@ -109,7 +109,7 @@ function AssignmentRuns({ runs }: Readonly<{ runs: readonly AgentRun[] }>) {
                     <dd>{run.proposal.reason}</dd>
                   </div>
                 </>
-              ) : (
+              ) : run.outcome === "failed" ? (
                 <>
                   <div>
                     <dt>Failure code</dt>
@@ -120,6 +120,11 @@ function AssignmentRuns({ runs }: Readonly<{ runs: readonly AgentRun[] }>) {
                     <dd>{run.failure.retryable ? "Yes" : "No"}</dd>
                   </div>
                 </>
+              ) : (
+                <div>
+                  <dt>Status</dt>
+                  <dd>Still running</dd>
+                </div>
               )}
               <div>
                 <dt>Evidence references</dt>
@@ -222,7 +227,7 @@ function WriterRuns({ runs }: Readonly<{ runs: readonly AgentRun[] }>) {
                     <dd>{run.revisionId}</dd>
                   </div>
                 </>
-              ) : (
+              ) : run.outcome === "failed" ? (
                 <>
                   <div>
                     <dt>Failure</dt>
@@ -233,6 +238,11 @@ function WriterRuns({ runs }: Readonly<{ runs: readonly AgentRun[] }>) {
                     <dd>{run.failure.retryable ? "Yes" : "No"}</dd>
                   </div>
                 </>
+              ) : (
+                <div>
+                  <dt>Status</dt>
+                  <dd>Still running</dd>
+                </div>
               )}
               <div>
                 <dt>Evidence references</dt>
@@ -317,7 +327,7 @@ function DirectorRuns({ runs }: Readonly<{ runs: readonly AgentRun[] }>) {
                     <dd>{run.review.summary}</dd>
                   </div>
                 </>
-              ) : (
+              ) : run.outcome === "failed" ? (
                 <>
                   <div>
                     <dt>Failure</dt>
@@ -328,6 +338,11 @@ function DirectorRuns({ runs }: Readonly<{ runs: readonly AgentRun[] }>) {
                     <dd>{run.failure.retryable ? "Yes" : "No"}</dd>
                   </div>
                 </>
+              ) : (
+                <div>
+                  <dt>Status</dt>
+                  <dd>Still running</dd>
+                </div>
               )}
             </dl>
           </article>
@@ -873,6 +888,12 @@ export function StoryWorkspace({
         setProposalStatus(modelFailureMessage("Assignment Editor", result.value.failure));
         return;
       }
+      if (result.value.outcome === "running") {
+        setProposalStatus(
+          "Assignment Editor is still running. Reopen this Story to see the result.",
+        );
+        return;
+      }
       setWriterProfileId(result.value.proposal.writerProfileId);
       setAngle(result.value.proposal.angle);
       setBrief(result.value.proposal.brief);
@@ -1033,6 +1054,10 @@ export function StoryWorkspace({
       }
       if (result.value.outcome === "failed") {
         setReviewStatus(modelFailureMessage("Director review", result.value.failure));
+        return;
+      }
+      if (result.value.outcome === "running") {
+        setReviewStatus("Director review is still running. Reopen this Story to see the result.");
         return;
       }
       setOperatorDecision(result.value.review.recommendation);

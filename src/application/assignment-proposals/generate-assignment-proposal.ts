@@ -199,6 +199,48 @@ export function createGenerateAssignmentProposal(dependencies: {
 
     const id = dependencies.createAgentRunId();
     const startedAt = dependencies.now();
+    const input = {
+      story: {
+        id: story.id,
+        title: story.title,
+        state: story.state,
+        revisionCycle: story.revisionCycle,
+      },
+      evidence: selected.map(({ reference }) => reference),
+      unavailableSourceIds,
+      writerProfileIds: writers.map(({ id: writerId }) => writerId),
+    };
+    const identity = {
+      id,
+      storyId: story.id,
+      profileId: editor.id,
+      role: "assignment_editor" as const,
+      operation: "assignment_proposal" as const,
+      model: dependencies.model.descriptor,
+      prompt: ASSIGNMENT_EDITOR_PROMPT,
+      requestedBy: command.requestedBy,
+      startedAt,
+      input,
+    };
+
+    // Record the run before the model is called so an in-flight run is durable: a reload can
+    // see it, and a process that dies mid-call leaves evidence rather than nothing.
+    const started = recordAgentRun({ ...identity, completedAt: null, outcome: "running" });
+    if (!started.ok) throw new Error("The application produced an invalid AgentRun.");
+    const appendedStart = await dependencies.runs.append(started.run);
+    if (!appendedStart.ok) {
+      if (appendedStart.error.code === "AGENT_RUN_ID_CONFLICT")
+        return {
+          ok: false,
+          error: {
+            code: "AGENT_RUN_ID_CONFLICT",
+            message: appendedStart.error.message,
+            runId: appendedStart.error.runId,
+          },
+        };
+      throw new Error("A non-Director AgentRun received a Director uniqueness conflict.");
+    }
+
     const generated = await dependencies.model
       .generateStructured({
         systemPrompt: assignmentEditorSystemPrompt(editor.instructions),
@@ -220,30 +262,7 @@ export function createGenerateAssignmentProposal(dependencies: {
         failure: { code: "MODEL_REQUEST_FAILED" as const, retryable: true },
       }));
     const completedAt = dependencies.now();
-    const input = {
-      story: {
-        id: story.id,
-        title: story.title,
-        state: story.state,
-        revisionCycle: story.revisionCycle,
-      },
-      evidence: selected.map(({ reference }) => reference),
-      unavailableSourceIds,
-      writerProfileIds: writers.map(({ id: writerId }) => writerId),
-    };
-    const common = {
-      id,
-      storyId: story.id,
-      profileId: editor.id,
-      role: "assignment_editor" as const,
-      operation: "assignment_proposal" as const,
-      model: dependencies.model.descriptor,
-      prompt: ASSIGNMENT_EDITOR_PROMPT,
-      requestedBy: command.requestedBy,
-      startedAt,
-      completedAt,
-      input,
-    };
+    const common = { ...identity, completedAt };
 
     const parsed = generated.ok ? assignmentProposalOutputSchema.safeParse(generated.output) : null;
     const proposal = parsed?.success
@@ -267,19 +286,8 @@ export function createGenerateAssignmentProposal(dependencies: {
           };
     const recorded = recordAgentRun(candidate);
     if (!recorded.ok) throw new Error("The application produced an invalid AgentRun.");
-    const appended = await dependencies.runs.append(recorded.run);
-    if (!appended.ok) {
-      if (appended.error.code === "AGENT_RUN_ID_CONFLICT")
-        return {
-          ok: false,
-          error: {
-            code: "AGENT_RUN_ID_CONFLICT",
-            message: appended.error.message,
-            runId: appended.error.runId,
-          },
-        };
-      throw new Error("A non-Director AgentRun received a Director uniqueness conflict.");
-    }
-    return appended;
+    const completed = await dependencies.runs.complete(recorded.run);
+    if (!completed.ok) throw new Error("The in-flight AgentRun could not be completed.");
+    return completed;
   };
 }

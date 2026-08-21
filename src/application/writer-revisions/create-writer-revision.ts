@@ -266,6 +266,37 @@ export function createWriterRevision(dependencies: {
       evidence: previousWriterRun.input.evidence,
       unavailableSourceIds: previousWriterRun.input.unavailableSourceIds,
     };
+
+    const identity = {
+      id,
+      storyId: story.id,
+      profileId: writerProfile.id,
+      role: "writer" as const,
+      operation: "article_revision" as const,
+      model: resolved.model.descriptor,
+      prompt: WRITER_REVISION_PROMPT,
+      requestedBy: command.requestedBy,
+      startedAt,
+      input,
+    };
+
+    // Record the run before the model is called so an in-flight run is durable.
+    const started = recordAgentRun({ ...identity, completedAt: null, outcome: "running" });
+    if (!started.ok)
+      throw new Error("The application produced an invalid Writer revision AgentRun.");
+    const appendedStart = await dependencies.runs.append(started.run);
+    if (!appendedStart.ok) {
+      if (appendedStart.error.code === "AGENT_RUN_ID_CONFLICT")
+        return {
+          ok: false,
+          error: {
+            code: "AGENT_RUN_ID_CONFLICT",
+            message: appendedStart.error.message,
+            runId: appendedStart.error.runId,
+          },
+        };
+      throw new Error("A non-Director AgentRun received a Director uniqueness conflict.");
+    }
     const generated = await resolved.model
       .generateStructured({
         systemPrompt: writerRevisionSystemPrompt(writerProfile.instructions),
@@ -280,19 +311,7 @@ export function createWriterRevision(dependencies: {
         failure: { code: "MODEL_REQUEST_FAILED" as const, retryable: true },
       }));
     const completedAt = dependencies.now();
-    const common = {
-      id,
-      storyId: story.id,
-      profileId: writerProfile.id,
-      role: "writer" as const,
-      operation: "article_revision" as const,
-      model: resolved.model.descriptor,
-      prompt: WRITER_REVISION_PROMPT,
-      requestedBy: command.requestedBy,
-      startedAt,
-      completedAt,
-      input,
-    };
+    const common = { ...identity, completedAt };
     const parsed = generated.ok ? writerRevisionOutputSchema.safeParse(generated.output) : null;
     if (!generated.ok || !parsed?.success) {
       const recorded = recordAgentRun({
@@ -304,19 +323,8 @@ export function createWriterRevision(dependencies: {
       });
       if (!recorded.ok)
         throw new Error("The application produced an invalid Writer revision AgentRun.");
-      const appended = await dependencies.runs.append(recorded.run);
-      if (!appended.ok) {
-        if (appended.error.code === "AGENT_RUN_ID_CONFLICT")
-          return {
-            ok: false,
-            error: {
-              code: "AGENT_RUN_ID_CONFLICT",
-              message: appended.error.message,
-              runId: appended.error.runId,
-            },
-          };
-        throw new Error("A Writer AgentRun received a Director uniqueness conflict.");
-      }
+      const appended = await dependencies.runs.complete(recorded.run);
+      if (!appended.ok) throw new Error("The in-flight Writer AgentRun could not be completed.");
       if (appended.run.role !== "writer" || appended.run.operation !== "article_revision")
         throw new Error("The durable AgentRun operation changed unexpectedly.");
       return { ok: true, run: appended.run };

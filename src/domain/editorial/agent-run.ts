@@ -82,7 +82,15 @@ export function recordAgentRun(candidate: AgentRun): RecordAgentRunResult {
   ) {
     return invalid("AGENT_RUN_EVIDENCE_DUPLICATE", "AgentRun input identities must be unique.");
   }
-  if (!nonEmpty(candidate.startedAt) || !nonEmpty(candidate.completedAt)) {
+  if (!nonEmpty(candidate.startedAt)) {
+    return invalid("AGENT_RUN_OUTCOME_INVALID", "AgentRun timestamps must be non-empty.");
+  }
+  // A run that is still in flight has no completion yet; a finished one must record when.
+  if (candidate.outcome === "running") {
+    if (candidate.completedAt !== null) {
+      return invalid("AGENT_RUN_OUTCOME_INVALID", "A running AgentRun cannot be completed.");
+    }
+  } else if (!nonEmpty(candidate.completedAt)) {
     return invalid("AGENT_RUN_OUTCOME_INVALID", "AgentRun timestamps must be non-empty.");
   }
   if (candidate.role === "writer") {
@@ -205,6 +213,10 @@ export function recordAgentRun(candidate: AgentRun): RecordAgentRunResult {
         return invalid("AGENT_RUN_OUTCOME_INVALID", "Successful Director review is invalid.");
       return { ok: true, run: structuredClone({ ...candidate, review: review.review }) };
     }
+  }
+  // Every role validates its input above; an in-flight run carries no outcome payload yet.
+  if (candidate.outcome === "running") {
+    return { ok: true, run: structuredClone(candidate) };
   }
   if (
     candidate.outcome !== "failed" ||

@@ -160,7 +160,11 @@ describe("createWriterDraft", () => {
       inspections: {
         inspect: vi.fn(async () => ({ ok: true as const, inspection: facts.inspection })),
       },
-      runs: { append: vi.fn(), listByStoryId: vi.fn() },
+      runs: {
+        append: vi.fn(async (run) => ({ ok: true as const, run })),
+        complete: vi.fn(async (run) => ({ ok: true as const, run })),
+        listByStoryId: vi.fn(),
+      },
       persistence: { persist },
       resolveModel: () => ({
         ok: true,
@@ -201,6 +205,7 @@ describe("createWriterDraft", () => {
   it("persists a failed run without invoking draft persistence", async () => {
     const facts = fixture();
     const append = vi.fn(async (run: AgentRun) => ({ ok: true as const, run }));
+    const complete = vi.fn(async (run: AgentRun) => ({ ok: true as const, run }));
     const persist = vi.fn();
     const model: StructuredModel = {
       descriptor: { provider: "openrouter", model: "writer" },
@@ -214,7 +219,7 @@ describe("createWriterDraft", () => {
       inspections: {
         inspect: vi.fn(async () => ({ ok: true as const, inspection: facts.inspection })),
       },
-      runs: { append, listByStoryId: vi.fn() },
+      runs: { append, complete, listByStoryId: vi.fn() },
       persistence: { persist },
       resolveModel: () => ({
         ok: true,
@@ -229,7 +234,11 @@ describe("createWriterDraft", () => {
     expect(
       await workflow({ storyId: facts.story.id, requestedBy: facts.assignment.assignedBy }),
     ).toMatchObject({ ok: true, run: { outcome: "failed" } });
+    // The run is appended once while in flight, then completed with the failure.
     expect(append).toHaveBeenCalledOnce();
+    expect(append.mock.calls[0]?.[0]).toMatchObject({ outcome: "running" });
+    expect(complete).toHaveBeenCalledOnce();
+    expect(complete.mock.calls[0]?.[0]).toMatchObject({ outcome: "failed" });
     expect(persist).not.toHaveBeenCalled();
   });
 

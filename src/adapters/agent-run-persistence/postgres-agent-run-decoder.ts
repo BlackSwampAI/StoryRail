@@ -107,8 +107,9 @@ const shared = {
   prompt,
   requestedBy: actor,
   startedAt: nonEmpty,
-  completedAt: nonEmpty,
 };
+const completed = { ...{}, completedAt: nonEmpty };
+const inFlight = { ...{}, completedAt: z.null() };
 const assignmentCommon = {
   ...shared,
   role: z.literal("assignment_editor"),
@@ -169,9 +170,14 @@ const writerRevisionCommon = {
   }),
 };
 const schema = z.union([
+  z.object({ ...assignmentCommon, ...inFlight, outcome: z.literal("running") }).strict(),
+  z.object({ ...writerCommon, ...inFlight, outcome: z.literal("running") }).strict(),
+  z.object({ ...writerRevisionCommon, ...inFlight, outcome: z.literal("running") }).strict(),
+  z.object({ ...directorCommon, ...inFlight, outcome: z.literal("running") }).strict(),
   z
     .object({
       ...assignmentCommon,
+      ...completed,
       outcome: z.literal("succeeded"),
       proposal: z
         .object({
@@ -187,6 +193,7 @@ const schema = z.union([
   z
     .object({
       ...assignmentCommon,
+      ...completed,
       outcome: z.literal("failed"),
       failure: z.object({ code: z.enum(MODEL_FAILURE_CODES), retryable: z.boolean() }).strict(),
     })
@@ -194,6 +201,7 @@ const schema = z.union([
   z
     .object({
       ...writerCommon,
+      ...completed,
       outcome: z.literal("succeeded"),
       articleId: nonEmpty,
       revisionId: nonEmpty,
@@ -202,6 +210,7 @@ const schema = z.union([
   z
     .object({
       ...writerRevisionCommon,
+      ...completed,
       outcome: z.literal("succeeded"),
       articleId: nonEmpty,
       revisionId: nonEmpty,
@@ -210,6 +219,7 @@ const schema = z.union([
   z
     .object({
       ...writerRevisionCommon,
+      ...completed,
       outcome: z.literal("failed"),
       failure: z.object({ code: z.enum(MODEL_FAILURE_CODES), retryable: z.boolean() }).strict(),
     })
@@ -217,14 +227,16 @@ const schema = z.union([
   z
     .object({
       ...writerCommon,
+      ...completed,
       outcome: z.literal("failed"),
       failure: z.object({ code: z.enum(MODEL_FAILURE_CODES), retryable: z.boolean() }).strict(),
     })
     .strict(),
-  z.object({ ...directorCommon, outcome: z.literal("succeeded"), review }).strict(),
+  z.object({ ...directorCommon, ...completed, outcome: z.literal("succeeded"), review }).strict(),
   z
     .object({
       ...directorCommon,
+      ...completed,
       outcome: z.literal("failed"),
       failure: z.object({ code: z.enum(MODEL_FAILURE_CODES), retryable: z.boolean() }).strict(),
     })
@@ -265,17 +277,21 @@ export function decodePostgresAgentRun(row: {
         (row.operation === "article_draft" || row.operation === "article_revision")) ||
       (row.role === "editor_in_chief" && row.operation === "article_review")
     ) ||
-    (row.outcome !== "succeeded" && row.outcome !== "failed") ||
+    (row.outcome !== "running" && row.outcome !== "succeeded" && row.outcome !== "failed") ||
     !record(payload) ||
     !exact(payload, [
       ...common,
-      row.outcome === "failed"
-        ? "failure"
-        : row.role === "writer"
-          ? "articleId"
-          : row.role === "editor_in_chief"
-            ? "review"
-            : "proposal",
+      ...(row.outcome === "running"
+        ? []
+        : [
+            row.outcome === "failed"
+              ? "failure"
+              : row.role === "writer"
+                ? "articleId"
+                : row.role === "editor_in_chief"
+                  ? "review"
+                  : "proposal",
+          ]),
       ...(row.outcome === "succeeded" && row.role === "writer" ? ["revisionId"] : []),
     ]) ||
     payload.id !== row.run_id ||

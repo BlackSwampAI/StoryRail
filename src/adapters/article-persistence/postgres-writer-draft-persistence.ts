@@ -94,7 +94,13 @@ export function createPostgresWriterDraftPersistence(options: {
           return conflict(command.expectedStory.id);
         }
         const runResult = await client.query(
-          `INSERT INTO storyrail.agent_runs (run_id, story_id, profile_id, role, operation, outcome, payload) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING run_id,story_id,profile_id,role,operation,outcome,payload`,
+          // The run was recorded as in flight before the model was called, so completing it
+          // here is an update. Guarding on 'running' keeps the completion one-way and atomic
+          // with the Article, Revision, and Story transition written alongside it.
+          `UPDATE storyrail.agent_runs SET outcome = $6, payload = $7::jsonb
+           WHERE run_id = $1 AND story_id = $2 AND profile_id = $3 AND role = $4
+             AND operation = $5 AND outcome = 'running'
+           RETURNING run_id,story_id,profile_id,role,operation,outcome,payload`,
           [
             command.run.id,
             command.run.storyId,
