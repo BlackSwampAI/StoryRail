@@ -395,6 +395,31 @@ describe("NewsroomShell", () => {
     expect(screen.getByText(assignment.id)).toBeVisible();
   });
 
+  it("opens the desk on the queue holding the furthest-along work", async () => {
+    const inProgress = { ...STORY, state: "in_progress" as const, updatedAt: "in-progress" };
+    const requests = {
+      ...storyRequests(),
+      listStories: vi.fn(async () => ({
+        kind: "completed" as const,
+        value: [{ story: inProgress, sourceCount: 0 }],
+      })),
+    };
+    render(<NewsroomShell storyRequests={requests} sourceInboxRequests={inboxRequests()} />);
+
+    // Nothing was clicked: the Story needing a decision is already reachable.
+    expect(
+      await screen.findByRole("button", { name: /Persisted Story, In progress/ }),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "In progress, 1 story" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Intake, 0 stories" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
   it("nests only the selected queue's Stories inside the consolidated Desk navigation", async () => {
     render(
       <NewsroomShell
@@ -839,7 +864,6 @@ describe("NewsroomShell", () => {
       createWriterDraft: vi.fn(async () => ({ kind: "completed" as const, value: failedRun })),
     };
     render(<NewsroomShell storyRequests={requests} sourceInboxRequests={inboxRequests()} />);
-    fireEvent.click(await screen.findByRole("button", { name: /Assigned, 1 story/ }));
     fireEvent.click(await screen.findByRole("button", { name: /Persisted Story/ }));
     const runWriter = await screen.findByRole("button", { name: "Run Writer" });
     expect(screen.queryByLabelText("Writer")).not.toBeInTheDocument();
@@ -968,7 +992,6 @@ describe("NewsroomShell", () => {
     };
 
     render(<NewsroomShell storyRequests={requests} sourceInboxRequests={inboxRequests()} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Assigned, 1 story" }));
     fireEvent.click(await screen.findByRole("button", { name: /Persisted Story, Assigned/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Run Writer" }));
 
@@ -1058,7 +1081,6 @@ describe("NewsroomShell", () => {
       })),
     };
     render(<NewsroomShell storyRequests={requests} sourceInboxRequests={inboxRequests()} />);
-    fireEvent.click(await screen.findByRole("button", { name: "In progress, 1 story" }));
     fireEvent.click(await screen.findByRole("button", { name: /Persisted Story/ }));
 
     expect(

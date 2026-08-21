@@ -271,6 +271,8 @@
 .articleReviewWorkspace {
   display: grid;
   gap: 1.5rem;
+  /* Room for the pinned review action, so the end of the Article can still be scrolled clear. */
+  padding-bottom: 4rem;
 }
 
 .reviewTask,
@@ -279,6 +281,24 @@
   border-radius: 0.9rem;
   background: #0e1d18;
   padding: clamp(1.25rem, 3vw, 2rem);
+}
+
+/*
+ * The Article is the reference material and the review action is the job. Reading before acting
+ * is right, but the action was landing about three screens down and had to be scrolled back to
+ * for every step of the review, so it stays pinned to the foot of the Article it belongs to.
+ */
+.reviewTask {
+  position: sticky;
+  bottom: 0.75rem;
+  z-index: 1;
+  box-shadow: 0 0.75rem 2rem rgb(0 0 0 / 45%);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .reviewTask {
+    transition: box-shadow 140ms ease;
+  }
 }
 
 .reviewTask h2,
