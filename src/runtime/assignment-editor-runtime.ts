@@ -8,7 +8,7 @@ import { createOpenRouterStructuredModel } from "@/adapters/model";
 import { createPostgresStoryInspectionRepository } from "@/adapters/story-inspection";
 import {
   createGenerateAssignmentProposal,
-  type GenerateAssignmentProposalResult,
+  type StartAssignmentProposalResult,
   type GenerateAssignmentProposalCommand,
 } from "@/application/assignment-proposals";
 import { agentRunId } from "@/domain/editorial";
@@ -21,7 +21,7 @@ import {
 export interface AssignmentEditorRuntime {
   readonly generateAssignmentProposal: (
     command: GenerateAssignmentProposalCommand,
-  ) => Promise<GenerateAssignmentProposalResult>;
+  ) => Promise<StartAssignmentProposalResult>;
   close(): Promise<void>;
 }
 

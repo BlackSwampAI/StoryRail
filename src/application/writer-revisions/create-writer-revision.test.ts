@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { settleAgentRun } from "@/test/settle-agent-run";
+
 import type { StructuredModel, StructuredModelRequest } from "@/application/model";
 import type { StoryInspection } from "@/application/story-inspection";
 import {
@@ -253,10 +255,12 @@ describe("createWriterRevision", () => {
         .mockReturnValue("created"),
     });
 
-    const result = await workflow({
-      storyId: inspection.story.id,
-      requestedBy: { type: "operator", operatorId: operatorId("operator-41") },
-    });
+    const result = await settleAgentRun(
+      workflow({
+        storyId: inspection.story.id,
+        requestedBy: { type: "operator", operatorId: operatorId("operator-41") },
+      }),
+    );
 
     expect(generatedInput).toMatchObject({
       reviewDecision: { reason: "Add the supplied date and keep the rest unchanged." },
@@ -294,10 +298,12 @@ describe("createWriterRevision", () => {
     });
 
     await expect(
-      workflow({
-        storyId: mismatched.story.id,
-        requestedBy: { type: "operator", operatorId: operatorId("operator-41") },
-      }),
+      settleAgentRun(
+        workflow({
+          storyId: mismatched.story.id,
+          requestedBy: { type: "operator", operatorId: operatorId("operator-41") },
+        }),
+      ),
     ).resolves.toMatchObject({ ok: false, error: { code: "REVIEW_CONTEXT_MISMATCH" } });
     expect(resolveModel).not.toHaveBeenCalled();
   });

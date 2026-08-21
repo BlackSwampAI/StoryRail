@@ -472,11 +472,19 @@ describe("story-client", () => {
     };
     const { proposal: _proposal, ...strictFailed } = failed;
     void _proposal;
+    // The endpoint accepts the request and answers with a run identity; the client follows that
+    // run by inspecting the Story until it reaches a terminal outcome.
     const fetch = vi
       .fn<StoryClientDependencies["fetch"]>()
-      .mockResolvedValueOnce(response(201, { ok: true, run: AGENT_RUN }))
-      .mockResolvedValueOnce(response(201, { ok: true, run: strictFailed }));
-    const client = createStoryClient({ fetch });
+      .mockResolvedValueOnce(response(202, { ok: true, runId: AGENT_RUN.id }))
+      .mockResolvedValueOnce(
+        response(200, { ok: true, inspection: { ...INSPECTION, agentRuns: [AGENT_RUN] } }),
+      )
+      .mockResolvedValueOnce(response(202, { ok: true, runId: strictFailed.id }))
+      .mockResolvedValueOnce(
+        response(200, { ok: true, inspection: { ...INSPECTION, agentRuns: [strictFailed] } }),
+      );
+    const client = createStoryClient({ fetch, now: () => 0, wait: async () => {} });
     await expect(client.generateAssignmentProposal(STORY.id)).resolves.toEqual({
       kind: "completed",
       value: AGENT_RUN,
@@ -490,6 +498,37 @@ describe("story-client", () => {
       `/api/stories/${STORY.id}/assignment-proposals`,
       expect.objectContaining({ method: "POST", body: "{}" }),
     );
+    expect(fetch).toHaveBeenNthCalledWith(2, `/api/stories/${STORY.id}`, expect.anything());
+  });
+
+  it("keeps following a started run until it stops running", async () => {
+    const running = { ...AGENT_RUN, outcome: "running" as const, completedAt: null };
+    const { proposal: _proposal, ...inFlight } = running as never as {
+      proposal: unknown;
+    } & Record<string, unknown>;
+    const fetch = vi
+      .fn<StoryClientDependencies["fetch"]>()
+      .mockResolvedValueOnce(response(202, { ok: true, runId: AGENT_RUN.id }))
+      .mockResolvedValueOnce(
+        response(200, { ok: true, inspection: { ...INSPECTION, agentRuns: [inFlight] } }),
+      )
+      .mockResolvedValueOnce(
+        response(200, { ok: true, inspection: { ...INSPECTION, agentRuns: [AGENT_RUN] } }),
+      );
+    const waited: number[] = [];
+    const client = createStoryClient({
+      fetch,
+      now: () => 0,
+      wait: async (milliseconds) => {
+        waited.push(milliseconds);
+      },
+    });
+
+    await expect(client.generateAssignmentProposal(STORY.id)).resolves.toEqual({
+      kind: "completed",
+      value: AGENT_RUN,
+    });
+    expect(waited).toHaveLength(1);
   });
 
   it("fails closed on a malformed AgentRun but returns expected proposal preconditions", async () => {
@@ -552,14 +591,17 @@ describe("story-client", () => {
       outcome: "failed",
       failure: { code: "MODEL_REQUEST_FAILED", retryable: true },
     };
-    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
-      response(201, { ok: true, run }),
-    );
-    await expect(createStoryClient({ fetch }).createWriterDraft(STORY.id)).resolves.toEqual({
-      kind: "completed",
-      value: run,
-    });
-    expect(fetch).toHaveBeenCalledWith(
+    const fetch = vi
+      .fn<StoryClientDependencies["fetch"]>()
+      .mockResolvedValueOnce(response(202, { ok: true, runId: run.id }))
+      .mockResolvedValueOnce(
+        response(200, { ok: true, inspection: { ...INSPECTION, agentRuns: [run] } }),
+      );
+    await expect(
+      createStoryClient({ fetch, now: () => 0, wait: async () => {} }).createWriterDraft(STORY.id),
+    ).resolves.toEqual({ kind: "completed", value: run });
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
       `/api/stories/${STORY.id}/writer-drafts`,
       expect.objectContaining({ method: "POST", body: "{}" }),
     );

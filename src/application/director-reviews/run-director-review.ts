@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import type { AgentProfileRepository } from "@/application/agent-profiles";
-import type { AgentRunRepository } from "@/application/agent-runs";
+import type { AgentRunRepository, StartAgentRun } from "@/application/agent-runs";
 import type { StructuredModel } from "@/application/model";
 import type { StoryInspectionRepository } from "@/application/story-inspection";
 import {
@@ -84,6 +84,17 @@ export type RunDirectorReviewResult =
       };
     };
 
+export type RunDirectorReviewFailure = Extract<RunDirectorReviewResult, { readonly ok: false }>;
+
+/**
+ * Resolves once the run is durably recorded as in flight. The model call continues in
+ * `completion`, so preconditions still fail fast while the wait no longer blocks the caller.
+ */
+export type StartRunDirectorReviewResult = StartAgentRun<
+  RunDirectorReviewResult,
+  RunDirectorReviewFailure
+>;
+
 export function createRunDirectorReview(dependencies: {
   readonly inspections: StoryInspectionRepository;
   readonly profiles: AgentProfileRepository;
@@ -95,7 +106,7 @@ export function createRunDirectorReview(dependencies: {
   return async (command: {
     readonly storyId: StoryId;
     readonly requestedBy: EditorialActor;
-  }): Promise<RunDirectorReviewResult> => {
+  }): Promise<StartRunDirectorReviewResult> => {
     const inspected = await dependencies.inspections.inspect(command.storyId);
     if (!inspected.ok)
       return {
@@ -268,50 +279,56 @@ export function createRunDirectorReview(dependencies: {
     const appendedStart = await dependencies.runs.append(started.run);
     if (!appendedStart.ok) return appendedStart;
 
-    const generated = await resolved.model
-      .generateStructured({
-        systemPrompt: directorSystemPrompt(profile.instructions),
-        input: {
-          ...input,
-          evidence: selected.map(({ reference, document }) => ({ ...reference, document })),
-        },
-        schema: directorReviewOutputSchema,
-      })
-      .catch(() => ({
-        ok: false as const,
-        failure: { code: "MODEL_REQUEST_FAILED" as const, retryable: true },
-      }));
-    const completedAt = dependencies.now();
-    const common = { ...identity, completedAt };
-    const parsed = generated.ok ? directorReviewOutputSchema.safeParse(generated.output) : null;
-    const validated = parsed?.success ? createDirectorReview(parsed.data) : null;
-    const candidate: AgentRun =
-      generated.ok && parsed?.success && validated?.ok
-        ? { ...common, outcome: "succeeded", review: validated.review }
-        : {
-            ...common,
-            outcome: "failed",
-            failure: generated.ok
-              ? { code: "MODEL_OUTPUT_INVALID", retryable: false }
-              : generated.failure,
-          };
-    const recorded = recordAgentRun(candidate);
-    if (!recorded.ok) throw new Error("The application produced an invalid Director AgentRun.");
-    const appended = await dependencies.runs.complete(recorded.run);
-    if (!appended.ok) {
-      if (appended.error.code === "DIRECTOR_REVIEW_ALREADY_SUCCEEDED")
-        return {
-          ok: false,
-          error: {
-            code: "DIRECTOR_REVIEW_ALREADY_SUCCEEDED",
-            message: appended.error.message,
-            runId: appended.error.runId,
+    // The run is durable now, so the caller can stop waiting. Only the model call and the
+    // completion it produces continue past this point.
+    const completion = (async (): Promise<RunDirectorReviewResult> => {
+      const generated = await resolved.model
+        .generateStructured({
+          systemPrompt: directorSystemPrompt(profile.instructions),
+          input: {
+            ...input,
+            evidence: selected.map(({ reference, document }) => ({ ...reference, document })),
           },
-        };
-      throw new Error("The in-flight Director AgentRun could not be completed.");
-    }
-    if (appended.run.role !== "editor_in_chief")
-      throw new Error("The durable AgentRun role changed unexpectedly.");
-    return { ok: true, run: appended.run };
+          schema: directorReviewOutputSchema,
+        })
+        .catch(() => ({
+          ok: false as const,
+          failure: { code: "MODEL_REQUEST_FAILED" as const, retryable: true },
+        }));
+      const completedAt = dependencies.now();
+      const common = { ...identity, completedAt };
+      const parsed = generated.ok ? directorReviewOutputSchema.safeParse(generated.output) : null;
+      const validated = parsed?.success ? createDirectorReview(parsed.data) : null;
+      const candidate: AgentRun =
+        generated.ok && parsed?.success && validated?.ok
+          ? { ...common, outcome: "succeeded", review: validated.review }
+          : {
+              ...common,
+              outcome: "failed",
+              failure: generated.ok
+                ? { code: "MODEL_OUTPUT_INVALID", retryable: false }
+                : generated.failure,
+            };
+      const recorded = recordAgentRun(candidate);
+      if (!recorded.ok) throw new Error("The application produced an invalid Director AgentRun.");
+      const appended = await dependencies.runs.complete(recorded.run);
+      if (!appended.ok) {
+        if (appended.error.code === "DIRECTOR_REVIEW_ALREADY_SUCCEEDED")
+          return {
+            ok: false,
+            error: {
+              code: "DIRECTOR_REVIEW_ALREADY_SUCCEEDED",
+              message: appended.error.message,
+              runId: appended.error.runId,
+            },
+          };
+        throw new Error("The in-flight Director AgentRun could not be completed.");
+      }
+      if (appended.run.role !== "editor_in_chief")
+        throw new Error("The durable AgentRun role changed unexpectedly.");
+      return { ok: true, run: appended.run };
+    })();
+
+    return { ok: true, runId: started.run.id, completion };
   };
 }

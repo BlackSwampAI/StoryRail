@@ -8,7 +8,7 @@ import { createPostgresStoryInspectionRepository } from "@/adapters/story-inspec
 import {
   createRunDirectorReview,
   type DirectorModelResolution,
-  type RunDirectorReviewResult,
+  type StartRunDirectorReviewResult,
 } from "@/application/director-reviews";
 import {
   agentRunId,
@@ -25,7 +25,7 @@ export interface DirectorRuntime {
   readonly runDirectorReview: (command: {
     readonly storyId: StoryId;
     readonly requestedBy: EditorialActor;
-  }) => Promise<RunDirectorReviewResult>;
+  }) => Promise<StartRunDirectorReviewResult>;
   close(): Promise<void>;
 }
 

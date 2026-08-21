@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+
+import { settleAgentRun } from "@/test/settle-agent-run";
 import { createWriterDraft } from "./create-writer-draft";
 import type { WriterDraftPersistence } from "./writer-draft-persistence";
 import type { StructuredModel, StructuredModelRequest } from "@/application/model";
@@ -180,10 +182,12 @@ describe("createWriterDraft", () => {
         .mockReturnValueOnce("completed")
         .mockReturnValue("persisted"),
     });
-    const result = await workflow({
-      storyId: facts.story.id,
-      requestedBy: facts.assignment.assignedBy,
-    });
+    const result = await settleAgentRun(
+      workflow({
+        storyId: facts.story.id,
+        requestedBy: facts.assignment.assignedBy,
+      }),
+    );
     expect(generateStructured).toHaveBeenCalledOnce();
     expect(generateStructured.mock.calls[0]?.[0].input).toMatchObject({
       unavailableSourceIds: [sourceId("source-b")],
@@ -232,7 +236,9 @@ describe("createWriterDraft", () => {
       now: () => "now",
     });
     expect(
-      await workflow({ storyId: facts.story.id, requestedBy: facts.assignment.assignedBy }),
+      await settleAgentRun(
+        workflow({ storyId: facts.story.id, requestedBy: facts.assignment.assignedBy }),
+      ),
     ).toMatchObject({ ok: true, run: { outcome: "failed" } });
     // The run is appended once while in flight, then completed with the failure.
     expect(append).toHaveBeenCalledOnce();
@@ -265,7 +271,9 @@ describe("createWriterDraft", () => {
       now: () => "now",
     });
     expect(
-      await workflow({ storyId: facts.story.id, requestedBy: facts.assignment.assignedBy }),
+      await settleAgentRun(
+        workflow({ storyId: facts.story.id, requestedBy: facts.assignment.assignedBy }),
+      ),
     ).toMatchObject({ ok: false, error: { code: "WRITER_EVIDENCE_REQUIRED" } });
     expect(resolveModel).not.toHaveBeenCalled();
   });

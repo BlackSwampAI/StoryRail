@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import type { AgentProfileRepository } from "@/application/agent-profiles";
-import type { AgentRunRepository } from "@/application/agent-runs";
+import type { AgentRunRepository, StartAgentRun } from "@/application/agent-runs";
 import type { StructuredModel } from "@/application/model";
 import type { StoryInspectionRepository } from "@/application/story-inspection";
 import {
@@ -49,30 +49,40 @@ export interface GenerateAssignmentProposalCommand {
   readonly requestedBy: EditorialActor;
 }
 
+export type GenerateAssignmentProposalFailure = {
+  readonly ok: false;
+  readonly error:
+    | { readonly code: "STORY_NOT_FOUND"; readonly message: string; readonly storyId: StoryId }
+    | {
+        readonly code: "ASSIGNMENT_PROPOSAL_NOT_ALLOWED";
+        readonly message: string;
+        readonly storyId: StoryId;
+      }
+    | {
+        readonly code: "ASSIGNMENT_EDITOR_EVIDENCE_REQUIRED";
+        readonly message: string;
+        readonly storyId: StoryId;
+      }
+    | { readonly code: "WRITER_PROFILE_REQUIRED"; readonly message: string }
+    | { readonly code: "ASSIGNMENT_EDITOR_PROFILE_UNAVAILABLE"; readonly message: string }
+    | {
+        readonly code: "AGENT_RUN_ID_CONFLICT";
+        readonly message: string;
+        readonly runId: AgentRunId;
+      };
+};
+
 export type GenerateAssignmentProposalResult =
-  | { readonly ok: true; readonly run: AgentRun }
-  | {
-      readonly ok: false;
-      readonly error:
-        | { readonly code: "STORY_NOT_FOUND"; readonly message: string; readonly storyId: StoryId }
-        | {
-            readonly code: "ASSIGNMENT_PROPOSAL_NOT_ALLOWED";
-            readonly message: string;
-            readonly storyId: StoryId;
-          }
-        | {
-            readonly code: "ASSIGNMENT_EDITOR_EVIDENCE_REQUIRED";
-            readonly message: string;
-            readonly storyId: StoryId;
-          }
-        | { readonly code: "WRITER_PROFILE_REQUIRED"; readonly message: string }
-        | { readonly code: "ASSIGNMENT_EDITOR_PROFILE_UNAVAILABLE"; readonly message: string }
-        | {
-            readonly code: "AGENT_RUN_ID_CONFLICT";
-            readonly message: string;
-            readonly runId: AgentRunId;
-          };
-    };
+  { readonly ok: true; readonly run: AgentRun } | GenerateAssignmentProposalFailure;
+
+/**
+ * Resolves once the run is durably recorded as in flight. The model call continues in
+ * `completion`, so preconditions still fail fast while the wait no longer blocks the caller.
+ */
+export type StartAssignmentProposalResult = StartAgentRun<
+  GenerateAssignmentProposalResult,
+  GenerateAssignmentProposalFailure
+>;
 
 interface SelectedEvidence {
   readonly reference: EvidenceReference;
@@ -106,7 +116,7 @@ export function createGenerateAssignmentProposal(dependencies: {
 }) {
   return async (
     command: GenerateAssignmentProposalCommand,
-  ): Promise<GenerateAssignmentProposalResult> => {
+  ): Promise<StartAssignmentProposalResult> => {
     const inspected = await dependencies.inspections.inspect(command.storyId);
     if (!inspected.ok) {
       return {
@@ -241,53 +251,64 @@ export function createGenerateAssignmentProposal(dependencies: {
       throw new Error("A non-Director AgentRun received a Director uniqueness conflict.");
     }
 
-    const generated = await dependencies.model
-      .generateStructured({
-        systemPrompt: assignmentEditorSystemPrompt(editor.instructions),
-        input: {
-          story: {
-            id: story.id,
-            title: story.title,
-            state: story.state,
-            revisionCycle: story.revisionCycle,
+    // The run is durable now, so the caller can stop waiting. Only the model call and the
+    // completion it produces continue past this point.
+    const completion = (async (): Promise<GenerateAssignmentProposalResult> => {
+      const generated = await dependencies.model
+        .generateStructured({
+          systemPrompt: assignmentEditorSystemPrompt(editor.instructions),
+          input: {
+            story: {
+              id: story.id,
+              title: story.title,
+              state: story.state,
+              revisionCycle: story.revisionCycle,
+            },
+            evidence: selected.map(({ reference, content }) => ({
+              ...reference,
+              document: content,
+            })),
+            unavailableSourceIds,
+            writers: writers.map(writerInput),
           },
-          evidence: selected.map(({ reference, content }) => ({ ...reference, document: content })),
-          unavailableSourceIds,
-          writers: writers.map(writerInput),
-        },
-        schema: assignmentProposalOutputSchema,
-      })
-      .catch(() => ({
-        ok: false as const,
-        failure: { code: "MODEL_REQUEST_FAILED" as const, retryable: true },
-      }));
-    const completedAt = dependencies.now();
-    const common = { ...identity, completedAt };
-
-    const parsed = generated.ok ? assignmentProposalOutputSchema.safeParse(generated.output) : null;
-    const proposal = parsed?.success
-      ? createAssignmentProposal({
-          ...parsed.data,
-          writerProfileId: agentProfileId(parsed.data.writerProfileId),
+          schema: assignmentProposalOutputSchema,
         })
-      : null;
-    const knownWriter =
-      proposal?.ok === true &&
-      writers.some(({ id: writerId }) => writerId === proposal.proposal.writerProfileId);
-    const candidate: AgentRun =
-      generated.ok && proposal?.ok === true && knownWriter
-        ? { ...common, outcome: "succeeded", proposal: proposal.proposal }
-        : {
-            ...common,
-            outcome: "failed",
-            failure: generated.ok
-              ? { code: "MODEL_OUTPUT_INVALID", retryable: false }
-              : generated.failure,
-          };
-    const recorded = recordAgentRun(candidate);
-    if (!recorded.ok) throw new Error("The application produced an invalid AgentRun.");
-    const completed = await dependencies.runs.complete(recorded.run);
-    if (!completed.ok) throw new Error("The in-flight AgentRun could not be completed.");
-    return completed;
+        .catch(() => ({
+          ok: false as const,
+          failure: { code: "MODEL_REQUEST_FAILED" as const, retryable: true },
+        }));
+      const completedAt = dependencies.now();
+      const common = { ...identity, completedAt };
+
+      const parsed = generated.ok
+        ? assignmentProposalOutputSchema.safeParse(generated.output)
+        : null;
+      const proposal = parsed?.success
+        ? createAssignmentProposal({
+            ...parsed.data,
+            writerProfileId: agentProfileId(parsed.data.writerProfileId),
+          })
+        : null;
+      const knownWriter =
+        proposal?.ok === true &&
+        writers.some(({ id: writerId }) => writerId === proposal.proposal.writerProfileId);
+      const candidate: AgentRun =
+        generated.ok && proposal?.ok === true && knownWriter
+          ? { ...common, outcome: "succeeded", proposal: proposal.proposal }
+          : {
+              ...common,
+              outcome: "failed",
+              failure: generated.ok
+                ? { code: "MODEL_OUTPUT_INVALID", retryable: false }
+                : generated.failure,
+            };
+      const recorded = recordAgentRun(candidate);
+      if (!recorded.ok) throw new Error("The application produced an invalid AgentRun.");
+      const completed = await dependencies.runs.complete(recorded.run);
+      if (!completed.ok) throw new Error("The in-flight AgentRun could not be completed.");
+      return completed;
+    })();
+
+    return { ok: true, runId: started.run.id, completion };
   };
 }

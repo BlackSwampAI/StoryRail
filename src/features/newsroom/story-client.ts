@@ -23,6 +23,9 @@ export const STORY_REQUEST_UNAVAILABLE_MESSAGE = "The Story request could not be
 
 export interface StoryClientDependencies {
   readonly fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  /** Injectable so following a started run is deterministic under test. */
+  readonly now?: () => number;
+  readonly wait?: (milliseconds: number) => Promise<void>;
 }
 
 export interface StoryClientApplicationError {
@@ -379,6 +382,17 @@ function isTransition(value: unknown): value is StoryTransitionReceipt {
   );
 }
 
+/** A run still in flight has no completion timestamp; a finished one must record when. */
+function hasRunTimestamps(value: Record<string, unknown>): boolean {
+  if (!isString(value.startedAt) || value.startedAt.trim().length === 0) return false;
+  if (value.outcome === "running") return value.completedAt === null;
+  return (
+    isString(value.completedAt) &&
+    (value.completedAt.trim().length === 0) === false &&
+    value.completedAt === value.completedAt.trim()
+  );
+}
+
 function isAgentRun(value: unknown): value is AgentRun {
   if (isDirectorAgentRun(value)) return true;
   if (isWriterAgentRun(value)) return true;
@@ -417,12 +431,7 @@ function isAgentRun(value: unknown): value is AgentRun {
         value.requestedBy.operatorId !== value.requestedBy.operatorId.trim()
       : value.requestedBy.runId.trim().length === 0 ||
         value.requestedBy.runId !== value.requestedBy.runId.trim()) ||
-    !isString(value.startedAt) ||
-    value.startedAt.trim().length === 0 ||
-    value.startedAt !== value.startedAt.trim() ||
-    !isString(value.completedAt) ||
-    value.completedAt.trim().length === 0 ||
-    value.completedAt !== value.completedAt.trim() ||
+    !hasRunTimestamps(value) ||
     !isRecord(value.input) ||
     !hasExactKeys(value.input, ["story", "evidence", "unavailableSourceIds", "writerProfileIds"]) ||
     !isRecord(value.input.story) ||
@@ -486,6 +495,7 @@ function isAgentRun(value: unknown): value is AgentRun {
     "input",
     "outcome",
   ];
+  if (value.outcome === "running") return hasExactKeys(value, common);
   if (value.outcome === "succeeded") {
     return (
       hasExactKeys(value, [...common, "proposal"]) &&
@@ -554,8 +564,7 @@ function isDirectorAgentRun(value: unknown): value is AgentRun {
     !isString(value.prompt.key) ||
     !isString(value.prompt.version) ||
     !isActor(value.requestedBy) ||
-    !isString(value.startedAt) ||
-    !isString(value.completedAt) ||
+    !hasRunTimestamps(value) ||
     !isRecord(value.input) ||
     !hasExactKeys(value.input, [
       "story",
@@ -592,6 +601,7 @@ function isDirectorAgentRun(value: unknown): value is AgentRun {
     "input",
     "outcome",
   ];
+  if (value.outcome === "running") return hasExactKeys(value, common);
   if (value.outcome === "failed")
     return (
       hasExactKeys(value, [...common, "failure"]) &&
@@ -678,8 +688,7 @@ function isWriterAgentRun(value: unknown): value is AgentRun {
     !isString(value.prompt.key) ||
     !isString(value.prompt.version) ||
     !isActor(value.requestedBy) ||
-    !isString(value.startedAt) ||
-    !isString(value.completedAt) ||
+    !hasRunTimestamps(value) ||
     !isRecord(value.input) ||
     !(
       (value.operation === "article_draft" &&
@@ -782,6 +791,7 @@ function isWriterAgentRun(value: unknown): value is AgentRun {
     "input",
     "outcome",
   ];
+  if (value.outcome === "running") return hasExactKeys(value, common);
   return value.outcome === "succeeded"
     ? hasExactKeys(value, [...common, "articleId", "revisionId"]) &&
         isString(value.articleId) &&
@@ -984,6 +994,66 @@ function unavailable(): StoryClientResult<never> {
   return { kind: "unavailable", message: STORY_REQUEST_UNAVAILABLE_MESSAGE };
 }
 
+const jsonHeaders = { "Content-Type": "application/json", Accept: "application/json" };
+
+/** How often a started agent run is checked, and how long the client keeps following it. */
+const RUN_POLL_INTERVAL_MS = 1_000;
+const RUN_POLL_TIMEOUT_MS = 5 * 60_000;
+
+function isStartedRun(value: unknown): value is { readonly runId: string } {
+  return isRecord(value) && typeof value.runId === "string" && value.runId.trim().length > 0;
+}
+
+/**
+ * Supervised agent endpoints accept the request and answer with the identity of a run that is
+ * already durable, rather than holding the connection open for the model. The client follows
+ * that run by inspecting the Story until it reaches a terminal outcome, so callers keep the
+ * same contract they had when the request blocked.
+ */
+async function startRun(
+  dependencies: Required<StoryClientDependencies>,
+  storyId: string,
+  input: string,
+  applicationErrors: Readonly<Record<number, ReadonlySet<string>>>,
+  inspect: (storyId: string) => Promise<StoryClientResult<StoryInspection>>,
+): Promise<StoryClientResult<AgentRun>> {
+  let runId: string;
+  try {
+    const response = await dependencies.fetch(input, {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({}),
+    });
+    const body: unknown = await response.json();
+    if (!isRecord(body)) return unavailable();
+    if (response.status === 202 && body.ok === true && isStartedRun(body)) {
+      runId = body.runId;
+    } else if (
+      response.status >= 400 &&
+      response.status < 500 &&
+      body.ok === false &&
+      isApplicationError(body.error) &&
+      applicationErrors[response.status]?.has(body.error.code) === true
+    ) {
+      return { kind: "application-failure", error: body.error };
+    } else {
+      return unavailable();
+    }
+  } catch {
+    return unavailable();
+  }
+
+  const deadline = dependencies.now() + RUN_POLL_TIMEOUT_MS;
+  for (;;) {
+    const inspected = await inspect(storyId);
+    if (inspected.kind !== "completed") return inspected;
+    const run = inspected.value.agentRuns.find((candidate) => candidate.id === runId);
+    if (run && run.outcome !== "running") return { kind: "completed", value: run };
+    if (dependencies.now() >= deadline) return unavailable();
+    await dependencies.wait(RUN_POLL_INTERVAL_MS);
+  }
+}
+
 async function request<Value>(
   fetch: StoryClientDependencies["fetch"],
   input: string,
@@ -1017,8 +1087,14 @@ async function request<Value>(
 }
 
 export function createStoryClient(dependencies: StoryClientDependencies): StoryClient {
-  const jsonHeaders = { "Content-Type": "application/json", Accept: "application/json" };
-  return {
+  const resolved: Required<StoryClientDependencies> = {
+    fetch: dependencies.fetch,
+    now: dependencies.now ?? (() => Date.now()),
+    wait:
+      dependencies.wait ??
+      ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))),
+  };
+  const client: StoryClient = {
     listStories: () =>
       request(
         dependencies.fetch,
@@ -1132,13 +1208,10 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
       }
     },
     generateAssignmentProposal: (storyId) =>
-      request(
-        dependencies.fetch,
+      startRun(
+        resolved,
+        storyId,
         `/api/stories/${encodeURIComponent(storyId)}/assignment-proposals`,
-        { method: "POST", headers: jsonHeaders, body: JSON.stringify({}) },
-        201,
-        "run",
-        isAgentRun,
         {
           400: new Set(["INVALID_JSON", "INVALID_REQUEST"]),
           404: new Set(["STORY_NOT_FOUND"]),
@@ -1146,15 +1219,13 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
           415: new Set(["UNSUPPORTED_MEDIA_TYPE"]),
           422: new Set(["ASSIGNMENT_EDITOR_EVIDENCE_REQUIRED", "WRITER_PROFILE_REQUIRED"]),
         },
+        (identity) => client.inspectStory(identity),
       ),
     createWriterDraft: (storyId) =>
-      request(
-        dependencies.fetch,
+      startRun(
+        resolved,
+        storyId,
         `/api/stories/${encodeURIComponent(storyId)}/writer-drafts`,
-        { method: "POST", headers: jsonHeaders, body: JSON.stringify({}) },
-        201,
-        "run",
-        isAgentRun,
         {
           400: new Set(["INVALID_JSON", "INVALID_REQUEST"]),
           404: new Set(["STORY_NOT_FOUND"]),
@@ -1168,15 +1239,13 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
           415: new Set(["UNSUPPORTED_MEDIA_TYPE"]),
           422: new Set(["WRITER_EVIDENCE_REQUIRED"]),
         },
+        (identity) => client.inspectStory(identity),
       ),
     createWriterRevision: (storyId) =>
-      request(
-        dependencies.fetch,
+      startRun(
+        resolved,
+        storyId,
         `/api/stories/${encodeURIComponent(storyId)}/writer-revisions`,
-        { method: "POST", headers: jsonHeaders, body: JSON.stringify({}) },
-        201,
-        "run",
-        isAgentRun,
         {
           400: new Set(["INVALID_JSON", "INVALID_REQUEST"]),
           404: new Set(["STORY_NOT_FOUND"]),
@@ -1193,6 +1262,7 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
           415: new Set(["UNSUPPORTED_MEDIA_TYPE"]),
           422: new Set(["WRITER_EVIDENCE_UNAVAILABLE"]),
         },
+        (identity) => client.inspectStory(identity),
       ),
     async rejectStory(storyId, reason) {
       try {
@@ -1267,13 +1337,10 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
       }
     },
     runDirectorReview: (storyId) =>
-      request(
-        dependencies.fetch,
+      startRun(
+        resolved,
+        storyId,
         `/api/stories/${encodeURIComponent(storyId)}/director-reviews`,
-        { method: "POST", headers: jsonHeaders, body: JSON.stringify({}) },
-        201,
-        "run",
-        isAgentRun,
         {
           400: new Set(["INVALID_JSON", "INVALID_REQUEST"]),
           404: new Set(["STORY_NOT_FOUND"]),
@@ -1290,6 +1357,7 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
             "DIRECTOR_EVIDENCE_UNAVAILABLE",
           ]),
         },
+        (identity) => client.inspectStory(identity),
       ),
     async recordReviewDecision(storyId, command) {
       try {
@@ -1333,6 +1401,7 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
       }
     },
   };
+  return client;
 }
 
 export const storyClient = createStoryClient({

@@ -2,6 +2,8 @@
 
 import { describe, expect, it, vi } from "vitest";
 
+import type { GenerateAssignmentProposalResult } from "@/application/assignment-proposals";
+
 import { agentProfileId, agentRunId, operatorId, storyId, type AgentRun } from "@/domain/editorial";
 import { AssignmentEditorRuntimeConfigurationError, type AssignmentEditorRuntime } from "@/runtime";
 
@@ -36,20 +38,35 @@ const request = (body = "{}", contentType = "application/json") =>
   });
 
 describe("generate Assignment proposal HTTP handler", () => {
-  it("returns 201 for both successful and failed durable executions with no-store", async () => {
-    const generateAssignmentProposal = vi.fn(async () => ({ ok: true as const, run }));
+  it("accepts a started run and returns its identity without waiting for the model", async () => {
+    let settle: (value: GenerateAssignmentProposalResult) => void = () => {};
+    const completion = new Promise<GenerateAssignmentProposalResult>((resolve) => {
+      settle = resolve;
+    });
+    const generateAssignmentProposal = vi.fn(async () => ({
+      ok: true as const,
+      runId: run.id,
+      completion,
+    }));
     const runtime = { generateAssignmentProposal, close: vi.fn() } as AssignmentEditorRuntime;
+    const scheduled: (() => Promise<void>)[] = [];
     const response = await createGenerateAssignmentProposalHttpHandler({
       getRuntime: () => runtime,
       environment: { NODE_ENV: "test", STORYRAIL_OPERATOR_ID: "operator-http-0030" },
+      after: (task) => scheduled.push(task),
     })(request(), context);
-    expect(response.status).toBe(201);
+
+    // The response is produced while the model call is still outstanding.
+    expect(response.status).toBe(202);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.json()).toEqual({ ok: true, run });
+    expect(await response.json()).toEqual({ ok: true, runId: run.id });
     expect(generateAssignmentProposal).toHaveBeenCalledWith({
       storyId: run.storyId,
       requestedBy: run.requestedBy,
     });
+    settle({ ok: true, run });
+    expect(scheduled).toHaveLength(1);
+    await Promise.all(scheduled.map((task) => task()));
   });
 
   it.each([

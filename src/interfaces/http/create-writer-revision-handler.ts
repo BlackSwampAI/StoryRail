@@ -1,4 +1,6 @@
-import type { CreateWriterRevisionResult } from "@/application/writer-revisions";
+import { after as scheduleAfterResponse } from "next/server";
+
+import type { CreateWriterRevisionFailure } from "@/application/writer-revisions";
 import { operatorId, storyId, type OperatorActor } from "@/domain/editorial";
 import { WriterRuntimeConfigurationError, type WriterRuntime } from "@/runtime";
 import type { StoryRouteContext } from "./attach-source-to-story-handler";
@@ -8,8 +10,7 @@ const respond = (body: unknown, status: number) =>
   new Response(JSON.stringify(body), { status, headers: HEADERS });
 const error = (code: string, message: string) => ({ ok: false, error: { code, message } });
 
-function status(result: CreateWriterRevisionResult): number {
-  if (result.ok) return 201;
+function status(result: CreateWriterRevisionFailure): number {
   switch (result.error.code) {
     case "STORY_NOT_FOUND":
       return 404;
@@ -35,7 +36,10 @@ function status(result: CreateWriterRevisionResult): number {
 export function createWriterRevisionHttpHandler(dependencies: {
   readonly getRuntime: () => WriterRuntime;
   readonly environment?: Readonly<Partial<NodeJS.ProcessEnv>>;
+  /** Injectable so the handler can be exercised outside a Next.js request scope. */
+  readonly after?: (task: () => Promise<void>) => void;
 }) {
+  const after = dependencies.after ?? scheduleAfterResponse;
   return async (request: Request, context: StoryRouteContext): Promise<Response> => {
     if (
       request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() !==
@@ -69,10 +73,18 @@ export function createWriterRevisionHttpHandler(dependencies: {
         operatorId: operatorId(configuredOperator),
       };
       const parameters = await context.params;
-      const result = await dependencies
+      const started = await dependencies
         .getRuntime()
         .createWriterRevision({ storyId: storyId(parameters.storyId), requestedBy });
-      return respond(result, status(result));
+      if (!started.ok) return respond(started, status(started));
+
+      // The run is durable and its identity is returned now; the model call finishes after
+      // the response so a slow provider cannot hold the request open.
+      const { completion } = started;
+      after(async () => {
+        await completion;
+      });
+      return respond({ ok: true, runId: started.runId }, 202);
     } catch (caught) {
       if (caught instanceof WriterRuntimeConfigurationError)
         return respond(error("WRITER_UNAVAILABLE", "Writer execution is not configured."), 503);
