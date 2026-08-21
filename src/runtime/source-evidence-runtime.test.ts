@@ -149,12 +149,21 @@ function makeRepositories(): ControlledRepositories {
   };
 }
 
+// The Firecrawl adapter rejects near-empty renderings as extraction artifacts, so fixtures
+// standing for a real extraction carry article-length content.
+const RUNTIME_MARKDOWN = [
+  "# Runtime-composed evidence",
+  "",
+  "The office published its composed figures on Tuesday, describing a steady rise across",
+  "every district that filed on time, with the remainder expected within the week.",
+].join("\n");
+
 function successfulFetch(): typeof globalThis.fetch {
   return vi.fn<typeof globalThis.fetch>(async () =>
     Response.json({
       success: true,
       data: {
-        markdown: "# Runtime-composed evidence",
+        markdown: RUNTIME_MARKDOWN,
         metadata: { title: "Runtime evidence", language: "en" },
       },
     }),
@@ -306,9 +315,7 @@ describe("createSourceEvidenceRuntime", () => {
     factoryMocks.createPostgresSourceRepositories.mockReturnValue(repositories);
     const fetchImplementation = vi
       .fn<typeof globalThis.fetch>()
-      .mockResolvedValueOnce(
-        Response.json({ success: true, data: { markdown: "# Successful evidence" } }),
-      )
+      .mockResolvedValueOnce(Response.json({ success: true, data: { markdown: RUNTIME_MARKDOWN } }))
       .mockResolvedValueOnce(new Response(null, { status: 503 }));
     const createUuid = vi
       .fn<() => string>()

@@ -71,9 +71,33 @@ function isObviousChallengePage(markdown: string): boolean {
   return CHALLENGE_PAGE_MARKERS.some((marker) => marker.test(markdown));
 }
 
+// Firecrawl answers 200 with `success: true` even when the page it fetched answered with an
+// error, reporting the upstream status in metadata. Rendering an error page as Markdown is not
+// evidence, so the upstream status decides the outcome before any content is considered.
+function upstreamFailure(metadata: Record<string, unknown> | null): SourceExtractorResult | null {
+  const status = metadata?.statusCode;
+
+  if (typeof status !== "number" || !Number.isInteger(status)) {
+    return null;
+  }
+
+  return status >= 200 && status < 300 ? null : mapHttpFailure(status);
+}
+
+// A page that renders to almost nothing is an extraction artifact rather than an article. The
+// floor is deliberately far below any real piece of writing so only empty shells are rejected.
+const MINIMUM_EXTRACTED_CONTENT_LENGTH = 120;
+
 function mapSuccessfulBody(body: unknown): SourceExtractorResult {
   if (!isRecord(body) || body.success !== true || !isRecord(body.data)) {
     return failure("EXTRACTION_FAILED", false);
+  }
+
+  const metadata = isRecord(body.data.metadata) ? body.data.metadata : null;
+  const rejectedUpstream = upstreamFailure(metadata);
+
+  if (rejectedUpstream) {
+    return rejectedUpstream;
   }
 
   const markdown = body.data.markdown;
@@ -86,7 +110,10 @@ function mapSuccessfulBody(body: unknown): SourceExtractorResult {
     return failure("RESPONSE_REJECTED", false);
   }
 
-  const metadata = isRecord(body.data.metadata) ? body.data.metadata : null;
+  if (markdown.trim().length < MINIMUM_EXTRACTED_CONTENT_LENGTH) {
+    return failure("EXTRACTION_FAILED", false);
+  }
+
   const document: ExtractedSourceDocument = {
     format: "markdown",
     content: markdown,
