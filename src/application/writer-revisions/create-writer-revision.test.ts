@@ -222,7 +222,23 @@ describe("createWriterRevision", () => {
       generatedInput = request.input;
       return {
         ok: true as const,
-        output: { headline: "Revised headline", dek: null, bodyMarkdown: "Revised body." },
+        output: {
+          headline: "Revised headline",
+          dek: null,
+          blocks: [
+            {
+              kind: "claim",
+              markdown: "The supplied date is August 13.",
+              citations: [
+                {
+                  sourceId: "source-41",
+                  evidenceId: "preparation-41",
+                  quote: "The supplied date is August 13.",
+                },
+              ],
+            },
+          ],
+        },
       };
     });
     const model: StructuredModel = {
@@ -278,6 +294,64 @@ describe("createWriterRevision", () => {
       story: { state: "in_progress", revisionCycle: 1 },
       transitionReceipt: { previousState: "changes_requested", nextState: "in_progress" },
     });
+  });
+
+  it("refuses a revision whose claim is not supported by the historical evidence", async () => {
+    // A revision is held to the same standard as the draft it replaces: the Story stays in
+    // changes_requested rather than advancing on an assertion nothing supports.
+    const inspection = fixture();
+    const persist = vi.fn();
+    const model: StructuredModel = {
+      descriptor: { provider: "openrouter", model: "writer" },
+      limits: { maximumInputCharacters: 60_000 },
+      generateStructured: vi.fn(async () => ({
+        ok: true as const,
+        output: {
+          headline: "Revised headline",
+          dek: null,
+          blocks: [
+            {
+              kind: "claim",
+              markdown: "The supplied date is September 2.",
+              citations: [
+                {
+                  sourceId: "source-41",
+                  evidenceId: "preparation-41",
+                  quote: "The supplied date is September 2.",
+                },
+              ],
+            },
+          ],
+        },
+      })) as StructuredModel["generateStructured"],
+    };
+    const workflow = createWriterRevision({
+      inspections: { inspect: vi.fn(async () => ({ ok: true as const, inspection })) },
+      runs: {
+        append: vi.fn(async (run) => ({ ok: true as const, run })),
+        complete: vi.fn(async (run) => ({ ok: true as const, run })),
+        listByStoryId: vi.fn(),
+      },
+      persistence: { persist },
+      resolveModel: () => ({ ok: true, model }),
+      createAgentRunId: () => agentRunId("writer-run-ungrounded-41"),
+      createRevisionId: () => articleRevisionId("unused"),
+      createTransitionId: () => transitionId("unused"),
+      now: () => "now",
+    });
+
+    expect(
+      await settleAgentRun(
+        workflow({
+          storyId: inspection.story.id,
+          requestedBy: { type: "operator", operatorId: operatorId("operator-41") },
+        }),
+      ),
+    ).toMatchObject({
+      ok: true,
+      run: { outcome: "failed", failure: { code: "MODEL_OUTPUT_UNGROUNDED" } },
+    });
+    expect(persist).not.toHaveBeenCalled();
   });
 
   it("rejects a revision whose number does not match the durable Story cycle", async () => {

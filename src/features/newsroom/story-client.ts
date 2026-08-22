@@ -122,6 +122,11 @@ const STORY_STATES = new Set([
 const AGENT_ROLES = new Set(["assignment_editor", "writer", "fact_checker", "editor_in_chief"]);
 const EXTRACTION_FAILURE_CODES = new Set<string>(SOURCE_EXTRACTION_FAILURE_CODES);
 const PREPARATION_FAILURE_CODE_SET = new Set<string>(PREPARATION_FAILURE_CODES);
+const GROUNDING_FAILURE_CODES: ReadonlySet<string> = new Set([
+  "CITATION_EVIDENCE_UNKNOWN",
+  "CITATION_SOURCE_MISMATCH",
+  "CITATION_QUOTE_UNSUPPORTED",
+]);
 const MODEL_FAILURE_CODE_SET = new Set<string>(MODEL_FAILURE_CODES);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -151,6 +156,42 @@ function isActor(value: unknown): value is EditorialActor {
 
 function isStringOrNull(value: unknown): value is string | null {
   return value === null || isString(value);
+}
+
+/**
+ * Findings explain a grounding refusal and belong to that code alone, so a failure carrying them
+ * under any other code is refused rather than shown.
+ */
+function isModelFailure(value: unknown): boolean {
+  if (
+    !isRecord(value) ||
+    !isString(value.code) ||
+    !MODEL_FAILURE_CODE_SET.has(value.code) ||
+    typeof value.retryable !== "boolean"
+  )
+    return false;
+  if (hasExactKeys(value, ["code", "retryable"])) return true;
+  return (
+    hasExactKeys(value, ["code", "retryable", "findings"]) &&
+    value.code === "MODEL_OUTPUT_UNGROUNDED" &&
+    Array.isArray(value.findings) &&
+    value.findings.length > 0 &&
+    value.findings.every(
+      (finding) =>
+        isRecord(finding) &&
+        hasExactKeys(finding, ["blockIndex", "citationIndex", "code", "quote", "evidenceId"]) &&
+        Number.isInteger(finding.blockIndex) &&
+        (finding.blockIndex as number) >= 0 &&
+        Number.isInteger(finding.citationIndex) &&
+        (finding.citationIndex as number) >= 0 &&
+        isString(finding.code) &&
+        GROUNDING_FAILURE_CODES.has(finding.code) &&
+        isString(finding.quote) &&
+        finding.quote.trim().length > 0 &&
+        isString(finding.evidenceId) &&
+        finding.evidenceId.trim().length > 0,
+    )
+  );
 }
 
 function isExtraction(value: unknown): value is SourceExtraction {
@@ -544,11 +585,7 @@ function isAgentRun(value: unknown): value is AgentRun {
   return (
     value.outcome === "failed" &&
     hasExactKeys(value, [...common, "failure"]) &&
-    isRecord(value.failure) &&
-    hasExactKeys(value.failure, ["code", "retryable"]) &&
-    isString(value.failure.code) &&
-    MODEL_FAILURE_CODE_SET.has(value.failure.code) &&
-    typeof value.failure.retryable === "boolean"
+    isModelFailure(value.failure)
   );
 }
 
@@ -618,14 +655,7 @@ function isDirectorAgentRun(value: unknown): value is AgentRun {
   ];
   if (value.outcome === "running") return hasExactKeys(value, common);
   if (value.outcome === "failed")
-    return (
-      hasExactKeys(value, [...common, "failure"]) &&
-      isRecord(value.failure) &&
-      hasExactKeys(value.failure, ["code", "retryable"]) &&
-      isString(value.failure.code) &&
-      MODEL_FAILURE_CODE_SET.has(value.failure.code) &&
-      typeof value.failure.retryable === "boolean"
-    );
+    return hasExactKeys(value, [...common, "failure"]) && isModelFailure(value.failure);
   if (
     value.outcome !== "succeeded" ||
     !hasExactKeys(value, [...common, "review"]) ||
@@ -813,11 +843,7 @@ function isWriterAgentRun(value: unknown): value is AgentRun {
         isString(value.revisionId)
     : value.outcome === "failed" &&
         hasExactKeys(value, [...common, "failure"]) &&
-        isRecord(value.failure) &&
-        hasExactKeys(value.failure, ["code", "retryable"]) &&
-        isString(value.failure.code) &&
-        MODEL_FAILURE_CODE_SET.has(value.failure.code) &&
-        typeof value.failure.retryable === "boolean";
+        isModelFailure(value.failure);
 }
 
 function isArticleBlock(value: unknown): value is ArticleBlock {

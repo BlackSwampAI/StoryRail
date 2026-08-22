@@ -221,7 +221,12 @@ export function recordAgentRun(candidate: AgentRun): RecordAgentRunResult {
   if (
     candidate.outcome !== "failed" ||
     !(MODEL_FAILURE_CODES as readonly string[]).includes(candidate.failure.code) ||
-    typeof candidate.failure.retryable !== "boolean"
+    typeof candidate.failure.retryable !== "boolean" ||
+    // Findings explain a grounding refusal and mean nothing attached to any other failure.
+    (candidate.failure.findings !== undefined &&
+      (candidate.failure.code !== "MODEL_OUTPUT_UNGROUNDED" ||
+        !Array.isArray(candidate.failure.findings) ||
+        candidate.failure.findings.length === 0))
   ) {
     return invalid("AGENT_RUN_OUTCOME_INVALID", "Failed AgentRun outcome is invalid.");
   }

@@ -25,6 +25,16 @@ function isSuccessfulProposal(
 import { ArticleReader } from "./article-reader";
 import { EditorialTaskPending } from "./editorial-task-pending";
 import { modelFailureMessage } from "./model-failure";
+
+/**
+ * A refused draft is only useful if it says what it could not support, so each finding names the
+ * problem and shows the passage the Writer claimed to be quoting.
+ */
+const GROUNDING_FINDING_LABELS = {
+  CITATION_EVIDENCE_UNKNOWN: "Cited evidence not on this Assignment",
+  CITATION_SOURCE_MISMATCH: "Source does not own the cited evidence",
+  CITATION_QUOTE_UNSUPPORTED: "Not found in the cited evidence",
+} as const;
 import { autopilotProgress, resolveAutopilotFollow } from "./autopilot-follow";
 import { STORY_STATE_LABELS } from "./newsroom-state";
 import { WRITER_ASSIGNMENT_DROP_ID, WRITER_DRAG_TYPE, type StaffState } from "./newsroom-staff";
@@ -130,6 +140,21 @@ function AssignmentRuns({ runs }: Readonly<{ runs: readonly AgentRun[] }>) {
                     <dt>Retryable</dt>
                     <dd>{run.failure.retryable ? "Yes" : "No"}</dd>
                   </div>
+                  {run.failure.findings ? (
+                    <div className={styles.groundingFindings}>
+                      <dt>Unsupported citations</dt>
+                      <dd>
+                        <ol>
+                          {run.failure.findings.map((finding) => (
+                            <li key={`${finding.blockIndex}-${finding.citationIndex}`}>
+                              <span>{GROUNDING_FINDING_LABELS[finding.code]}</span>
+                              <q>{finding.quote}</q>
+                            </li>
+                          ))}
+                        </ol>
+                      </dd>
+                    </div>
+                  ) : null}
                 </>
               ) : (
                 <div>
@@ -248,6 +273,21 @@ function WriterRuns({ runs }: Readonly<{ runs: readonly AgentRun[] }>) {
                     <dt>Retryable</dt>
                     <dd>{run.failure.retryable ? "Yes" : "No"}</dd>
                   </div>
+                  {run.failure.findings ? (
+                    <div className={styles.groundingFindings}>
+                      <dt>Unsupported citations</dt>
+                      <dd>
+                        <ol>
+                          {run.failure.findings.map((finding) => (
+                            <li key={`${finding.blockIndex}-${finding.citationIndex}`}>
+                              <span>{GROUNDING_FINDING_LABELS[finding.code]}</span>
+                              <q>{finding.quote}</q>
+                            </li>
+                          ))}
+                        </ol>
+                      </dd>
+                    </div>
+                  ) : null}
                 </>
               ) : (
                 <div>
@@ -348,6 +388,21 @@ function DirectorRuns({ runs }: Readonly<{ runs: readonly AgentRun[] }>) {
                     <dt>Retryable</dt>
                     <dd>{run.failure.retryable ? "Yes" : "No"}</dd>
                   </div>
+                  {run.failure.findings ? (
+                    <div className={styles.groundingFindings}>
+                      <dt>Unsupported citations</dt>
+                      <dd>
+                        <ol>
+                          {run.failure.findings.map((finding) => (
+                            <li key={`${finding.blockIndex}-${finding.citationIndex}`}>
+                              <span>{GROUNDING_FINDING_LABELS[finding.code]}</span>
+                              <q>{finding.quote}</q>
+                            </li>
+                          ))}
+                        </ol>
+                      </dd>
+                    </div>
+                  ) : null}
                 </>
               ) : (
                 <div>

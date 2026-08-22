@@ -23,6 +23,7 @@ export * from "./agent-run";
 export * from "./agent-run-types";
 export * from "./article";
 export * from "./article-types";
+export * from "./article-grounding";
 export * from "./director-review";
 export * from "./director-review-types";
 export * from "./review-decision";
