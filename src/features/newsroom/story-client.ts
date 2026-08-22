@@ -72,6 +72,12 @@ export interface StoryClient {
   ) => Promise<
     StoryClientResult<{ readonly story: Story; readonly transitionReceipt: StoryTransitionReceipt }>
   >;
+  readonly publishStory: (
+    storyId: string,
+    reason: string,
+  ) => Promise<
+    StoryClientResult<{ readonly story: Story; readonly transitionReceipt: StoryTransitionReceipt }>
+  >;
   readonly submitReview: (
     storyId: string,
   ) => Promise<
@@ -1268,6 +1274,42 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
       try {
         const response = await dependencies.fetch(
           `/api/stories/${encodeURIComponent(storyId)}/rejections`,
+          {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ reason }),
+          },
+        );
+        const body: unknown = await response.json();
+        if (
+          isRecord(body) &&
+          response.status === 201 &&
+          body.ok === true &&
+          hasExactKeys(body, ["ok", "story", "transitionReceipt"]) &&
+          isStory(body.story) &&
+          isTransition(body.transitionReceipt)
+        )
+          return {
+            kind: "completed",
+            value: { story: body.story, transitionReceipt: body.transitionReceipt },
+          };
+        if (
+          isRecord(body) &&
+          body.ok === false &&
+          isApplicationError(body.error) &&
+          response.status >= 400 &&
+          response.status < 500
+        )
+          return { kind: "application-failure", error: body.error };
+        return unavailable();
+      } catch {
+        return unavailable();
+      }
+    },
+    async publishStory(storyId, reason) {
+      try {
+        const response = await dependencies.fetch(
+          `/api/stories/${encodeURIComponent(storyId)}/publications`,
           {
             method: "POST",
             headers: jsonHeaders,

@@ -86,6 +86,7 @@ function makeRuntime(overrides: Partial<StoryRuntime> = {}): StoryRuntime {
     listAgentProfiles: vi.fn<StoryRuntime["listAgentProfiles"]>(),
     assignStory: vi.fn<StoryRuntime["assignStory"]>(),
     rejectStory: vi.fn<StoryRuntime["rejectStory"]>(),
+    publishStory: vi.fn(),
     submitStoryReview: vi.fn<StoryRuntime["submitStoryReview"]>(),
     recordStoryReviewDecision: vi.fn<StoryRuntime["recordStoryReviewDecision"]>(),
     close: vi.fn<StoryRuntime["close"]>(async () => undefined),
