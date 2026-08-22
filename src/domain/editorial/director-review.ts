@@ -20,14 +20,19 @@ export function createDirectorReview(
   if (
     !DIRECTOR_CHECK_NAMES.every((name) => {
       const check = candidate.checks[name];
-      return (check.status === "pass" || check.status === "needs_changes") && nonEmpty(check.note);
+      return (
+        (check.status === "pass" || check.status === "needs_changes") &&
+        nonEmpty(check.note) &&
+        nonEmpty(check.quoted)
+      );
     })
   ) {
     return {
       ok: false,
       error: {
         code: "DIRECTOR_REVIEW_INVALID",
-        message: "Every Director check requires a supported status and non-empty note.",
+        message:
+          "Every Director check requires a supported status, a note, and the passage it judges.",
       },
     };
   }
@@ -72,7 +77,11 @@ export function createDirectorReview(
       checks: Object.fromEntries(
         DIRECTOR_CHECK_NAMES.map((name) => [
           name,
-          { ...candidate.checks[name], note: candidate.checks[name].note.trim() },
+          {
+            ...candidate.checks[name],
+            note: candidate.checks[name].note.trim(),
+            quoted: candidate.checks[name].quoted.trim(),
+          },
         ]),
       ) as DirectorReviewRecommendation["checks"],
       revisionInstructions: candidate.revisionInstructions?.trim() ?? null,

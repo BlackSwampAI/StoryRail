@@ -32,7 +32,10 @@ export interface EvidenceReference {
 export interface AgentRunFailure {
   readonly code: ModelFailureCode;
   readonly retryable: boolean;
+  /** Which of a Writer's citations could not be supported. */
   readonly findings?: readonly GroundingFinding[];
+  /** Which of a Director's checks quoted a passage the Article does not contain. */
+  readonly unsupportedChecks?: readonly string[];
 }
 
 export interface AssignmentProposalAgentRunInput {

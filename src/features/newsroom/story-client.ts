@@ -1,5 +1,6 @@
 import {
   ARTICLE_BLOCK_KINDS,
+  DIRECTOR_CHECK_NAMES,
   SOURCE_EXTRACTION_FAILURE_CODES,
   PREPARATION_FAILURE_CODES,
   MODEL_FAILURE_CODES,
@@ -171,6 +172,13 @@ function isModelFailure(value: unknown): boolean {
   )
     return false;
   if (hasExactKeys(value, ["code", "retryable"])) return true;
+  if (hasExactKeys(value, ["code", "retryable", "unsupportedChecks"]))
+    return (
+      value.code === "MODEL_OUTPUT_UNGROUNDED" &&
+      Array.isArray(value.unsupportedChecks) &&
+      value.unsupportedChecks.length > 0 &&
+      value.unsupportedChecks.every((name) => isString(name) && name.trim().length > 0)
+    );
   return (
     hasExactKeys(value, ["code", "retryable", "findings"]) &&
     value.code === "MODEL_OUTPUT_UNGROUNDED" &&
@@ -592,10 +600,13 @@ function isAgentRun(value: unknown): value is AgentRun {
 function isReviewCheck(value: unknown): boolean {
   return (
     isRecord(value) &&
-    hasExactKeys(value, ["status", "note"]) &&
+    hasExactKeys(value, ["status", "note", "quoted"]) &&
     (value.status === "pass" || value.status === "needs_changes") &&
     isString(value.note) &&
-    value.note.trim().length > 0
+    value.note.trim().length > 0 &&
+    // A check that cannot point at the passage it judged is not a review of this Article.
+    isString(value.quoted) &&
+    value.quoted.trim().length > 0
   );
 }
 
@@ -670,15 +681,13 @@ function isDirectorAgentRun(value: unknown): value is AgentRun {
     isString(review.summary) &&
     review.summary.trim().length > 0 &&
     isRecord(checks) &&
-    hasExactKeys(checks, ["assignment", "accuracy", "headline", "structure", "style"]) &&
-    ["assignment", "accuracy", "headline", "structure", "style"].every((name) =>
-      isReviewCheck(checks[name]),
-    ) &&
+    hasExactKeys(checks, [...DIRECTOR_CHECK_NAMES]) &&
+    DIRECTOR_CHECK_NAMES.every((name) => isReviewCheck(checks[name])) &&
     (review.revisionInstructions === null ||
       (isString(review.revisionInstructions) && review.revisionInstructions.trim().length > 0));
   if (!shapeValid) return false;
   const validatedChecks = checks as Record<string, unknown>;
-  const statuses = ["assignment", "accuracy", "headline", "structure", "style"].map(
+  const statuses = DIRECTOR_CHECK_NAMES.map(
     (name) => (validatedChecks[name] as Record<string, unknown>).status,
   );
   return review.recommendation === "approve"
@@ -806,7 +815,7 @@ function isWriterAgentRun(value: unknown): value is AgentRun {
         "structure",
         "style",
       ]) ||
-      !["assignment", "accuracy", "headline", "structure", "style"].every((name) =>
+      ![...DIRECTOR_CHECK_NAMES].every((name) =>
         isReviewCheck((directorReview.checks as Record<string, unknown>)[name]),
       ) ||
       !(

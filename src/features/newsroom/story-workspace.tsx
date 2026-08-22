@@ -142,6 +142,12 @@ function AssignmentRuns({ runs }: Readonly<{ runs: readonly AgentRun[] }>) {
                     <dt>Retryable</dt>
                     <dd>{run.failure.retryable ? "Yes" : "No"}</dd>
                   </div>
+                  {run.failure.unsupportedChecks ? (
+                    <div>
+                      <dt>Checks quoting the Article wrongly</dt>
+                      <dd>{run.failure.unsupportedChecks.join(", ")}</dd>
+                    </div>
+                  ) : null}
                   {run.failure.findings ? (
                     <div className={styles.groundingFindings}>
                       <dt>Unsupported citations</dt>
@@ -275,6 +281,12 @@ function WriterRuns({ runs }: Readonly<{ runs: readonly AgentRun[] }>) {
                     <dt>Retryable</dt>
                     <dd>{run.failure.retryable ? "Yes" : "No"}</dd>
                   </div>
+                  {run.failure.unsupportedChecks ? (
+                    <div>
+                      <dt>Checks quoting the Article wrongly</dt>
+                      <dd>{run.failure.unsupportedChecks.join(", ")}</dd>
+                    </div>
+                  ) : null}
                   {run.failure.findings ? (
                     <div className={styles.groundingFindings}>
                       <dt>Unsupported citations</dt>
@@ -390,6 +402,12 @@ function DirectorRuns({ runs }: Readonly<{ runs: readonly AgentRun[] }>) {
                     <dt>Retryable</dt>
                     <dd>{run.failure.retryable ? "Yes" : "No"}</dd>
                   </div>
+                  {run.failure.unsupportedChecks ? (
+                    <div>
+                      <dt>Checks quoting the Article wrongly</dt>
+                      <dd>{run.failure.unsupportedChecks.join(", ")}</dd>
+                    </div>
+                  ) : null}
                   {run.failure.findings ? (
                     <div className={styles.groundingFindings}>
                       <dt>Unsupported citations</dt>
@@ -1547,6 +1565,7 @@ export function StoryWorkspace({
                       <h3>{name}</h3>
                       <strong>{check.status === "pass" ? "PASS" : "NEEDS CHANGES"}</strong>
                       <p>{check.note}</p>
+                      <q className={styles.checkQuoted}>{check.quoted}</q>
                     </article>
                   ))}
                 </div>

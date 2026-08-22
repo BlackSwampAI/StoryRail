@@ -182,11 +182,16 @@ describe("run Director review", () => {
         recommendation: "approve",
         summary: "Ready.",
         checks: {
-          assignment: { status: "pass", note: "Aligned." },
-          accuracy: { status: "pass", note: "Supported." },
-          headline: { status: "pass", note: "Supported." },
-          structure: { status: "pass", note: "Coherent." },
-          style: { status: "pass", note: "Clear." },
+          assignment: { status: "pass", note: "Aligned.", quoted: "Body" },
+          support: {
+            status: "pass" as const,
+            note: "Each claim follows from its passage.",
+            quoted: "Body",
+          },
+          accuracy: { status: "pass", note: "Supported.", quoted: "Body" },
+          headline: { status: "pass", note: "Supported.", quoted: "Body" },
+          structure: { status: "pass", note: "Coherent.", quoted: "Body" },
+          style: { status: "pass", note: "Clear.", quoted: "Body" },
         },
         revisionInstructions: null,
       },
@@ -236,6 +241,153 @@ describe("run Director review", () => {
     expect(JSON.stringify(appended[0]?.input)).not.toContain("Evidence B");
   });
 
+  it("refuses a review whose checks quote passages the Article does not contain", async () => {
+    // The review parses, its statuses are coherent, and it judged a sentence nobody wrote. A
+    // reviewer allowed to invent its evidence could refuse work over passages that do not exist.
+    const facts = fixture();
+    const check = (quoted: string) => ({ status: "pass" as const, note: "Fine.", quoted });
+    const model: StructuredModel = {
+      descriptor: { provider: "openrouter", model: "director-model" },
+      limits: { maximumInputCharacters: 60_000 },
+      generateStructured: vi.fn(async () => ({
+        ok: true as const,
+        output: {
+          recommendation: "approve",
+          summary: "Ready.",
+          checks: {
+            assignment: check("Body"),
+            support: check("Body"),
+            accuracy: check("A sentence the Writer never wrote"),
+            headline: check("Body"),
+            structure: check("Body"),
+            style: check("Body"),
+          },
+          revisionInstructions: null,
+        },
+      })) as StructuredModel["generateStructured"],
+    };
+    const workflow = createRunDirectorReview({
+      inspections: {
+        inspect: vi.fn(async () => ({ ok: true as const, inspection: facts.inspection })),
+      },
+      profiles: { findById: vi.fn(async () => facts.director), list: vi.fn(), append: vi.fn() },
+      runs: {
+        append: vi.fn(async (run) => ({ ok: true as const, run })),
+        complete: vi.fn(async (run) => ({ ok: true as const, run })),
+        listByStoryId: vi.fn(),
+      },
+      resolveModel: () => ({ ok: true, model }),
+      createAgentRunId: () => agentRunId("director-run-ungrounded"),
+      now: vi.fn().mockReturnValueOnce("start").mockReturnValue("end"),
+    });
+
+    await expect(
+      settleAgentRun(workflow({ storyId: facts.inspection.story.id, requestedBy: facts.actor })),
+    ).resolves.toMatchObject({
+      ok: true,
+      run: {
+        outcome: "failed",
+        failure: {
+          code: "MODEL_OUTPUT_UNGROUNDED",
+          retryable: true,
+          // The refusal names the check that quoted wrongly, so the operator is not left
+          // with a bare code and no way to see which part of the review was invented.
+          unsupportedChecks: ["accuracy"],
+        },
+      },
+    });
+  });
+
+  it("lets the headline check quote the headline", async () => {
+    // Observed live: the headline check has nothing to point at but the headline, and verifying
+    // against the body alone refused reviews for quoting the very thing they were asked to judge.
+    const facts = fixture();
+    const check = (quoted: string) => ({ status: "pass" as const, note: "Fine.", quoted });
+    const model: StructuredModel = {
+      descriptor: { provider: "openrouter", model: "director-model" },
+      limits: { maximumInputCharacters: 60_000 },
+      generateStructured: vi.fn(async () => ({
+        ok: true as const,
+        output: {
+          recommendation: "approve",
+          summary: "Ready.",
+          checks: {
+            assignment: check("Body"),
+            support: check("Body"),
+            accuracy: check("Body"),
+            headline: check(facts.inspection.article.revisions[0]!.headline),
+            structure: check("Body"),
+            style: check("Body"),
+          },
+          revisionInstructions: null,
+        },
+      })) as StructuredModel["generateStructured"],
+    };
+    const workflow = createRunDirectorReview({
+      inspections: {
+        inspect: vi.fn(async () => ({ ok: true as const, inspection: facts.inspection })),
+      },
+      profiles: { findById: vi.fn(async () => facts.director), list: vi.fn(), append: vi.fn() },
+      runs: {
+        append: vi.fn(async (run) => ({ ok: true as const, run })),
+        complete: vi.fn(async (run) => ({ ok: true as const, run })),
+        listByStoryId: vi.fn(),
+      },
+      resolveModel: () => ({ ok: true, model }),
+      createAgentRunId: () => agentRunId("director-run-headline"),
+      now: vi.fn().mockReturnValueOnce("start").mockReturnValue("end"),
+    });
+
+    await expect(
+      settleAgentRun(workflow({ storyId: facts.inspection.story.id, requestedBy: facts.actor })),
+    ).resolves.toMatchObject({ ok: true, run: { outcome: "succeeded" } });
+  });
+
+  it("shows the Director each claim with the passage it rests on, and the measurement", async () => {
+    // Mechanical verification proves the quote exists. Whether the claim fairly follows from it
+    // is the judgement the Director is for, so it has to be given both to make it.
+    const facts = fixture();
+    let shown: unknown = null;
+    const model: StructuredModel = {
+      descriptor: { provider: "openrouter", model: "director-model" },
+      limits: { maximumInputCharacters: 60_000 },
+      generateStructured: vi.fn(async (request: { input: unknown }) => {
+        shown = request.input;
+        return {
+          ok: false as const,
+          failure: { code: "MODEL_REQUEST_FAILED" as const, retryable: true },
+        };
+      }) as unknown as StructuredModel["generateStructured"],
+    };
+    const workflow = createRunDirectorReview({
+      inspections: {
+        inspect: vi.fn(async () => ({ ok: true as const, inspection: facts.inspection })),
+      },
+      profiles: { findById: vi.fn(async () => facts.director), list: vi.fn(), append: vi.fn() },
+      runs: {
+        append: vi.fn(async (run) => ({ ok: true as const, run })),
+        complete: vi.fn(async (run) => ({ ok: true as const, run })),
+        listByStoryId: vi.fn(),
+      },
+      resolveModel: () => ({ ok: true, model }),
+      createAgentRunId: () => agentRunId("director-run-input"),
+      now: vi.fn().mockReturnValueOnce("start").mockReturnValue("end"),
+    });
+
+    await settleAgentRun(
+      workflow({ storyId: facts.inspection.story.id, requestedBy: facts.actor }),
+    );
+
+    expect(shown).toMatchObject({
+      claims: expect.any(Array),
+      grounding: expect.objectContaining({
+        claimBlocks: expect.any(Number),
+        contextBlocks: expect.any(Number),
+        citations: expect.any(Number),
+      }),
+    });
+  });
+
   it("fails safely before model execution when the exact evidence ID is unavailable", async () => {
     const facts = fixture();
     const generateStructured = vi.fn();
@@ -283,11 +435,16 @@ describe("run Director review", () => {
           recommendation: "approve",
           summary: "Ready.",
           checks: {
-            assignment: { status: "pass", note: "Aligned." },
-            accuracy: { status: "pass", note: "Supported." },
-            headline: { status: "pass", note: "Supported." },
-            structure: { status: "pass", note: "Coherent." },
-            style: { status: "pass", note: "Clear." },
+            assignment: { status: "pass", note: "Aligned.", quoted: "Body" },
+            support: {
+              status: "pass" as const,
+              note: "Each claim follows from its passage.",
+              quoted: "Body",
+            },
+            accuracy: { status: "pass", note: "Supported.", quoted: "Body" },
+            headline: { status: "pass", note: "Supported.", quoted: "Body" },
+            structure: { status: "pass", note: "Coherent.", quoted: "Body" },
+            style: { status: "pass", note: "Clear.", quoted: "Body" },
           },
           revisionInstructions: null,
         },

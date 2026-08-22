@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   sourceEvidencePreparationId,
   sourceId,
+  unsupportedDirectorQuotes,
   verifyArticleGrounding,
   type ArticleBlock,
   type GroundingEvidence,
@@ -106,6 +107,35 @@ describe("verifying that an Article Revision is grounded", () => {
     ).toEqual({ ok: true });
   });
 
+  it("looks past a line break written as the two characters backslash-n", () => {
+    // Observed live: the model copied a wrapped passage accurately but escaped its newlines
+    // twice. The words are right and only the rendering is wrong, so this is not fabrication.
+    const wrapped: readonly GroundingEvidence[] = [
+      {
+        sourceId: SOURCE,
+        evidenceId: EVIDENCE,
+        content:
+          "`cargo publish --workspace` is now supported, publishing all of\nthe crates in order.",
+      },
+    ];
+
+    expect(
+      verifyArticleGrounding(
+        claim(
+          "`cargo publish --workspace` is now supported, publishing all of\\nthe crates in order.",
+        ),
+        wrapped,
+      ),
+    ).toEqual({ ok: true });
+    // Reworded text is still refused; only the rendering is forgiven.
+    expect(
+      verifyArticleGrounding(
+        claim("`cargo publish --workspace` now publishes every crate"),
+        wrapped,
+      ),
+    ).toMatchObject({ ok: false, findings: [{ code: "CITATION_QUOTE_UNSUPPORTED" }] });
+  });
+
   it("allows a lead-in and the list it introduces to be quoted together", () => {
     // The blank line before a Markdown list is punctuation, not a change of subject. Refusing
     // this was rejecting accurate quotations of real release notes.
@@ -153,5 +183,51 @@ describe("verifying that an Article Revision is grounded", () => {
         { blockIndex: 1, citationIndex: 1, code: "CITATION_QUOTE_UNSUPPORTED" },
       ],
     });
+  });
+});
+
+describe("holding a Director to the standard it enforces", () => {
+  const article =
+    "Rust 2024 is the largest edition released to date.\n\nAdoption is expected to take months.";
+  const check = (quoted: string) => ({ status: "pass" as const, note: "Fine.", quoted });
+
+  it("accepts a review that quotes the Article it judged", () => {
+    expect(
+      unsupportedDirectorQuotes(
+        {
+          checks: {
+            assignment: check("Rust 2024 is the largest edition"),
+            style: check("Adoption is expected to take months."),
+          },
+        },
+        article,
+      ),
+    ).toEqual([]);
+  });
+
+  it("names the checks that quote something the Article does not contain", () => {
+    // A reviewer that can invent the passage it judged can refuse work over a sentence nobody
+    // wrote, which is the same failure as a Writer inventing a source.
+    expect(
+      unsupportedDirectorQuotes(
+        {
+          checks: {
+            assignment: check("Rust 2024 is the largest edition"),
+            accuracy: check("The release was delayed"),
+            style: check("Adoption is expected to take years."),
+          },
+        },
+        article,
+      ),
+    ).toEqual(["accuracy", "style"]);
+  });
+
+  it("holds the Director to the same paragraph boundary as the Writer", () => {
+    expect(
+      unsupportedDirectorQuotes(
+        { checks: { assignment: check("released to date. Adoption is expected") } },
+        article,
+      ),
+    ).toEqual(["assignment"]);
   });
 });

@@ -226,7 +226,14 @@ export function recordAgentRun(candidate: AgentRun): RecordAgentRunResult {
     (candidate.failure.findings !== undefined &&
       (candidate.failure.code !== "MODEL_OUTPUT_UNGROUNDED" ||
         !Array.isArray(candidate.failure.findings) ||
-        candidate.failure.findings.length === 0))
+        candidate.failure.findings.length === 0)) ||
+    (candidate.failure.unsupportedChecks !== undefined &&
+      (candidate.failure.code !== "MODEL_OUTPUT_UNGROUNDED" ||
+        !Array.isArray(candidate.failure.unsupportedChecks) ||
+        candidate.failure.unsupportedChecks.length === 0 ||
+        !candidate.failure.unsupportedChecks.every(
+          (name) => typeof name === "string" && name.trim().length > 0,
+        )))
   ) {
     return invalid("AGENT_RUN_OUTCOME_INVALID", "Failed AgentRun outcome is invalid.");
   }

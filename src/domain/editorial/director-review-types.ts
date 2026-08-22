@@ -6,6 +6,9 @@ export type DirectorCheckStatus = (typeof DIRECTOR_CHECK_STATUSES)[number];
 
 export const DIRECTOR_CHECK_NAMES = [
   "assignment",
+  // Mechanical verification proves a cited passage exists. It cannot say whether the claim built
+  // on that passage is a fair reading of it, which is the judgement a Director is actually for.
+  "support",
   "accuracy",
   "headline",
   "structure",
@@ -16,6 +19,12 @@ export type DirectorCheckName = (typeof DIRECTOR_CHECK_NAMES)[number];
 export interface DirectorReviewCheck {
   readonly status: DirectorCheckStatus;
   readonly note: string;
+  /**
+   * The passage of the Article this check is judging, copied verbatim and verified against the
+   * Article before the review is recorded. A reviewer that must point at something cannot
+   * return "well structured and accurate" about work it did not read.
+   */
+  readonly quoted: string;
 }
 
 export interface DirectorReviewRecommendation {

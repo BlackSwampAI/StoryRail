@@ -6,11 +6,32 @@ const approval: DirectorReviewRecommendation = {
   recommendation: "approve",
   summary: "The Article is ready.",
   checks: {
-    assignment: { status: "pass", note: "Matches the Assignment." },
-    accuracy: { status: "pass", note: "Claims are supported by supplied evidence." },
-    headline: { status: "pass", note: "Headline is supported." },
-    structure: { status: "pass", note: "Organization is coherent." },
-    style: { status: "pass", note: "Prose is clear." },
+    assignment: {
+      status: "pass",
+      note: "Matches the Assignment.",
+      quoted: "Quoted from the Article.",
+    },
+    support: {
+      status: "pass" as const,
+      note: "Each claim follows from its passage.",
+      quoted: "Quoted from the Article.",
+    },
+    accuracy: {
+      status: "pass",
+      note: "Claims are supported by supplied evidence.",
+      quoted: "Quoted from the Article.",
+    },
+    headline: {
+      status: "pass",
+      note: "Headline is supported.",
+      quoted: "Quoted from the Article.",
+    },
+    structure: {
+      status: "pass",
+      note: "Organization is coherent.",
+      quoted: "Quoted from the Article.",
+    },
+    style: { status: "pass", note: "Prose is clear.", quoted: "Quoted from the Article." },
   },
   revisionInstructions: null,
 };
@@ -27,7 +48,11 @@ describe("DirectorReviewRecommendation", () => {
         recommendation: "request_changes",
         checks: {
           ...approval.checks,
-          accuracy: { status: "needs_changes", note: "Support the timeline." },
+          accuracy: {
+            status: "needs_changes",
+            note: "Support the timeline.",
+            quoted: "Quoted from the Article.",
+          },
         },
         revisionInstructions: "Add evidence for the timeline or remove the unsupported claim.",
       }),
@@ -40,7 +65,11 @@ describe("DirectorReviewRecommendation", () => {
         ...approval,
         checks: {
           ...approval.checks,
-          style: { status: "needs_changes", note: "Tighten repetition." },
+          style: {
+            status: "needs_changes",
+            note: "Tighten repetition.",
+            quoted: "Quoted from the Article.",
+          },
         },
       }),
     ).toMatchObject({ ok: false });
@@ -69,7 +98,11 @@ describe("DirectorReviewRecommendation", () => {
         recommendation: "request_changes",
         checks: {
           ...approval.checks,
-          headline: { status: "needs_changes", note: "Overstates evidence." },
+          headline: {
+            status: "needs_changes",
+            note: "Overstates evidence.",
+            quoted: "Quoted from the Article.",
+          },
         },
         revisionInstructions: " ",
       }),
@@ -81,7 +114,10 @@ describe("DirectorReviewRecommendation", () => {
     expect(
       createDirectorReview({
         ...approval,
-        checks: { ...approval.checks, assignment: { status: "pass", note: " " } },
+        checks: {
+          ...approval.checks,
+          assignment: { status: "pass", note: " ", quoted: "Quoted from the Article." },
+        },
       }),
     ).toMatchObject({ ok: false });
   });

@@ -134,11 +134,20 @@ function inspection(): StoryInspection {
           recommendation: "request_changes",
           summary: "One factual claim needs support.",
           checks: {
-            assignment: { status: "pass", note: "Aligned." },
-            accuracy: { status: "needs_changes", note: "Support the timeline." },
-            headline: { status: "pass", note: "Supported." },
-            structure: { status: "pass", note: "Coherent." },
-            style: { status: "pass", note: "Clear." },
+            assignment: { status: "pass", note: "Aligned.", quoted: "Quoted from the Article." },
+            support: {
+              status: "pass" as const,
+              note: "Each claim follows from its passage.",
+              quoted: "Quoted from the Article.",
+            },
+            accuracy: {
+              status: "needs_changes",
+              note: "Support the timeline.",
+              quoted: "Quoted from the Article.",
+            },
+            headline: { status: "pass", note: "Supported.", quoted: "Quoted from the Article." },
+            structure: { status: "pass", note: "Coherent.", quoted: "Quoted from the Article." },
+            style: { status: "pass", note: "Clear.", quoted: "Quoted from the Article." },
           },
           revisionInstructions: "Support the timeline or remove the claim.",
         },
@@ -342,7 +351,8 @@ describe("Director review workspace", () => {
       </DragDropProvider>,
     );
     expect(screen.getByRole("heading", { name: "Request changes" })).toBeVisible();
-    expect(screen.getAllByText("PASS")).toHaveLength(4);
+    // Five passing checks now, with the sixth — support — the one asking for changes.
+    expect(screen.getAllByText("PASS")).toHaveLength(5);
     expect(screen.getByText("NEEDS CHANGES")).toBeVisible();
     expect(screen.getByRole("button", { name: "Approve" })).toBeVisible();
     const requestChanges = screen.getByRole("button", { name: "Request changes" });
