@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  articleBodyMarkdown,
   agentProfileId,
   agentRunId,
   articleId,
@@ -58,7 +59,7 @@ function fixture(revisionCycle = 0) {
     agentRunId: agentRunId("writer-run-38"),
     headline: "Headline",
     dek: null,
-    bodyMarkdown: "Body",
+    blocks: [{ kind: "context" as const, markdown: "Body", citations: [] }],
     createdBy: {
       type: "agent" as const,
       role: "writer" as const,
@@ -97,7 +98,7 @@ function fixture(revisionCycle = 0) {
         agentRunId: revision.agentRunId,
         headline: revision.headline,
         dek: null,
-        bodyMarkdown: revision.bodyMarkdown,
+        bodyMarkdown: articleBodyMarkdown(revision.blocks),
       },
       evidence: [
         {

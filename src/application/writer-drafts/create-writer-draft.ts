@@ -6,6 +6,7 @@ import type { StoryInspectionRepository } from "@/application/story-inspection";
 import {
   createArticle,
   createFirstArticleRevision,
+  unattributedArticleBlocks,
   recordAgentRun,
   transitionStory,
   type AgentRun,
@@ -311,7 +312,9 @@ export function createWriterDraft(dependencies: {
         revisionNumber: 1,
         writerProfileId: writerProfile.id,
         agentRunId: id,
-        ...parsed.data,
+        headline: parsed.data.headline,
+        dek: parsed.data.dek,
+        blocks: unattributedArticleBlocks(parsed.data.bodyMarkdown),
         createdBy: actor,
         createdAt: occurredAt,
       });

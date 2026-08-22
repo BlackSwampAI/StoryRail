@@ -1,4 +1,4 @@
-import type { ArticleRevision } from "@/domain/editorial";
+import { articleBodyMarkdown, type ArticleRevision } from "@/domain/editorial";
 
 import styles from "./newsroom-shell.module.css";
 import { SafeMarkdown } from "./safe-markdown";
@@ -18,7 +18,7 @@ export function ArticleReader({
           Revision {revision.revisionNumber} · {writerName}
         </p>
       </header>
-      <SafeMarkdown markdown={revision.bodyMarkdown} />
+      <SafeMarkdown markdown={articleBodyMarkdown(revision.blocks)} />
     </article>
   );
 }

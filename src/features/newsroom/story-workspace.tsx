@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { StoryInspection } from "@/application/story-inspection";
 import {
+  articleBodyMarkdown,
   type AgentProfile,
   type AgentRun,
   type Assignment,
@@ -673,7 +674,9 @@ function AuditPanel({
                       <dd>{revision.createdAt}</dd>
                     </div>
                   </dl>
-                  <pre className={styles.extractedContent}>{revision.bodyMarkdown}</pre>
+                  <pre className={styles.extractedContent}>
+                    {articleBodyMarkdown(revision.blocks)}
+                  </pre>
                 </details>
               ))}
             </>

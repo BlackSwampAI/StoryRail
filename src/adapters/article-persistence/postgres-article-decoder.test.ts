@@ -17,7 +17,7 @@ describe("PostgreSQL Article decoders", () => {
       agentRunId: "run-31",
       headline: "Headline",
       dek: null,
-      bodyMarkdown: "Body",
+      blocks: [{ kind: "context", markdown: "Body", citations: [] }],
       createdBy: { type: "agent" as const, role: "writer" as const, runId: "run-31" },
       createdAt: "created",
     };

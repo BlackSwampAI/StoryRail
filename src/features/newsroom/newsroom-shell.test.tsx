@@ -980,7 +980,7 @@ describe("NewsroomShell", () => {
             agentRunId: writerRunIdentity,
             headline: "Transition article",
             dek: null,
-            bodyMarkdown: "The drafted body.",
+            blocks: [{ kind: "context" as const, markdown: "The drafted body.", citations: [] }],
             createdBy: {
               type: "agent" as const,
               role: "writer" as const,
@@ -1083,7 +1083,7 @@ describe("NewsroomShell", () => {
                 agentRunId: agentRunId("writer-run-article-32"),
                 headline: "A readable newsroom headline",
                 dek: "A clear editorial deck.",
-                bodyMarkdown,
+                blocks: [{ kind: "context" as const, markdown: bodyMarkdown, citations: [] }],
                 createdBy: {
                   type: "agent" as const,
                   role: "writer" as const,

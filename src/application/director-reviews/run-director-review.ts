@@ -6,6 +6,7 @@ import type { StructuredModel } from "@/application/model";
 import type { StoryInspectionRepository } from "@/application/story-inspection";
 import {
   agentProfileId,
+  articleBodyMarkdown,
   createDirectorReview,
   recordAgentRun,
   type AgentRun,
@@ -255,7 +256,7 @@ export function createRunDirectorReview(dependencies: {
         agentRunId: revision.agentRunId,
         headline: revision.headline,
         dek: revision.dek,
-        bodyMarkdown: revision.bodyMarkdown,
+        bodyMarkdown: articleBodyMarkdown(revision.blocks),
       },
       evidence: writerRun.input.evidence,
       unavailableSourceIds: writerRun.input.unavailableSourceIds,

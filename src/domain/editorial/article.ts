@@ -1,9 +1,11 @@
-import type {
-  Article,
-  ArticleRevision,
-  ArticleValidationCode,
-  CreateArticleResult,
-  CreateArticleRevisionResult,
+import {
+  ARTICLE_BLOCK_KINDS,
+  type Article,
+  type ArticleBlock,
+  type ArticleRevision,
+  type ArticleValidationCode,
+  type CreateArticleResult,
+  type CreateArticleRevisionResult,
 } from "./article-types";
 
 function nonEmpty(value: unknown): value is string {
@@ -15,6 +17,53 @@ function invalid<T extends CreateArticleResult | CreateArticleRevisionResult>(
   message: string,
 ): T {
   return { ok: false, error: { code, message } } as T;
+}
+
+/**
+ * The reading view of a Revision, derived rather than stored. Blocks are the record; rendering
+ * them is a presentation concern, so there is no second copy of the prose to drift out of step
+ * with the citations attached to it.
+ */
+export function articleBodyMarkdown(blocks: readonly ArticleBlock[]): string {
+  return blocks
+    .map((block) => (block.kind === "heading" ? `## ${block.markdown}` : block.markdown))
+    .join("\n\n");
+}
+
+/**
+ * Wraps prose that arrived without any attribution as a single `context` block. It records the
+ * truth about such prose — the Writer's own words, supported by nothing the system can check —
+ * rather than dressing it up as sourced work.
+ */
+export function unattributedArticleBlocks(markdown: string): readonly ArticleBlock[] {
+  return [{ kind: "context", markdown: markdown.trim(), citations: [] }];
+}
+
+function blockProblem(blocks: readonly ArticleBlock[]): ArticleValidationCode | null {
+  if (!Array.isArray(blocks) || blocks.length === 0) return "ARTICLE_REVISION_BLOCK_INVALID";
+  for (const block of blocks) {
+    if (
+      !ARTICLE_BLOCK_KINDS.includes(block?.kind) ||
+      !nonEmpty(block.markdown) ||
+      block.markdown !== block.markdown.trim() ||
+      !Array.isArray(block.citations)
+    )
+      return "ARTICLE_REVISION_BLOCK_INVALID";
+    // A claim without a citation is an assertion the system cannot check, and a citation on
+    // prose that claims nothing implies support the Writer never offered. Both are refused.
+    if (block.kind === "claim" ? block.citations.length === 0 : block.citations.length > 0)
+      return "ARTICLE_REVISION_CITATION_INVALID";
+    for (const citation of block.citations) {
+      if (
+        !nonEmpty(citation?.sourceId) ||
+        !nonEmpty(citation.evidenceId) ||
+        !nonEmpty(citation.quote) ||
+        citation.quote !== citation.quote.trim()
+      )
+        return "ARTICLE_REVISION_CITATION_INVALID";
+    }
+  }
+  return null;
 }
 
 export function createArticle(candidate: Article): CreateArticleResult {
@@ -79,14 +128,19 @@ export function createArticleRevision(candidate: ArticleRevision): CreateArticle
       "Article Revision number must be between 1 and 3.",
     );
   }
-  if (
-    !nonEmpty(candidate.headline) ||
-    (candidate.dek !== null && !nonEmpty(candidate.dek)) ||
-    !nonEmpty(candidate.bodyMarkdown)
-  ) {
+  if (!nonEmpty(candidate.headline) || (candidate.dek !== null && !nonEmpty(candidate.dek))) {
     return invalid(
       "ARTICLE_REVISION_CONTENT_INVALID",
-      "Article Revision headline and body must be non-empty; dek must be null or non-empty.",
+      "Article Revision headline must be non-empty; dek must be null or non-empty.",
+    );
+  }
+  const problem = blockProblem(candidate.blocks);
+  if (problem !== null) {
+    return invalid(
+      problem,
+      problem === "ARTICLE_REVISION_BLOCK_INVALID"
+        ? "An Article Revision must be a non-empty list of blocks with trimmed Markdown."
+        : "A claim block must carry at least one complete citation, and other blocks none.",
     );
   }
   if (
@@ -105,7 +159,6 @@ export function createArticleRevision(candidate: ArticleRevision): CreateArticle
       ...candidate,
       headline: candidate.headline.trim(),
       dek: candidate.dek === null ? null : candidate.dek.trim(),
-      bodyMarkdown: candidate.bodyMarkdown.trim(),
     }),
   };
 }

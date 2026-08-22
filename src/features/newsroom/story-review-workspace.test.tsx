@@ -56,7 +56,7 @@ function inspection(): StoryInspection {
     agentRunId: "writer-run-38",
     headline: "Article headline",
     dek: null,
-    bodyMarkdown: "Article body.",
+    blocks: [{ kind: "context", markdown: "Article body.", citations: [] }],
     createdBy: { type: "agent", role: "writer", runId: "writer-run-38" },
     createdAt: "drafted",
   } as const;
@@ -117,7 +117,7 @@ function inspection(): StoryInspection {
             agentRunId: "writer-run-38",
             headline: revision.headline,
             dek: null,
-            bodyMarkdown: revision.bodyMarkdown,
+            bodyMarkdown: "Article body.",
           },
           evidence: [
             {
