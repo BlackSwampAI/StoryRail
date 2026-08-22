@@ -84,10 +84,38 @@ describe("run autopilot HTTP handler", () => {
     expect(scheduled).toHaveLength(0);
   });
 
+  it("passes an explicit research request through to the sequence", async () => {
+    // Research is opt-in per run, because the cost is per run and the operator is present.
+    const generateAssignmentProposal = vi.fn(async () => ({
+      ok: false,
+      error: { code: "STORY_NOT_FOUND", message: "Gone.", storyId: identity },
+    }));
+    const researchStorySources = vi.fn(async () => ({
+      ok: false,
+      error: { code: "RESEARCH_EVIDENCE_REQUIRED", message: "Nothing." },
+    }));
+    const runtimes = {
+      story: {},
+      assignmentEditor: { generateAssignmentProposal },
+      writer: {},
+      director: {},
+      researcher: { researchStorySources },
+    } as unknown as AutopilotRuntimes;
+
+    await createRunAutopilotHttpHandler({
+      getRuntimes: () => runtimes,
+      environment,
+      after: () => {},
+    })(request('{"research":true}'), context);
+
+    expect(researchStorySources).toHaveBeenCalledOnce();
+  });
+
   it.each([
     [415, "UNSUPPORTED_MEDIA_TYPE", "{}", "text/plain"],
     [400, "INVALID_JSON", "not json", "application/json"],
     [400, "INVALID_REQUEST", '{"storyId":"x"}', "application/json"],
+    [400, "INVALID_REQUEST", '{"research":"yes"}', "application/json"],
   ] as const)("rejects %s %s", async (expectedStatus, code, body, contentType) => {
     const generateAssignmentProposal = vi.fn();
     const response = await createRunAutopilotHttpHandler({

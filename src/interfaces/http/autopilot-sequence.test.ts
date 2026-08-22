@@ -284,6 +284,92 @@ async function complete(harness: ReturnType<typeof runtimes>) {
   return { runId: startedRun.runId, result: await startedRun.completion };
 }
 
+describe("autopilot with research", () => {
+  const researcher = (result: unknown) =>
+    ({ researchStorySources: vi.fn(async () => result) }) as unknown as NonNullable<
+      AutopilotRuntimes["researcher"]
+    >;
+
+  it("does not research unless the operator asked for it", async () => {
+    const harness = runtimes({});
+    const research = researcher({
+      ok: true,
+      runId: agentRunId("r"),
+      completion: Promise.resolve({}),
+    });
+    await createAutopilot({ ...harness.runtimes, researcher: research }).start({
+      storyId: identity,
+      requestedBy: operator,
+    });
+
+    expect(research.researchStorySources).not.toHaveBeenCalled();
+  });
+
+  it("widens the evidence before anything is assigned", async () => {
+    // Research exists to change what there is to assign, so it has to finish first.
+    const order: string[] = [];
+    const harness = runtimes({});
+    const research = {
+      researchStorySources: vi.fn(async () => {
+        order.push("research");
+        return { ok: true as const, runId: agentRunId("r"), completion: Promise.resolve({}) };
+      }),
+    } as unknown as NonNullable<AutopilotRuntimes["researcher"]>;
+    (
+      harness.runtimes.assignmentEditor.generateAssignmentProposal as ReturnType<typeof vi.fn>
+    ).mockImplementationOnce(async () => {
+      order.push("assignment");
+      return started(proposalRun("run-proposal-1"));
+    });
+
+    const startedRun = await createAutopilot({ ...harness.runtimes, researcher: research }).start({
+      storyId: identity,
+      requestedBy: operator,
+      research: true,
+    });
+    if (startedRun.ok) await startedRun.completion;
+
+    expect(order).toEqual(["research", "assignment"]);
+  });
+
+  it("carries on when research fails, because it is enrichment and not a precondition", async () => {
+    // Every other step feeds the next. A Story whose research failed is still writable from the
+    // evidence the operator submitted, and stopping would make asking for research riskier.
+    const harness = runtimes({});
+    const research = researcher({
+      ok: false,
+      error: { code: "RESEARCH_EVIDENCE_REQUIRED", message: "Nothing to research from." },
+    });
+
+    const startedRun = await createAutopilot({ ...harness.runtimes, researcher: research }).start({
+      storyId: identity,
+      requestedBy: operator,
+      research: true,
+    });
+
+    expect(startedRun.ok).toBe(true);
+    if (startedRun.ok)
+      expect(await startedRun.completion).toEqual({
+        ok: true,
+        storyId: identity,
+        revisionCycles: 0,
+      });
+    expect(harness.calls.publishStory).toHaveBeenCalledOnce();
+  });
+
+  it("runs without a Researcher at all when none is configured", async () => {
+    const harness = runtimes({});
+    const startedRun = await createAutopilot(harness.runtimes).start({
+      storyId: identity,
+      requestedBy: operator,
+      research: true,
+    });
+
+    expect(startedRun.ok).toBe(true);
+    if (startedRun.ok) expect(await startedRun.completion).toMatchObject({ ok: true });
+  });
+});
+
 describe("autopilot sequence", () => {
   it("carries an intake Story through to published, recording the operator as the actor", async () => {
     const harness = runtimes({});

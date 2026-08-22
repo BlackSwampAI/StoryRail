@@ -2289,6 +2289,30 @@
   overflow-wrap: anywhere;
 }
 
+/* The cost of asking for research is stated where the choice is made. */
+.autopilotOption {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin-top: 1rem;
+  color: var(--tone-152);
+  cursor: pointer;
+  font-size: 0.88rem;
+}
+
+.autopilotOption input {
+  margin-top: 0.2rem;
+}
+
+.autopilotOption small {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--tone-97);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  max-width: 58ch;
+}
+
 /* Autopilot changes who decides, so the card says what it will do before it is started. */
 .autopilotExplainer {
   margin: 1rem 0 0;
