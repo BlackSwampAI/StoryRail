@@ -32,6 +32,7 @@ export interface LedgerEntry {
 }
 
 const RUN_TITLES: Readonly<Record<string, string>> = {
+  "researcher/source_research": "Researcher widened the evidence",
   "assignment_editor/assignment_proposal": "Assignment Editor proposed an Assignment",
   "writer/article_draft": "Writer drafted the Article",
   "writer/article_revision": "Writer revised the Article",
@@ -53,11 +54,15 @@ function runEntry(run: AgentRun): LedgerEntry {
     kind: "run",
     title,
     detail:
-      run.outcome === "succeeded" && run.role === "editor_in_chief"
-        ? run.review.summary
-        : run.outcome === "running"
-          ? "Still running."
-          : null,
+      run.outcome === "succeeded" && run.role === "researcher"
+        ? run.attached.length === 0
+          ? "Nothing further was worth attaching."
+          : `Attached ${run.attached.length} ${run.attached.length === 1 ? "Source" : "Sources"}: ${run.attached.map(({ url }) => url).join(", ")}`
+        : run.outcome === "succeeded" && run.role === "editor_in_chief"
+          ? run.review.summary
+          : run.outcome === "running"
+            ? "Still running."
+            : null,
     actor: run.requestedBy,
     outcome: run.outcome,
     model: run.model,

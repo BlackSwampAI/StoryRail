@@ -58,6 +58,7 @@ export interface Story {
 
 export const AGENT_ROLES = [
   "assignment_editor",
+  "researcher",
   "writer",
   "fact_checker",
   "editor_in_chief",

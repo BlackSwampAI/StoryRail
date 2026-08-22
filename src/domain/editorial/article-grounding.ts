@@ -33,8 +33,8 @@ export type VerifyArticleGroundingResult =
 
 /**
  * Differences that are typography rather than content: a model re-wraps lines, straightens or
- * curls quotation marks, swaps dashes, or writes a line break as the two characters `\n` while
- * copying a passage accurately. Normalising those away keeps the check about whether the words
+ * curls quotation marks, swaps dashes, or over-escapes while copying a passage accurately —
+ * writing a line break as the two characters `\n`, or a quotation mark as `\"`. Normalising those away keeps the check about whether the words
  * are present, not about how they were rendered.
  *
  * The same transformation is applied to the evidence, so a source that genuinely contains an
@@ -49,6 +49,7 @@ function comparable(value: string): string {
     .replace(/[“”‟″]/g, '"')
     .replace(/[‐-―−]/g, "-")
     .replace(/\\[nrt]/g, " ")
+    .replace(/\\(["'\\])/g, "$1")
     .replace(/\s+/g, " ")
     .trim();
 }

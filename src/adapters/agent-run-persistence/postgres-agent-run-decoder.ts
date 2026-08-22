@@ -81,6 +81,9 @@ const assignmentInput = z
     writerProfileIds: z.array(nonEmpty).min(1),
   })
   .strict();
+const researchInput = z
+  .object({ story: storyInput, evidence, unavailableSourceIds: z.array(nonEmpty) })
+  .strict();
 const writerInput = z
   .object({
     story: storyInput,
@@ -143,6 +146,12 @@ const writerCommon = {
   operation: z.literal("article_draft"),
   input: writerInput,
 };
+const researcherCommon = {
+  ...shared,
+  role: z.literal("researcher"),
+  operation: z.literal("source_research"),
+  input: researchInput,
+};
 const directorCommon = {
   ...shared,
   role: z.literal("editor_in_chief"),
@@ -194,6 +203,25 @@ const writerRevisionCommon = {
 };
 const schema = z.union([
   z.object({ ...assignmentCommon, ...inFlight, outcome: z.literal("running") }).strict(),
+  z.object({ ...researcherCommon, ...inFlight, outcome: z.literal("running") }).strict(),
+  z
+    .object({
+      ...researcherCommon,
+      ...completed,
+      outcome: z.literal("succeeded"),
+      attached: z.array(
+        z.object({ sourceId: nonEmpty, url: nonEmpty, relevance: nonEmpty }).strict(),
+      ),
+    })
+    .strict(),
+  z
+    .object({
+      ...researcherCommon,
+      ...completed,
+      outcome: z.literal("failed"),
+      failure: failureSchema,
+    })
+    .strict(),
   z.object({ ...writerCommon, ...inFlight, outcome: z.literal("running") }).strict(),
   z.object({ ...writerRevisionCommon, ...inFlight, outcome: z.literal("running") }).strict(),
   z.object({ ...directorCommon, ...inFlight, outcome: z.literal("running") }).strict(),
@@ -296,6 +324,7 @@ export function decodePostgresAgentRun(row: {
     typeof row.profile_id !== "string" ||
     !(
       (row.role === "assignment_editor" && row.operation === "assignment_proposal") ||
+      (row.role === "researcher" && row.operation === "source_research") ||
       (row.role === "writer" &&
         (row.operation === "article_draft" || row.operation === "article_revision")) ||
       (row.role === "editor_in_chief" && row.operation === "article_review")
@@ -313,7 +342,9 @@ export function decodePostgresAgentRun(row: {
                 ? "articleId"
                 : row.role === "editor_in_chief"
                   ? "review"
-                  : "proposal",
+                  : row.role === "researcher"
+                    ? "attached"
+                    : "proposal",
           ]),
       ...(row.outcome === "succeeded" && row.role === "writer" ? ["revisionId"] : []),
     ]) ||

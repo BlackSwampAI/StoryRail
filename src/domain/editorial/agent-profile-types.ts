@@ -1,7 +1,12 @@
 import type { ModelDescriptor } from "./source-evidence-preparation-types";
 import type { AgentProfileId } from "./types";
 
-export const AGENT_PROFILE_ROLES = ["assignment_editor", "writer", "editor_in_chief"] as const;
+export const AGENT_PROFILE_ROLES = [
+  "assignment_editor",
+  "researcher",
+  "writer",
+  "editor_in_chief",
+] as const;
 
 export type AgentProfileRole = (typeof AGENT_PROFILE_ROLES)[number];
 
