@@ -141,11 +141,19 @@ function recommendation(value: "approve" | "request_changes"): DirectorReviewRec
   const check = {
     status: value === "approve" ? ("pass" as const) : ("needs_changes" as const),
     note: "Note",
+    quoted: "Quoted from the Article.",
   };
   return {
     recommendation: value,
     summary: "Summary",
-    checks: { assignment: check, accuracy: check, headline: check, structure: check, style: check },
+    checks: {
+      assignment: check,
+      support: check,
+      accuracy: check,
+      headline: check,
+      structure: check,
+      style: check,
+    },
     revisionInstructions: value === "approve" ? null : "Tighten the lede.",
   };
 }

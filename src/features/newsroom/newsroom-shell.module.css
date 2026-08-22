@@ -2038,6 +2038,18 @@
   margin-top: 1.5rem;
 }
 
+/* Each check shows the passage it judged, so a review cannot be read without its evidence. */
+.checkQuoted {
+  display: block;
+  margin-top: 0.5rem;
+  border-left: 2px solid var(--tone-48);
+  padding-left: 0.65rem;
+  color: var(--tone-97);
+  font-size: 0.78rem;
+  font-style: italic;
+  overflow-wrap: anywhere;
+}
+
 /* A claim carries its support one click away; uncited prose says so on its face. */
 .articleBody {
   display: flex;

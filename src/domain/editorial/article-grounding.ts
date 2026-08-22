@@ -33,8 +33,12 @@ export type VerifyArticleGroundingResult =
 
 /**
  * Differences that are typography rather than content: a model re-wraps lines, straightens or
- * curls quotation marks, and swaps dashes while copying a passage accurately. Normalising those
- * away keeps the check about whether the words are present, not about how they were rendered.
+ * curls quotation marks, swaps dashes, or writes a line break as the two characters `\n` while
+ * copying a passage accurately. Normalising those away keeps the check about whether the words
+ * are present, not about how they were rendered.
+ *
+ * The same transformation is applied to the evidence, so a source that genuinely contains an
+ * escape sequence still matches a quote that reproduces it.
  *
  * Nothing else is normalised. Case, spelling, word order, and punctuation beyond this list stay
  * significant, so a passage that was reworded rather than quoted still fails.
@@ -44,6 +48,7 @@ function comparable(value: string): string {
     .replace(/[‘’‛′]/g, "'")
     .replace(/[“”‟″]/g, '"')
     .replace(/[‐-―−]/g, "-")
+    .replace(/\\[nrt]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -195,4 +200,26 @@ export function measureArticleGrounding(
     groundedShare: weighed === 0 ? null : citedCharacters / weighed,
     derivedShare: written.size === 0 ? null : carriedOver / written.size,
   };
+}
+
+/**
+ * Which of a Director's checks quote something the Article does not contain.
+ *
+ * A reviewer that must point at the passage it judges cannot return "well structured and
+ * accurate" about work it did not read, and cannot request changes over a sentence it invented.
+ * The Director is checked exactly as the Writer is, against the text it was given.
+ */
+export function unsupportedDirectorQuotes(
+  review: {
+    readonly checks: Readonly<Record<string, { readonly quoted: string }>>;
+  },
+  articleText: string,
+): readonly string[] {
+  const written = passages(articleText);
+  return Object.entries(review.checks)
+    .filter(([, check]) => {
+      const quoted = comparable(check.quoted);
+      return !written.some((passage) => passage.includes(quoted));
+    })
+    .map(([name]) => name);
 }

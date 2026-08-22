@@ -119,6 +119,10 @@ const ungroundedFailureMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0056-ungrounded-output-failure-code.sql",
 );
+const directorSupportMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0057-director-support-check.sql",
+);
 
 const OPERATOR: OperatorActor = {
   type: "operator",
@@ -335,6 +339,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let inFlightRunMigrationSql: string;
   let citedBlocksMigrationSql: string;
   let ungroundedFailureMigrationSql: string;
+  let directorSupportMigrationSql: string;
   let destructiveSetupAllowed = false;
 
   beforeAll(async () => {
@@ -354,6 +359,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     inFlightRunMigrationSql = await readFile(inFlightRunMigrationPath, "utf8");
     citedBlocksMigrationSql = await readFile(citedBlocksMigrationPath, "utf8");
     ungroundedFailureMigrationSql = await readFile(ungroundedFailureMigrationPath, "utf8");
+    directorSupportMigrationSql = await readFile(directorSupportMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -386,6 +392,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await client.query(inFlightRunMigrationSql);
       await client.query(citedBlocksMigrationSql);
       await client.query(ungroundedFailureMigrationSql);
+      await client.query(directorSupportMigrationSql);
     } finally {
       client.release();
     }
@@ -1053,11 +1060,32 @@ describePostgres("PostgreSQL persistence repositories", () => {
           recommendation: "approve" as const,
           summary: "The Article is ready.",
           checks: {
-            assignment: { status: "pass" as const, note: "Aligned." },
-            accuracy: { status: "pass" as const, note: "Supported." },
-            headline: { status: "pass" as const, note: "Supported." },
-            structure: { status: "pass" as const, note: "Coherent." },
-            style: { status: "pass" as const, note: "Clear." },
+            assignment: {
+              status: "pass" as const,
+              note: "Aligned.",
+              quoted: "Quoted from the Article.",
+            },
+            support: {
+              status: "pass" as const,
+              note: "Each claim follows from its passage.",
+              quoted: "Quoted from the Article.",
+            },
+            accuracy: {
+              status: "pass" as const,
+              note: "Supported.",
+              quoted: "Quoted from the Article.",
+            },
+            headline: {
+              status: "pass" as const,
+              note: "Supported.",
+              quoted: "Quoted from the Article.",
+            },
+            structure: {
+              status: "pass" as const,
+              note: "Coherent.",
+              quoted: "Quoted from the Article.",
+            },
+            style: { status: "pass" as const, note: "Clear.", quoted: "Quoted from the Article." },
           },
           revisionInstructions: null,
         },
@@ -1208,6 +1236,38 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await expect(accepts("MODEL_OUTPUT_UNSUPPORTED")).resolves.toBe(false);
     });
 
+    it("requires every Director check to point at the passage it judged", async () => {
+      // The rule lives in the database as well as the domain: no write path can record a
+      // review that praises or refuses work without quoting it.
+      const review = (checks: Record<string, unknown>) =>
+        pool
+          .query<{ valid: boolean }>(
+            "SELECT storyrail.director_review_is_valid($1::jsonb) AS valid",
+            [
+              JSON.stringify({
+                recommendation: "approve",
+                summary: "Ready.",
+                checks,
+                revisionInstructions: null,
+              }),
+            ],
+          )
+          .then((result) => result.rows[0]?.valid);
+      const check = { status: "pass", note: "Fine.", quoted: "A passage of the Article." };
+      const named = ["assignment", "support", "accuracy", "headline", "structure", "style"];
+      const complete = Object.fromEntries(named.map((name) => [name, check]));
+
+      await expect(review(complete)).resolves.toBe(true);
+      // The sixth check is not optional.
+      await expect(
+        review(Object.fromEntries(named.slice(1).map((name) => [name, check]))),
+      ).resolves.toBe(false);
+      await expect(review({ ...complete, style: { status: "pass", note: "Fine." } })).resolves.toBe(
+        false,
+      );
+      await expect(review({ ...complete, style: { ...check, quoted: "  " } })).resolves.toBe(false);
+    });
+
     it("accepts grounding findings only on an ungrounded failure", async () => {
       const withFindings = (code: string, findings: unknown) =>
         pool
@@ -1236,6 +1296,23 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await expect(
         withFindings("MODEL_OUTPUT_UNGROUNDED", [{ ...finding, quote: "  " }]),
       ).resolves.toBe(false);
+    });
+
+    it("accepts named Director checks only on an ungrounded failure", async () => {
+      const withChecks = (code: string, names: unknown) =>
+        pool
+          .query<{ valid: boolean }>(
+            `SELECT storyrail.model_failure_is_valid(
+               jsonb_build_object('code', $1::text, 'retryable', true, 'unsupportedChecks', $2::jsonb)
+             ) AS valid`,
+            [code, JSON.stringify(names)],
+          )
+          .then((result) => result.rows[0]?.valid);
+
+      await expect(withChecks("MODEL_OUTPUT_UNGROUNDED", ["accuracy"])).resolves.toBe(true);
+      await expect(withChecks("MODEL_OUTPUT_INVALID", ["accuracy"])).resolves.toBe(false);
+      await expect(withChecks("MODEL_OUTPUT_UNGROUNDED", [])).resolves.toBe(false);
+      await expect(withChecks("MODEL_OUTPUT_UNGROUNDED", ["  "])).resolves.toBe(false);
     });
   });
 

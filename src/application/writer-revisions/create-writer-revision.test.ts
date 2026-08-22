@@ -112,11 +112,20 @@ function fixture(): StoryInspection {
     recommendation: "request_changes" as const,
     summary: "One claim needs support.",
     checks: {
-      assignment: { status: "pass" as const, note: "Aligned." },
-      accuracy: { status: "needs_changes" as const, note: "Support the claim." },
-      headline: { status: "pass" as const, note: "Supported." },
-      structure: { status: "pass" as const, note: "Coherent." },
-      style: { status: "pass" as const, note: "Clear." },
+      assignment: { status: "pass" as const, note: "Aligned.", quoted: "Quoted from the Article." },
+      support: {
+        status: "pass" as const,
+        note: "Each claim follows from its passage.",
+        quoted: "Quoted from the Article.",
+      },
+      accuracy: {
+        status: "needs_changes" as const,
+        note: "Support the claim.",
+        quoted: "Quoted from the Article.",
+      },
+      headline: { status: "pass" as const, note: "Supported.", quoted: "Quoted from the Article." },
+      structure: { status: "pass" as const, note: "Coherent.", quoted: "Quoted from the Article." },
+      style: { status: "pass" as const, note: "Clear.", quoted: "Quoted from the Article." },
     },
     revisionInstructions: "Support the claim.",
   };

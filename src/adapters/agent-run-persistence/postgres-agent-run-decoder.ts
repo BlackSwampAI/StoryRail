@@ -44,6 +44,7 @@ const failureSchema = z
     code: z.enum(MODEL_FAILURE_CODES),
     retryable: z.boolean(),
     findings: z.array(groundingFindingSchema).min(1).optional(),
+    unsupportedChecks: z.array(nonEmpty).min(1).optional(),
   })
   .strict();
 const actor = z.discriminatedUnion("type", [
@@ -148,19 +149,21 @@ const directorCommon = {
   operation: z.literal("article_review"),
   input: directorInput,
 };
+const directorCheck = z
+  .object({ status: z.enum(["pass", "needs_changes"]), note: nonEmpty, quoted: nonEmpty })
+  .strict();
 const review = z
   .object({
     recommendation: z.enum(["approve", "request_changes"]),
     summary: nonEmpty,
     checks: z
       .object({
-        assignment: z
-          .object({ status: z.enum(["pass", "needs_changes"]), note: nonEmpty })
-          .strict(),
-        accuracy: z.object({ status: z.enum(["pass", "needs_changes"]), note: nonEmpty }).strict(),
-        headline: z.object({ status: z.enum(["pass", "needs_changes"]), note: nonEmpty }).strict(),
-        structure: z.object({ status: z.enum(["pass", "needs_changes"]), note: nonEmpty }).strict(),
-        style: z.object({ status: z.enum(["pass", "needs_changes"]), note: nonEmpty }).strict(),
+        assignment: directorCheck,
+        support: directorCheck,
+        accuracy: directorCheck,
+        headline: directorCheck,
+        structure: directorCheck,
+        style: directorCheck,
       })
       .strict(),
     revisionInstructions: nonEmpty.nullable(),
