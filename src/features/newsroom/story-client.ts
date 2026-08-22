@@ -73,6 +73,7 @@ export interface StoryClient {
    */
   readonly startAutopilot: (
     storyId: string,
+    options?: { readonly research?: boolean },
   ) => Promise<StoryClientResult<{ readonly runId: string }>>;
   /**
    * Retrieval takes as long as the pages do, so the client accepts the start and follows the
@@ -1093,12 +1094,13 @@ async function acceptRun(
   dependencies: Required<StoryClientDependencies>,
   input: string,
   applicationErrors: Readonly<Record<number, ReadonlySet<string>>>,
+  request: Readonly<Record<string, unknown>> = {},
 ): Promise<StoryClientResult<{ readonly runId: string }>> {
   try {
     const response = await dependencies.fetch(input, {
       method: "POST",
       headers: jsonHeaders,
-      body: JSON.stringify({}),
+      body: JSON.stringify(request),
     });
     const body: unknown = await response.json();
     if (!isRecord(body)) return unavailable();
@@ -1329,14 +1331,19 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
         415: new Set(["UNSUPPORTED_MEDIA_TYPE"]),
         422: new Set(["RESEARCH_EVIDENCE_REQUIRED"]),
       }),
-    startAutopilot: (storyId) =>
-      acceptRun(resolved, `/api/stories/${encodeURIComponent(storyId)}/autopilot`, {
-        400: new Set(["INVALID_JSON", "INVALID_REQUEST"]),
-        404: new Set(["STORY_NOT_FOUND"]),
-        409: new Set(["ASSIGNMENT_PROPOSAL_NOT_ALLOWED", "AGENT_RUN_ID_CONFLICT"]),
-        415: new Set(["UNSUPPORTED_MEDIA_TYPE"]),
-        422: new Set(["ASSIGNMENT_EDITOR_EVIDENCE_REQUIRED", "WRITER_PROFILE_REQUIRED"]),
-      }),
+    startAutopilot: (storyId, options) =>
+      acceptRun(
+        resolved,
+        `/api/stories/${encodeURIComponent(storyId)}/autopilot`,
+        {
+          400: new Set(["INVALID_JSON", "INVALID_REQUEST"]),
+          404: new Set(["STORY_NOT_FOUND"]),
+          409: new Set(["ASSIGNMENT_PROPOSAL_NOT_ALLOWED", "AGENT_RUN_ID_CONFLICT"]),
+          415: new Set(["UNSUPPORTED_MEDIA_TYPE"]),
+          422: new Set(["ASSIGNMENT_EDITOR_EVIDENCE_REQUIRED", "WRITER_PROFILE_REQUIRED"]),
+        },
+        options?.research === true ? { research: true } : {},
+      ),
     generateAssignmentProposal: (storyId) =>
       startRun(
         resolved,

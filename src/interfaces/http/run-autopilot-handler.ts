@@ -62,17 +62,24 @@ export function createRunAutopilotHttpHandler(dependencies: {
     } catch {
       return respond(error("INVALID_JSON", "The request body must contain valid JSON."), 400);
     }
+    // Research is opt-in per run rather than a setting, because the cost is per run and the
+    // operator is present when they ask for it.
     if (
       typeof body !== "object" ||
       body === null ||
       Array.isArray(body) ||
-      Object.keys(body).length !== 0
+      Object.keys(body).some((key) => key !== "research") ||
+      ("research" in body && typeof (body as { research: unknown }).research !== "boolean")
     ) {
       return respond(
-        error("INVALID_REQUEST", "The request body must be exactly an empty object."),
+        error(
+          "INVALID_REQUEST",
+          "The request body must be empty or contain only a boolean research flag.",
+        ),
         400,
       );
     }
+    const research = (body as { readonly research?: boolean }).research === true;
 
     try {
       const configuredOperator = (dependencies.environment ?? process.env).STORYRAIL_OPERATOR_ID;
@@ -89,6 +96,7 @@ export function createRunAutopilotHttpHandler(dependencies: {
       const started = await createAutopilot(dependencies.getRuntimes()).start({
         storyId: storyId(parameters.storyId),
         requestedBy,
+        research,
       });
       if (!started.ok) return respond(started, status(started));
 

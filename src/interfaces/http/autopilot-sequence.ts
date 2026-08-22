@@ -10,6 +10,7 @@ import {
 import type {
   AssignmentEditorRuntime,
   DirectorRuntime,
+  ResearcherRuntime,
   StoryRuntime,
   WriterRuntime,
 } from "@/runtime";
@@ -28,6 +29,7 @@ export const AUTOPILOT_REVIEW_DECISION_REASON =
 export const AUTOPILOT_PUBLICATION_REASON = "Published by autopilot after Director approval.";
 
 export const AUTOPILOT_STEPS = [
+  "source_research",
   "assignment_proposal",
   "assignment",
   "writer_draft",
@@ -71,6 +73,8 @@ export type StartAutopilotResult =
   | AutopilotStartFailure;
 
 export interface AutopilotRuntimes {
+  /** Present only where an operator has research configured; autopilot works without it. */
+  readonly researcher?: Pick<ResearcherRuntime, "researchStorySources">;
   readonly story: Pick<
     StoryRuntime,
     | "inspectStory"
@@ -248,7 +252,21 @@ export function createAutopilot(runtimes: AutopilotRuntimes) {
     async start(command: {
       readonly storyId: StoryId;
       readonly requestedBy: OperatorActor;
+      /** Widen the evidence before assigning. Off unless the operator asked for it. */
+      readonly research?: boolean;
     }): Promise<StartAutopilotResult> {
+      // Research runs before the Assignment Editor sees anything, because the point of it is to
+      // change what there is to assign. It is deliberately not a precondition: every other step
+      // feeds the next, but a Story whose research failed is still perfectly writable from the
+      // evidence the operator submitted, and stopping would make asking for research riskier
+      // than not asking.
+      if (command.research === true && runtimes.researcher !== undefined) {
+        const research = await runtimes.researcher.researchStorySources({
+          storyId: command.storyId,
+          requestedBy: command.requestedBy,
+        });
+        if (research.ok) await research.completion;
+      }
       const started = await assignmentEditor.generateAssignmentProposal({
         storyId: command.storyId,
         requestedBy: command.requestedBy,

@@ -23,6 +23,7 @@ function isSuccessfulProposal(
 }
 
 import { measureRevisionGrounding } from "@/application/article-grounding";
+import { DEFAULT_RESEARCH_CALL_BUDGET } from "@/application/source-research";
 import { editorialLedger, revisionHistory } from "@/application/editorial-ledger";
 
 import { ArticleReader } from "./article-reader";
@@ -34,6 +35,9 @@ import { modelFailureMessage } from "./model-failure";
  * A refused draft is only useful if it says what it could not support, so each finding names the
  * problem and shows the passage the Writer claimed to be quoting.
  */
+/** Stated where the operator chooses, so the cost of asking for research is not a surprise. */
+const AUTOPILOT_RESEARCH_PAGE_BUDGET = DEFAULT_RESEARCH_CALL_BUDGET;
+
 const GROUNDING_FINDING_LABELS = {
   CITATION_EVIDENCE_UNKNOWN: "Cited evidence not on this Assignment",
   CITATION_SOURCE_MISMATCH: "Source does not own the cited evidence",
@@ -865,6 +869,7 @@ export function StoryWorkspace({
   const [researchPending, setResearchPending] = useState(false);
   const [researchStatus, setResearchStatus] = useState<string | null>(null);
   const [autopilotPending, setAutopilotPending] = useState(false);
+  const [autopilotResearch, setAutopilotResearch] = useState(false);
   const [autopilotStatus, setAutopilotStatus] = useState<string | null>(null);
   // What autopilot looked like when it was last seen moving. The durable record is the only
   // authority on where an automated run has reached, so following one means watching that
@@ -1226,7 +1231,7 @@ export function StoryWorkspace({
     setAutopilotPending(true);
     setAutopilotStatus(null);
     try {
-      const result = await requests.startAutopilot(story.id);
+      const result = await requests.startAutopilot(story.id, { research: autopilotResearch });
       if (result.kind !== "completed") {
         setAutopilotStatus(
           result.kind === "application-failure"
@@ -1241,7 +1246,9 @@ export function StoryWorkspace({
         observedAt: Date.now(),
       });
       setAutopilotStatus(
-        "Autopilot is running this Story to publication. Every record is still written as you.",
+        autopilotResearch
+          ? "Autopilot is researching, then running this Story to publication. Every record is still written as you."
+          : "Autopilot is running this Story to publication. Every record is still written as you.",
       );
     } catch {
       setAutopilotStatus("Autopilot could not be started. Reopen this Story to check.");
@@ -1988,6 +1995,21 @@ export function StoryWorkspace({
                     {autopilotRunning ? "Autopilot is running…" : "Run autopilot"}
                   </button>
                 </div>
+                <label className={styles.autopilotOption}>
+                  <input
+                    type="checkbox"
+                    checked={autopilotResearch}
+                    disabled={autopilotPending || autopilotRunning}
+                    onChange={(event) => setAutopilotResearch(event.target.checked)}
+                  />
+                  <span>
+                    Research first
+                    <small>
+                      Retrieves up to {AUTOPILOT_RESEARCH_PAGE_BUDGET} linked pages and adds a model
+                      call before drafting. Slower, and it costs more per run.
+                    </small>
+                  </span>
+                </label>
                 <p className={styles.autopilotExplainer}>
                   Autopilot adopts the Director&apos;s recommendation as the decision and publishes
                   without a human reading the Article. Every record is still written as you, and
