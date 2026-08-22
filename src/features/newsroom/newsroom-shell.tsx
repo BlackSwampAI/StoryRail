@@ -8,6 +8,8 @@ import type { StoryInspection } from "@/application/story-inspection";
 import type { StoryListItem } from "@/application/story-listing";
 import { STORY_STATES, type AgentProfile, type StoryId, type StoryState } from "@/domain/editorial";
 
+import { AccountMenu } from "./account-menu";
+import { ProfileWorkspace, SettingsWorkspace } from "./account-workspace";
 import { AgentProfilesWorkspace } from "./agent-profiles-workspace";
 import { agentProfileClient, type AgentProfileClient } from "./agent-profile-client";
 import { STORY_STATE_LABELS } from "./newsroom-state";
@@ -21,7 +23,7 @@ import type { SourceInboxClient } from "./source-inbox-client";
 import { StoryWorkspace } from "./story-workspace";
 import { storyClient, type StoryClient } from "./story-client";
 
-type WorkspaceMode = "story" | "source-inbox" | "source-intake" | "agents";
+type WorkspaceMode = "story" | "source-inbox" | "source-intake" | "agents" | "profile" | "settings";
 
 export interface NewsroomShellProps {
   readonly requestSourceEvidence?: RequestSourceEvidenceUrl;
@@ -352,6 +354,22 @@ export function NewsroomShell({
 
         workspace={
           <main className={styles.workspace}>
+            <div className={styles.workspaceNavigation}>
+              <p className={styles.workspaceBreadcrumb}>
+                {workspaceMode === "profile" || workspaceMode === "settings"
+                  ? "Account"
+                  : "Newsroom"}
+              </p>
+              <AccountMenu
+                activeItem={
+                  workspaceMode === "profile" || workspaceMode === "settings"
+                    ? workspaceMode
+                    : undefined
+                }
+                onOpenProfile={() => openWorkspace("profile")}
+                onOpenSettings={() => openWorkspace("settings")}
+              />
+            </div>
             <div hidden={workspaceMode !== "story"}>
               {storySelection.kind === "loaded" ? (
                 <StoryWorkspace
@@ -479,6 +497,12 @@ export function NewsroomShell({
                   }}
                 />
               ) : null}
+            </div>
+            <div hidden={workspaceMode !== "profile"}>
+              {workspaceMode === "profile" ? <ProfileWorkspace /> : null}
+            </div>
+            <div hidden={workspaceMode !== "settings"}>
+              {workspaceMode === "settings" ? <SettingsWorkspace /> : null}
             </div>
             <div hidden={workspaceMode !== "agents"}>
               {workspaceMode === "agents" ? (

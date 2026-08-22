@@ -2864,3 +2864,335 @@
     transition: none;
   }
 }
+
+/* ---------- signed-in shell (scaffolding) ---------- */
+
+.workspaceBreadcrumb {
+  margin: 0;
+  color: #7f978c;
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.accountMenu {
+  position: relative;
+}
+
+.accountTrigger {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  border: 1px solid #24382f;
+  border-radius: 999px;
+  background: #0f1c17;
+  padding: 0.4rem 0.85rem 0.4rem 0.4rem;
+  color: #dbe7e0;
+  cursor: pointer;
+}
+
+.accountTrigger:hover {
+  border-color: #375a4b;
+}
+
+.accountTrigger:focus-visible {
+  outline: 2px solid #79d8b4;
+  outline-offset: 2px;
+}
+
+.accountTriggerText {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.25;
+}
+
+.accountTriggerText strong {
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.accountTriggerText small,
+.accountPopoverHeader small {
+  color: #86a094;
+  font-size: 0.72rem;
+}
+
+.accountAvatar,
+.profileAvatar {
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: linear-gradient(#2f6553, #1d4034);
+  color: #d8f2e6;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.accountAvatar {
+  width: 2rem;
+  height: 2rem;
+  font-size: 0.76rem;
+}
+
+.profileAvatar {
+  width: 3.5rem;
+  height: 3.5rem;
+  font-size: 1.1rem;
+}
+
+.accountPopover {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  min-width: 15rem;
+  flex-direction: column;
+  gap: 0.15rem;
+  border: 1px solid #2a463b;
+  border-radius: 0.8rem;
+  background: #0d1a15;
+  padding: 0.5rem;
+  box-shadow: 0 1.25rem 3rem rgb(0 0 0 / 55%);
+}
+
+.accountPopoverHeader {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  border-bottom: 1px solid #1e3229;
+  padding: 0.45rem 0.6rem 0.6rem;
+}
+
+.accountPopoverItem {
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  padding: 0.55rem 0.6rem;
+  color: #dbe7e0;
+  cursor: pointer;
+  text-align: left;
+  font-size: 0.88rem;
+}
+
+.accountPopoverItem:hover:not(:disabled) {
+  background: #15281f;
+}
+
+.accountPopoverItem:disabled {
+  color: #5f7a6d;
+  cursor: not-allowed;
+}
+
+.accountPopoverItem:focus-visible {
+  outline: 2px solid #79d8b4;
+  outline-offset: -2px;
+}
+
+.accountPopoverNote {
+  margin: 0.35rem 0.6rem 0.2rem;
+  color: #7c968a;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.accountWorkspace {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: clamp(1.5rem, 4vw, 3.5rem);
+}
+
+.scaffoldNotice {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+  margin: 0;
+  border: 1px dashed #3d6353;
+  border-radius: 0.75rem;
+  background: #0f1c17;
+  padding: 0.85rem 1rem;
+  color: #a9c2b6;
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.scaffoldBadge {
+  flex: none;
+  border-radius: 999px;
+  background: #24443a;
+  padding: 0.15rem 0.55rem;
+  color: #9fe3c6;
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.profileCard {
+  display: flex;
+  align-items: center;
+  gap: 1.1rem;
+  border: 1px solid #24382f;
+  border-radius: 1rem;
+  background: #0e1d18;
+  padding: 1.25rem;
+}
+
+.profileCard h2 {
+  margin: 0 0 0.2rem;
+  color: #f1f6f2;
+}
+
+.profileCard p {
+  margin: 0;
+  color: #92aa9e;
+  font-size: 0.9rem;
+}
+
+.settingsIndex {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.settingsIndex a {
+  border: 1px solid #24382f;
+  border-radius: 999px;
+  padding: 0.3rem 0.75rem;
+  color: #a9c2b6;
+  font-size: 0.8rem;
+  text-decoration: none;
+}
+
+.settingsIndex a:hover,
+.settingsIndex a:focus-visible {
+  border-color: #375a4b;
+  color: #dcece4;
+}
+
+.settingsSection {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  border: 1px solid #24382f;
+  border-radius: 1rem;
+  background: #0e1d18;
+  padding: clamp(1.1rem, 3vw, 1.75rem);
+  scroll-margin-top: 6rem;
+}
+
+.settingsSection header h3 {
+  margin: 0 0 0.3rem;
+  color: #f1f6f2;
+  font-size: 1.05rem;
+}
+
+.settingsSection header p {
+  margin: 0;
+  color: #8ea79a;
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.settingsFields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.9rem 1.5rem;
+  margin: 0;
+}
+
+.settingsFields div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  border-top: 1px solid #1c2f27;
+  padding-top: 0.7rem;
+}
+
+.settingsFields dt {
+  color: #7f978c;
+  font-size: 0.72rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.settingsFields dd {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0;
+  color: #dfeae4;
+  font-size: 0.92rem;
+  overflow-wrap: anywhere;
+}
+
+.settingsFields dd small {
+  color: #7f978c;
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.connectorList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.connectorRow {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 0.9rem;
+  border: 1px solid #1e3229;
+  border-radius: 0.7rem;
+  background: #0b1712;
+  padding: 0.75rem 0.9rem;
+}
+
+.connectorRow span:first-child {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.connectorRow strong {
+  color: #e6efe9;
+  font-size: 0.92rem;
+}
+
+.connectorRow small {
+  color: #829a8e;
+  font-size: 0.78rem;
+}
+
+.connectorStatus {
+  flex: none;
+  border-radius: 999px;
+  border: 1px solid currentcolor;
+  padding: 0.15rem 0.55rem;
+  color: #7f978c;
+  font-size: 0.68rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.connectorRow[data-status="connected"] .connectorStatus {
+  color: #79d8b4;
+}
+
+@media (max-width: 40rem) {
+  .connectorRow {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .accountTriggerText {
+    display: none;
+  }
+}
