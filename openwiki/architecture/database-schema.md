@@ -150,6 +150,26 @@ The migration also adds a `CHECK` constraint to ensure:
 - Both fields are non-negative integers
 - `submittedCharacters` ≤ `rawCharacters`
 
+## Migration 0053 — model quota failure code
+
+`database/migrations/0053-model-quota-failure-code.sql` adds a new failure code `MODEL_QUOTA_EXHAUSTED` to distinguish when a provider refuses a request due to account billing or quota limits (while the credential remains valid) from generic model rejections. It extracts the model failure validation logic into a reusable SQL function `storyrail.model_failure_is_valid` and updates the `agent_runs_payload_outcome_check` constraint to use it.
+
+The migration:
+1. Creates `storyrail.model_failure_is_valid(jsonb)` that returns true if the JSONB is an object with `code` and `retryable` fields, no extra keys, and `code` is one of the permitted model failure codes (including the new `MODEL_QUOTA_EXHAUSTED`).
+2. Drops and recreates the `agent_runs_payload_outcome_check` constraint on `storyrail.agent_runs` to use this function for the `failed` outcome branch, while preserving the existing validation for succeeded outcomes.
+
+## Migration 0054 — agent run in-flight tracking
+
+`database/migrations/0054-agent-run-in-flight.sql` changes agent run recording so that a row is inserted when the run starts (with `outcome = 'running'`) and updated in place when it completes, rather than only inserting after completion. This enables visibility into runs that are in progress and provides a durable recovery point if the process dies mid-call.
+
+The migration:
+1. Updates the `agent_runs_outcome_check` constraint to allow `outcome` values `'running'`, `'succeeded'`, or `'failed'`.
+2. Recreates `agent_runs_payload_exact_shape_check` to require that a `'running'` run has a `completedAt` set to `null` and contains only the core fields (`id`, `storyId`, `profileId`, `role`, `operation`, `model`, `prompt`, `requestedBy`, `startedAt`, `completedAt`, `input`, `outcome`).
+3. Recreates `agent_runs_payload_outcome_check` to accept the `'running'` outcome or delegate to the specific role/outcome validation (which now uses `storyrail.model_failure_is_valid` for failed outcomes).
+4. Recreates `agent_runs_payload_actor_time_check` to validate the `requestedBy` and timing fields, ensuring `completedAt` is a string only when the outcome is terminal.
+5. Adds a trigger function `storyrail.agent_run_completion_is_one_way()` that enforces that a run may transition from `'running'` to a terminal outcome exactly once, and that all other fields (including the input snapshot and `startedAt`) remain immutable.
+6. Attaches this function as a `BEFORE UPDATE` trigger on `storyrail.agent_runs`.
+
 ## Integration test lifecycle
 
-The PostgreSQL integration tests (`src/adapters/source-persistence/postgres-source-repositories.test.ts` and the Story/attachment/assignment/run/article/review contracts) connect via `STORYRAIL_TEST_DATABASE_URL`, verify the database name is exactly `storyrail_test`, drop and recreate the `storyrail` schema, apply migrations `0012`, `0017`, `0018`, `0024`, `0025`, `0027`, `0028`, `0030`, `0031`, `0038`, `0041`, and `0049` in order, and truncate the editorial tables (plus delete non-built-in Agent Profiles) between cases. The suite never creates or drops a database.
+The PostgreSQL integration tests (`src/adapters/source-persistence/postgres-source-repositories.test.ts` and the Story/attachment/assignment/run/article/review contracts) connect via `STORYRAIL_TEST_DATABASE_URL`, verify the database name is exactly `storyrail_test`, drop and recreate the `storyrail` schema, apply migrations `0012`, `0017`, `0018`, `0024`, `0025`, `0027`, `0028`, `0030`, `0031`, `0038`, `0041`, `0049`, `0053`, and `0054` in order, and truncate the editorial tables (plus delete non-built-in Agent Profiles) between cases. The suite never creates or drops a database.

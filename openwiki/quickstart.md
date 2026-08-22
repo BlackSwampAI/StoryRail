@@ -58,7 +58,7 @@ pnpm dev
 
 ## PostgreSQL integration tests
 
-Source-evidence, Story, attachment, triage, preparation, Agent Profile, Assignment, AgentRun, Article, Article Revision, Writer revision, review submission, review decision, Director review, and Story rejection persistence integration tests run against real PostgreSQL 18.4 (no mocks, testcontainers, or embedded databases). Provide the test-only connection through `STORYRAIL_TEST_DATABASE_URL`. The configured database name **must** be exactly `storyrail_test`. The suite never creates or drops a database, but it does drop and recreate the `storyrail` schema, applies migrations `0012`, `0017`, `0018`, `0024`, `0025`, `0027`, `0028`, `0030`, `0031`, `0038`, and `0041` in order, truncates the editorial tables (and deletes non-built-in Agent Profiles) between cases.
+Source-evidence, Story, attachment, triage, preparation, Agent Profile, Assignment, AgentRun, Article, Article Revision, Writer revision, review submission, review decision, Director review, and Story rejection persistence integration tests run against real PostgreSQL 18.4 (no mocks, testcontainers, or embedded databases). Provide the test-only connection through `STORYRAIL_TEST_DATABASE_URL`. The configured database name **must** be exactly `storyrail_test`. The suite never creates or drops a database, but it does drop and recreate the `storyrail` schema, applies migrations `0012`, `0017`, `0018`, `0024`, `0025`, `0027`, `0028`, `0030`, `0031`, `0038`, `0041`, `0049`, `0053`, and `0054` in order, truncates the editorial tables (and deletes non-built-in Agent Profiles) between cases.
 
 ```bash
 STORYRAIL_TEST_DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/storyrail_test' \
@@ -93,7 +93,7 @@ When `STORYRAIL_TEST_DATABASE_URL` is absent, `pnpm test` skips the PostgreSQL s
 - [Application workflows](architecture/application-workflows.md) — use-case orchestration and repository ports.
 - [Adapters and runtime composition](architecture/adapters-and-runtime.md) — PostgreSQL, Firecrawl, and OpenRouter adapters composed into focused runtimes including the Director runtime.
 - [HTTP API endpoints](architecture/http-api.md) — Next.js route handlers and status code maps.
-- [PostgreSQL schema and migrations](architecture/database-schema.md) — the `storyrail` schema and migrations `0012`–`0041`.
+- [PostgreSQL schema and migrations](architecture/database-schema.md) — the `storyrail` schema and migrations `0012`–`0054`.
 - [Newsroom UI shell](architecture/newsroom-ui.md) — resizable desk, staff sidebar, Story workspace with assignment, writing, Writer revision, review submission, Director review, operator decision, and operator Story rejection, and SafeMarkdown.
 - [Repository source map](architecture/source-map.md) — canonical file and directory locations.
 - [Engineering workflow and testing](engineering-workflow.md) — branch/batch discipline, verification ownership, CI contract, and the testing strategy.
