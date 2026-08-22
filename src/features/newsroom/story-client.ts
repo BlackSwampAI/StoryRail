@@ -74,6 +74,13 @@ export interface StoryClient {
   readonly startAutopilot: (
     storyId: string,
   ) => Promise<StoryClientResult<{ readonly runId: string }>>;
+  /**
+   * Retrieval takes as long as the pages do, so the client accepts the start and follows the
+   * Story rather than holding the request open.
+   */
+  readonly startSourceResearch: (
+    storyId: string,
+  ) => Promise<StoryClientResult<{ readonly runId: string }>>;
   readonly createWriterDraft: (storyId: string) => Promise<StoryClientResult<AgentRun>>;
   readonly createWriterRevision: (storyId: string) => Promise<StoryClientResult<AgentRun>>;
   readonly rejectStory: (
@@ -1314,6 +1321,14 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
         return unavailable();
       }
     },
+    startSourceResearch: (storyId) =>
+      acceptRun(resolved, `/api/stories/${encodeURIComponent(storyId)}/research`, {
+        400: new Set(["INVALID_JSON", "INVALID_REQUEST"]),
+        404: new Set(["STORY_NOT_FOUND"]),
+        409: new Set(["SOURCE_RESEARCH_NOT_ALLOWED", "AGENT_RUN_ID_CONFLICT"]),
+        415: new Set(["UNSUPPORTED_MEDIA_TYPE"]),
+        422: new Set(["RESEARCH_EVIDENCE_REQUIRED"]),
+      }),
     startAutopilot: (storyId) =>
       acceptRun(resolved, `/api/stories/${encodeURIComponent(storyId)}/autopilot`, {
         400: new Set(["INVALID_JSON", "INVALID_REQUEST"]),

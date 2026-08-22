@@ -136,6 +136,25 @@ describe("verifying that an Article Revision is grounded", () => {
     ).toMatchObject({ ok: false, findings: [{ code: "CITATION_QUOTE_UNSUPPORTED" }] });
   });
 
+  it("looks past a quotation mark written as the two characters backslash-quote", () => {
+    // Observed live: the model copied a passage accurately and escaped its quotation marks
+    // twice. As with escaped newlines, the words are right and only the rendering is wrong.
+    const quoted: readonly GroundingEvidence[] = [
+      {
+        sourceId: SOURCE,
+        evidenceId: EVIDENCE,
+        content: 'The non-unwind ABIs (e.g., `"C"`) will now abort on uncaught unwinds.',
+      },
+    ];
+
+    expect(
+      verifyArticleGrounding(
+        claim('The non-unwind ABIs (e.g., `\\"C\\"`) will now abort on uncaught unwinds.'),
+        quoted,
+      ),
+    ).toEqual({ ok: true });
+  });
+
   it("allows a lead-in and the list it introduces to be quoted together", () => {
     // The blank line before a Markdown list is punctuation, not a change of subject. Refusing
     // this was rejecting accurate quotations of real release notes.

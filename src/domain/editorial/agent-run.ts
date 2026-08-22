@@ -40,6 +40,7 @@ export function recordAgentRun(candidate: AgentRun): RecordAgentRunResult {
   }
   if (!(
     (candidate.role === "assignment_editor" && candidate.operation === "assignment_proposal") ||
+    (candidate.role === "researcher" && candidate.operation === "source_research") ||
     (candidate.role === "writer" &&
       (candidate.operation === "article_draft" || candidate.operation === "article_revision")) ||
     (candidate.role === "editor_in_chief" && candidate.operation === "article_review")
@@ -150,6 +151,24 @@ export function recordAgentRun(candidate: AgentRun): RecordAgentRunResult {
         return invalid(
           "AGENT_RUN_OUTCOME_INVALID",
           "Successful Writer AgentRun references are invalid.",
+        );
+      }
+      return { ok: true, run: structuredClone(candidate) };
+    }
+  } else if (candidate.role === "researcher") {
+    if (candidate.outcome === "succeeded") {
+      const { attached } = candidate;
+      if (
+        !Array.isArray(attached) ||
+        !attached.every(
+          (source) =>
+            nonEmpty(source.sourceId) && nonEmpty(source.url) && nonEmpty(source.relevance),
+        ) ||
+        new Set(attached.map(({ sourceId }) => sourceId)).size !== attached.length
+      ) {
+        return invalid(
+          "AGENT_RUN_OUTCOME_INVALID",
+          "Researched Sources must be distinct and completely described.",
         );
       }
       return { ok: true, run: structuredClone(candidate) };

@@ -74,6 +74,53 @@ export type AssignmentProposalAgentRun = AssignmentProposalAgentRunCommon &
       }
   );
 
+/**
+ * A Source the Researcher retrieved and judged worth attaching, recorded as the durable result
+ * of the run that found it. Which Sources a Story rests on is an editorial fact, so it is
+ * recorded where the decision was made rather than inferred from attachments later.
+ */
+export interface SourceResearchInput {
+  readonly story: {
+    readonly id: StoryId;
+    readonly title: string;
+    readonly state: StoryState;
+    readonly revisionCycle: number;
+  };
+  readonly evidence: readonly EvidenceReference[];
+  readonly unavailableSourceIds: readonly SourceId[];
+}
+
+export interface AttachedResearchSource {
+  readonly sourceId: SourceId;
+  readonly url: string;
+  readonly relevance: string;
+}
+
+interface SourceResearchAgentRunCommon {
+  readonly id: AgentRunId;
+  readonly storyId: StoryId;
+  readonly profileId: AgentProfileId;
+  readonly role: "researcher";
+  readonly operation: "source_research";
+  readonly model: ModelDescriptor;
+  readonly prompt: { readonly key: string; readonly version: string };
+  readonly requestedBy: EditorialActor;
+  readonly startedAt: string;
+  readonly completedAt: string | null;
+  readonly input: SourceResearchInput;
+}
+
+export type SourceResearchAgentRun = SourceResearchAgentRunCommon &
+  (
+    | { readonly outcome: "running" }
+    | {
+        readonly outcome: "succeeded";
+        /** Empty is a real answer: nothing further was worth attaching. */
+        readonly attached: readonly AttachedResearchSource[];
+      }
+    | { readonly outcome: "failed"; readonly failure: AgentRunFailure }
+  );
+
 export interface WriterArticleDraftAgentRunInput {
   readonly story: AssignmentProposalAgentRunInput["story"];
   readonly assignment: {
@@ -201,6 +248,7 @@ export type DirectorArticleReviewAgentRun = DirectorArticleReviewAgentRunCommon 
   );
 
 export type AgentRun =
+  | SourceResearchAgentRun
   | AssignmentProposalAgentRun
   | WriterArticleDraftAgentRun
   | WriterArticleRevisionAgentRun

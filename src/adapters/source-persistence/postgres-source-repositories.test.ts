@@ -129,6 +129,10 @@ const toolCallsMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0058-agent-tool-calls.sql",
 );
+const researcherMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0059-researcher-role.sql",
+);
 
 const OPERATOR: OperatorActor = {
   type: "operator",
@@ -347,6 +351,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let ungroundedFailureMigrationSql: string;
   let directorSupportMigrationSql: string;
   let toolCallsMigrationSql: string;
+  let researcherMigrationSql: string;
 
   /** Every migration, in order. One list so a rebuild can never drift from the first build. */
   const orderedMigrations = (): readonly string[] => [
@@ -368,6 +373,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     ungroundedFailureMigrationSql,
     directorSupportMigrationSql,
     toolCallsMigrationSql,
+    researcherMigrationSql,
   ];
   let destructiveSetupAllowed = false;
 
@@ -390,6 +396,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     ungroundedFailureMigrationSql = await readFile(ungroundedFailureMigrationPath, "utf8");
     directorSupportMigrationSql = await readFile(directorSupportMigrationPath, "utf8");
     toolCallsMigrationSql = await readFile(toolCallsMigrationPath, "utf8");
+    researcherMigrationSql = await readFile(researcherMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -1420,6 +1427,15 @@ describePostgres("PostgreSQL persistence repositories", () => {
   describe("Agent Profiles", () => {
     const BUILT_INS: readonly AgentProfile[] = [
       {
+        id: agentProfileId("storyrail-researcher-v1"),
+        role: "researcher",
+        name: "Researcher",
+        instructions:
+          "Widen the evidence behind a Story. Follow what the supplied evidence points at, retrieve material that corroborates, dates, or complicates it, and attach only what a reporter would actually cite. Never attach a page you did not retrieve.",
+        model: null,
+        builtIn: true,
+      },
+      {
         id: agentProfileId("storyrail-assignment-editor-v1"),
         role: "assignment_editor",
         name: "Assignment Editor",
@@ -1448,7 +1464,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       },
     ];
 
-    it("seeds the three stable built-in identities in presentation order", async () => {
+    it("seeds the stable built-in identities in the order the newsroom works", async () => {
       await expect(createPostgresAgentProfileRepository({ pool }).list()).resolves.toEqual(
         BUILT_INS,
       );

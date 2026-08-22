@@ -66,11 +66,13 @@ export function createPostgresAgentProfileRepository(options: {
         `SELECT profile_id, role, built_in, payload
          FROM storyrail.agent_profiles
          ORDER BY
+           -- Built-ins read in the order the newsroom works, not alphabetically.
            CASE profile_id
-             WHEN 'storyrail-assignment-editor-v1' THEN 1
-             WHEN 'storyrail-general-writer-v1' THEN 2
-             WHEN 'storyrail-director-v1' THEN 3
-             ELSE 4
+             WHEN 'storyrail-researcher-v1' THEN 1
+             WHEN 'storyrail-assignment-editor-v1' THEN 2
+             WHEN 'storyrail-general-writer-v1' THEN 3
+             WHEN 'storyrail-director-v1' THEN 4
+             ELSE 5
            END,
            payload ->> 'name' COLLATE "C" ASC,
            profile_id ASC`,

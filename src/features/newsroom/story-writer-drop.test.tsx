@@ -85,6 +85,10 @@ function requests(): StoryClient {
       kind: "unavailable",
       message: STORY_REQUEST_UNAVAILABLE_MESSAGE,
     })),
+    startSourceResearch: vi.fn<StoryClient["startSourceResearch"]>(async () => ({
+      kind: "unavailable",
+      message: STORY_REQUEST_UNAVAILABLE_MESSAGE,
+    })),
     startAutopilot: vi.fn<StoryClient["startAutopilot"]>(async () => ({
       kind: "unavailable",
       message: STORY_REQUEST_UNAVAILABLE_MESSAGE,

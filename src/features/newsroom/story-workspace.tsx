@@ -862,6 +862,8 @@ export function StoryWorkspace({
   const [rejectionReason, setRejectionReason] = useState("");
   const [rejectionStatus, setRejectionStatus] = useState<string | null>(null);
   const [runs, setRuns] = useState<readonly AgentRun[]>(agentRuns);
+  const [researchPending, setResearchPending] = useState(false);
+  const [researchStatus, setResearchStatus] = useState<string | null>(null);
   const [autopilotPending, setAutopilotPending] = useState(false);
   const [autopilotStatus, setAutopilotStatus] = useState<string | null>(null);
   // What autopilot looked like when it was last seen moving. The durable record is the only
@@ -891,6 +893,7 @@ export function StoryWorkspace({
     [runningOperations],
   );
   const proposalRunning = proposalPending || isRunning("assignment_editor", "assignment_proposal");
+  const researchRunning = researchPending || isRunning("researcher", "source_research");
   const draftRunning = writerPending || isRunning("writer", "article_draft");
   const revisionRunning = writerPending || isRunning("writer", "article_revision");
   const directorRunning = directorPending || isRunning("editor_in_chief", "article_review");
@@ -1191,6 +1194,33 @@ export function StoryWorkspace({
     };
   }, [autopilotWatch, requests, story.id, onReviewStateChanged]);
 
+  async function findMoreSources() {
+    if (researchPending) return;
+    setResearchPending(true);
+    setResearchStatus("Researcher is looking for corroborating Sources…");
+    try {
+      const result = await requests.startSourceResearch(story.id);
+      if (result.kind !== "completed") {
+        setResearchStatus(
+          result.kind === "application-failure"
+            ? `Research could not start: ${result.error.message}`
+            : "Research could not be started. Reopen this Story to check.",
+        );
+        return;
+      }
+      // Retrieval takes as long as the pages do, so the Story is followed rather than waited on.
+      setAutopilotWatch({
+        priorRunIds: new Set(runs.map((run) => run.id)),
+        progress: autopilotProgress({ story, agentRuns: runs }),
+        observedAt: Date.now(),
+      });
+    } catch {
+      setResearchStatus("Research could not be started. Reopen this Story to check.");
+    } finally {
+      setResearchPending(false);
+    }
+  }
+
   async function startAutopilot() {
     if (autopilotPending || autopilotRunning) return;
     setAutopilotPending(true);
@@ -1381,6 +1411,14 @@ export function StoryWorkspace({
       {notice ? (
         <p role="status" className={styles.workspaceNotice}>
           {notice}
+        </p>
+      ) : null}
+      {researchStatus ? (
+        <p
+          role={researchStatus.startsWith("Research could not") ? "alert" : "status"}
+          className={styles.workspaceNotice}
+        >
+          {researchStatus}
         </p>
       ) : null}
       {autopilotStatus ? (
@@ -1932,6 +1970,14 @@ export function StoryWorkspace({
                     onClick={() => setEditingAssignment(true)}
                   >
                     Assign manually
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.secondaryAction}
+                    disabled={researchPending || researchRunning}
+                    onClick={() => void findMoreSources()}
+                  >
+                    {researchRunning ? "Researcher is working…" : "Find more Sources"}
                   </button>
                   <button
                     type="button"
