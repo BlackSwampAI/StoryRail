@@ -133,6 +133,10 @@ const researcherMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0059-researcher-role.sql",
 );
+const citationCorrectionMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0060-writer-citation-correction.sql",
+);
 
 const OPERATOR: OperatorActor = {
   type: "operator",
@@ -352,6 +356,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let directorSupportMigrationSql: string;
   let toolCallsMigrationSql: string;
   let researcherMigrationSql: string;
+  let citationCorrectionMigrationSql: string;
 
   /** Every migration, in order. One list so a rebuild can never drift from the first build. */
   const orderedMigrations = (): readonly string[] => [
@@ -374,6 +379,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     directorSupportMigrationSql,
     toolCallsMigrationSql,
     researcherMigrationSql,
+    citationCorrectionMigrationSql,
   ];
   let destructiveSetupAllowed = false;
 
@@ -397,6 +403,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     directorSupportMigrationSql = await readFile(directorSupportMigrationPath, "utf8");
     toolCallsMigrationSql = await readFile(toolCallsMigrationPath, "utf8");
     researcherMigrationSql = await readFile(researcherMigrationPath, "utf8");
+    citationCorrectionMigrationSql = await readFile(citationCorrectionMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -1342,6 +1349,37 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await expect(accepts("MODEL_OUTPUT_UNGROUNDED")).resolves.toBe(true);
       await expect(accepts("MODEL_OUTPUT_INVALID")).resolves.toBe(true);
       await expect(accepts("MODEL_OUTPUT_UNSUPPORTED")).resolves.toBe(false);
+    });
+
+    it("records a corrected draft as corrected, never as a clean one", async () => {
+      const shape = (payload: Record<string, unknown>) =>
+        pool
+          .query<{ valid: boolean }>(
+            `SELECT $1::jsonb - ARRAY['id','storyId','profileId','role','operation','model','prompt','requestedBy','startedAt','completedAt','input','outcome','articleId','revisionId','corrected'] = '{}'::jsonb
+               AND (
+                 NOT $1::jsonb ? 'corrected'
+                 OR storyrail.grounding_findings_are_valid($1::jsonb -> 'corrected')
+               ) AS valid`,
+            [JSON.stringify(payload)],
+          )
+          .then((result) => result.rows[0]?.valid);
+      const finding = {
+        blockIndex: 0,
+        citationIndex: 0,
+        code: "CITATION_QUOTE_UNSUPPORTED",
+        quote: "Never written anywhere",
+        evidenceId: "prepared-a",
+      };
+
+      await expect(shape({ articleId: "a", revisionId: "r" })).resolves.toBe(true);
+      await expect(shape({ articleId: "a", revisionId: "r", corrected: [finding] })).resolves.toBe(
+        true,
+      );
+      // An empty correction record would say a correction happened and name none of it.
+      await expect(shape({ articleId: "a", revisionId: "r", corrected: [] })).resolves.toBe(false);
+      await expect(
+        shape({ articleId: "a", revisionId: "r", corrected: [{ ...finding, quote: "  " }] }),
+      ).resolves.toBe(false);
     });
 
     it("requires every Director check to point at the passage it judged", async () => {

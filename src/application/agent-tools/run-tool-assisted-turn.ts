@@ -68,11 +68,15 @@ export async function runToolAssisted<Output>(
   let used = 0;
 
   for (let turn = 0; turn < options.maximumTurns; turn += 1) {
+    // A model that spends its last turn asking for another tool has nothing left to answer
+    // with, and reporting that as a bad response blames it for a budget we set. On the final
+    // turn, and once the calls are spent, no tools are offered — so the only move is to answer.
+    const exhausted = used >= options.maximumCalls || turn === options.maximumTurns - 1;
     const generated = await options.model.generateWithTools({
       systemPrompt: options.systemPrompt,
       input: options.input,
       schema: options.schema,
-      tools: options.registry.declarations,
+      tools: exhausted ? [] : options.registry.declarations,
       transcript,
     });
     if (!generated.ok) return { result: generated, calls: recorded };

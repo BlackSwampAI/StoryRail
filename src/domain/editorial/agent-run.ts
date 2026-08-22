@@ -95,6 +95,16 @@ export function recordAgentRun(candidate: AgentRun): RecordAgentRunResult {
     return invalid("AGENT_RUN_OUTCOME_INVALID", "AgentRun timestamps must be non-empty.");
   }
   if (candidate.role === "writer") {
+    if (
+      candidate.outcome === "succeeded" &&
+      candidate.corrected !== undefined &&
+      (!Array.isArray(candidate.corrected) || candidate.corrected.length === 0)
+    ) {
+      return invalid(
+        "AGENT_RUN_OUTCOME_INVALID",
+        "A recorded correction must say which citations were corrected.",
+      );
+    }
     const assignment = candidate.input.assignment;
     if (
       assignment.storyId !== candidate.storyId ||

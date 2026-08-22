@@ -5,12 +5,12 @@ import type { StoryInspectionRepository } from "@/application/story-inspection";
 import {
   articleBlockOutputSchema,
   citedArticleBlocks,
+  correctedCitedBlocks,
   type WriterModelResolution,
 } from "@/application/writer-drafts";
 import {
   createArticleRevision,
   articleBodyMarkdown,
-  verifyArticleGrounding,
   recordAgentRun,
   transitionStory,
   type AgentRun,
@@ -328,13 +328,19 @@ export function createWriterRevision(dependencies: {
     // The run is durable now, so the caller can stop waiting. Only the model call and the
     // completion it produces continue past this point.
     const completion = (async (): Promise<CreateWriterRevisionResult> => {
+      const modelInput = {
+        ...input,
+        evidence: selected.map(({ reference, document }) => ({ ...reference, document })),
+      };
+      const groundingEvidence = selected.map(({ reference, document }) => ({
+        sourceId: reference.sourceId,
+        evidenceId: reference.evidenceId,
+        content: (document as { readonly content: string }).content,
+      }));
       const generated = await resolved.model
         .generateStructured({
           systemPrompt: writerRevisionSystemPrompt(writerProfile.instructions),
-          input: {
-            ...input,
-            evidence: selected.map(({ reference, document }) => ({ ...reference, document })),
-          },
+          input: modelInput,
           schema: writerRevisionOutputSchema,
         })
         .catch(() => ({
@@ -345,20 +351,21 @@ export function createWriterRevision(dependencies: {
       const common = { ...identity, completedAt };
       const parsed = generated.ok ? writerRevisionOutputSchema.safeParse(generated.output) : null;
       // A revision is held to the same standard as the draft it replaces: every claim it makes
-      // must be supported by the evidence it cites, checked before anything durable is written.
-      const blocks = parsed?.success ? citedArticleBlocks(parsed.data.blocks) : null;
-      const grounding =
-        blocks === null
-          ? null
-          : verifyArticleGrounding(
-              blocks,
-              selected.map(({ reference, document }) => ({
-                sourceId: reference.sourceId,
-                evidenceId: reference.evidenceId,
-                content: (document as { readonly content: string }).content,
-              })),
-            );
-      if (!generated.ok || !parsed?.success || blocks === null || grounding?.ok !== true) {
+      // must be supported by the evidence it cites, checked before anything durable is written,
+      // with the same single chance to correct citations it got wrong.
+      const settled = parsed?.success
+        ? await correctedCitedBlocks({
+            model: resolved.model,
+            systemPrompt: writerRevisionSystemPrompt(writerProfile.instructions),
+            input: modelInput,
+            schema: writerRevisionOutputSchema,
+            evidence: groundingEvidence,
+            toBlocks: (output) => citedArticleBlocks(output.blocks),
+            first: { ok: true, output: parsed.data },
+          })
+        : null;
+      const blocks = settled?.ok === true ? settled.blocks : null;
+      if (!generated.ok || !parsed?.success || settled?.ok !== true || blocks === null) {
         const recorded = recordAgentRun({
           ...common,
           outcome: "failed",
@@ -368,7 +375,10 @@ export function createWriterRevision(dependencies: {
               ? {
                   code: "MODEL_OUTPUT_UNGROUNDED",
                   retryable: true,
-                  findings: grounding?.ok === false ? grounding.findings : undefined,
+                  findings:
+                    settled !== null && settled.ok === false && "findings" in settled
+                      ? settled.findings
+                      : undefined,
                 }
               : { code: "MODEL_OUTPUT_INVALID", retryable: false },
         });
@@ -411,6 +421,7 @@ export function createWriterRevision(dependencies: {
         outcome: "succeeded",
         articleId: article.article.id,
         revisionId,
+        ...(settled.corrected === null ? {} : { corrected: settled.corrected }),
       });
       if (
         !runResult.ok ||

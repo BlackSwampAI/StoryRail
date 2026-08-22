@@ -9,7 +9,6 @@ import {
   createFirstArticleRevision,
   sourceEvidencePreparationId,
   sourceId,
-  verifyArticleGrounding,
   type ArticleBlock,
   recordAgentRun,
   transitionStory,
@@ -24,6 +23,7 @@ import {
   type TransitionId,
 } from "@/domain/editorial";
 
+import { correctedCitedBlocks } from "./correct-cited-blocks";
 import type { WriterDraftPersistence } from "./writer-draft-persistence";
 
 export const WRITER_DRAFT_PROMPT = Object.freeze({ key: "storyrail_writer_draft", version: "1" });
@@ -305,20 +305,26 @@ export function createWriterDraft(dependencies: {
     // The run is durable now, so the caller can stop waiting. Only the model call and the
     // completion it produces continue past this point.
     const completion = (async (): Promise<CreateWriterDraftResult> => {
+      const modelInput = {
+        story: {
+          id: story.id,
+          title: story.title,
+          state: story.state,
+          revisionCycle: story.revisionCycle,
+        },
+        assignment,
+        evidence: selected.map(({ reference, document }) => ({ ...reference, document })),
+        unavailableSourceIds,
+      };
+      const groundingEvidence = selected.map(({ reference, document }) => ({
+        sourceId: reference.sourceId,
+        evidenceId: reference.evidenceId,
+        content: (document as { readonly content: string }).content,
+      }));
       const generated = await resolved.model
         .generateStructured({
           systemPrompt: writerSystemPrompt(writerProfile.instructions),
-          input: {
-            story: {
-              id: story.id,
-              title: story.title,
-              state: story.state,
-              revisionCycle: story.revisionCycle,
-            },
-            assignment,
-            evidence: selected.map(({ reference, document }) => ({ ...reference, document })),
-            unavailableSourceIds,
-          },
+          input: modelInput,
           schema: writerDraftOutputSchema,
         })
         .catch(() => ({
@@ -330,20 +336,21 @@ export function createWriterDraft(dependencies: {
       const parsed = generated.ok ? writerDraftOutputSchema.safeParse(generated.output) : null;
       // A well-formed draft still has to be supported by the evidence it cites. Checking that
       // here, before anything durable is written, is what keeps an unverifiable claim out of the
-      // record entirely rather than leaving it for a reader to catch.
-      const blocks = parsed?.success ? citedArticleBlocks(parsed.data.blocks) : null;
-      const grounding =
-        blocks === null
-          ? null
-          : verifyArticleGrounding(
-              blocks,
-              selected.map(({ reference, document }) => ({
-                sourceId: reference.sourceId,
-                evidenceId: reference.evidenceId,
-                content: (document as { readonly content: string }).content,
-              })),
-            );
-      if (!generated.ok || !parsed?.success || blocks === null || grounding?.ok !== true) {
+      // record entirely rather than leaving it for a reader to catch. The Writer gets one
+      // chance to correct citations it got wrong, told exactly which ones.
+      const settled = parsed?.success
+        ? await correctedCitedBlocks({
+            model: resolved.model,
+            systemPrompt: writerSystemPrompt(writerProfile.instructions),
+            input: modelInput,
+            schema: writerDraftOutputSchema,
+            evidence: groundingEvidence,
+            toBlocks: (output) => citedArticleBlocks(output.blocks),
+            first: { ok: true, output: parsed.data },
+          })
+        : null;
+      const blocks = settled?.ok === true ? settled.blocks : null;
+      if (!generated.ok || !parsed?.success || settled?.ok !== true || blocks === null) {
         const candidate: AgentRun = {
           ...common,
           outcome: "failed",
@@ -353,7 +360,10 @@ export function createWriterDraft(dependencies: {
               ? {
                   code: "MODEL_OUTPUT_UNGROUNDED",
                   retryable: true,
-                  findings: grounding?.ok === false ? grounding.findings : undefined,
+                  findings:
+                    settled !== null && settled.ok === false && "findings" in settled
+                      ? settled.findings
+                      : undefined,
                 }
               : { code: "MODEL_OUTPUT_INVALID", retryable: false },
         };
@@ -398,7 +408,13 @@ export function createWriterDraft(dependencies: {
       });
       if (!articleResult.ok || !revisionResult.ok || !transition.ok)
         throw new Error("The application produced invalid Writer draft state.");
-      const runResult = recordAgentRun({ ...common, outcome: "succeeded", articleId, revisionId });
+      const runResult = recordAgentRun({
+        ...common,
+        outcome: "succeeded",
+        articleId,
+        revisionId,
+        ...(settled.corrected === null ? {} : { corrected: settled.corrected }),
+      });
       if (
         !runResult.ok ||
         runResult.run.role !== "writer" ||
