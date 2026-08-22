@@ -14,6 +14,9 @@ export const MODEL_FAILURE_CODES = [
   "MODEL_REQUEST_FAILED",
   "MODEL_RESPONSE_REJECTED",
   "MODEL_OUTPUT_INVALID",
+  // The response was well formed but cited evidence that does not support it. Distinct from an
+  // invalid shape: the model answered correctly and the answer was not grounded.
+  "MODEL_OUTPUT_UNGROUNDED",
 ] as const;
 
 export type ModelFailureCode = (typeof MODEL_FAILURE_CODES)[number];
