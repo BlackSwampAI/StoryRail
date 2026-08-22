@@ -2038,6 +2038,46 @@
   margin-top: 1.5rem;
 }
 
+/* Two numbers that qualify the Article above them, so neither is read without the other. */
+.groundingSummary {
+  margin: 0 0 1.75rem;
+  border: 1px solid var(--tone-48);
+  border-left: 3px solid var(--tone-97);
+  border-radius: 0.5rem;
+  background: rgb(var(--veil-08) / 55%);
+  padding: 0.9rem 1.15rem 1rem;
+}
+
+.groundingSummary dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 2.25rem;
+  margin: 0;
+}
+
+.groundingSummary dt {
+  color: var(--tone-97);
+  font-size: 0.66rem;
+  font-weight: 750;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.groundingSummary dd {
+  margin: 0.2rem 0 0;
+  color: var(--tone-152);
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.groundingSummary p {
+  margin: 0.75rem 0 0;
+  color: var(--tone-97);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
 /* A refused draft has to show the passage it could not support, not just that it failed. */
 .groundingFindings {
   grid-column: 1 / -1;

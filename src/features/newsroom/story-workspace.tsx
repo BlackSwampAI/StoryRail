@@ -22,6 +22,8 @@ function isSuccessfulProposal(
   return run.role === "assignment_editor" && run.outcome === "succeeded";
 }
 
+import { measureRevisionGrounding } from "@/application/article-grounding";
+
 import { ArticleReader } from "./article-reader";
 import { EditorialTaskPending } from "./editorial-task-pending";
 import { modelFailureMessage } from "./model-failure";
@@ -1404,6 +1406,7 @@ export function StoryWorkspace({
               revision={latestRevision}
               writerName={assignment?.writerProfile.name ?? "Writer"}
               headingId="current-task-heading"
+              measurement={measureRevisionGrounding(inspection, latestRevision)}
             />
             {story.state === "changes_requested" && revisionRunning ? (
               <EditorialTaskPending
