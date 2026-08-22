@@ -2038,6 +2038,95 @@
   margin-top: 1.5rem;
 }
 
+/* The Story's working record: every step in the order it happened, refusals included. */
+.ledger {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 2rem;
+}
+
+.ledgerList,
+.revisionSteps {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0.5rem 0 1.25rem;
+  padding: 0;
+  list-style: none;
+}
+
+.ledgerList li,
+.revisionSteps li {
+  border-left: 2px solid var(--tone-48);
+  padding: 0.7rem 0 0.7rem 1rem;
+}
+
+.ledgerList li[data-outcome="failed"] {
+  border-left-color: var(--tone-152);
+}
+
+.ledgerList li[data-outcome="running"] {
+  border-left-style: dashed;
+}
+
+.ledgerTitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0;
+  color: var(--tone-152);
+  font-weight: 600;
+}
+
+.ledgerTitle em {
+  border: 1px solid var(--tone-97);
+  border-radius: 999px;
+  padding: 0 0.5rem;
+  color: var(--tone-97);
+  font-size: 0.65rem;
+  font-style: normal;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.ledgerDetail {
+  margin: 0.3rem 0 0;
+  font-size: 0.85rem;
+}
+
+.ledgerMeta {
+  margin: 0.3rem 0 0;
+  color: var(--tone-97);
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+}
+
+.ledgerFailure {
+  margin-top: 0.45rem;
+  border-left: 2px solid var(--tone-97);
+  padding-left: 0.75rem;
+  font-size: 0.8rem;
+}
+
+.ledgerFailure p {
+  margin: 0 0 0.3rem;
+}
+
+.ledgerFailure ul {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0;
+  padding-left: 1rem;
+}
+
+.ledgerFailure q {
+  font-style: italic;
+  overflow-wrap: anywhere;
+}
+
 /* Each check shows the passage it judged, so a review cannot be read without its evidence. */
 .checkQuoted {
   display: block;

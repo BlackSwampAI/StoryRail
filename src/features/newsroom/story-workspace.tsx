@@ -23,8 +23,10 @@ function isSuccessfulProposal(
 }
 
 import { measureRevisionGrounding } from "@/application/article-grounding";
+import { editorialLedger, revisionHistory } from "@/application/editorial-ledger";
 
 import { ArticleReader } from "./article-reader";
+import { EditorialLedger } from "./editorial-ledger-panel";
 import { EditorialTaskPending } from "./editorial-task-pending";
 import { modelFailureMessage } from "./model-failure";
 
@@ -533,6 +535,10 @@ function AuditPanel({
         <span>{transitions.length + runs.length + reviewDecisions.length} records</span>
       </summary>
       <div className={styles.secondaryPanelContent}>
+        <EditorialLedger
+          entries={editorialLedger({ ...inspection, agentRuns: runs })}
+          revisions={revisionHistory({ ...inspection, agentRuns: runs })}
+        />
         <section aria-labelledby="story-audit-heading">
           <h4 id="story-audit-heading">Technical Story details</h4>
           <dl className={styles.auditGrid}>
