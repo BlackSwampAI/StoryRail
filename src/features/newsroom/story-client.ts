@@ -1,4 +1,5 @@
 import {
+  ARTICLE_BLOCK_KINDS,
   SOURCE_EXTRACTION_FAILURE_CODES,
   PREPARATION_FAILURE_CODES,
   MODEL_FAILURE_CODES,
@@ -7,6 +8,7 @@ import {
   type Assignment,
   type AgentRun,
   type Article,
+  type ArticleBlock,
   type ArticleRevision,
   type ReviewDecision,
   type SourceExtraction,
@@ -818,6 +820,29 @@ function isWriterAgentRun(value: unknown): value is AgentRun {
         typeof value.failure.retryable === "boolean";
 }
 
+function isArticleBlock(value: unknown): value is ArticleBlock {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ["kind", "markdown", "citations"]) &&
+    (ARTICLE_BLOCK_KINDS as readonly string[]).includes(value.kind as string) &&
+    isString(value.markdown) &&
+    value.markdown.trim().length > 0 &&
+    Array.isArray(value.citations) &&
+    value.citations.every(
+      (citation) =>
+        isRecord(citation) &&
+        hasExactKeys(citation, ["sourceId", "evidenceId", "quote"]) &&
+        isString(citation.sourceId) &&
+        isString(citation.evidenceId) &&
+        isString(citation.quote) &&
+        citation.quote.trim().length > 0,
+    ) &&
+    // A claim states something the evidence supports and must say where; anything else is the
+    // Writer's own prose and must not carry attribution.
+    (value.kind === "claim" ? value.citations.length > 0 : value.citations.length === 0)
+  );
+}
+
 function isArticle(value: unknown): value is Article {
   return (
     isRecord(value) &&
@@ -840,7 +865,7 @@ function isArticleRevision(value: unknown): value is ArticleRevision {
       "agentRunId",
       "headline",
       "dek",
-      "bodyMarkdown",
+      "blocks",
       "createdBy",
       "createdAt",
     ]) &&
@@ -854,8 +879,9 @@ function isArticleRevision(value: unknown): value is ArticleRevision {
     isString(value.headline) &&
     value.headline.trim().length > 0 &&
     isStringOrNull(value.dek) &&
-    isString(value.bodyMarkdown) &&
-    value.bodyMarkdown.trim().length > 0 &&
+    Array.isArray(value.blocks) &&
+    value.blocks.length > 0 &&
+    value.blocks.every(isArticleBlock) &&
     isActor(value.createdBy) &&
     value.createdBy.type === "agent" &&
     value.createdBy.role === "writer" &&

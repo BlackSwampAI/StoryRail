@@ -5,6 +5,7 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  articleBodyMarkdown,
   agentRunId,
   agentProfileId,
   assignmentId,
@@ -109,6 +110,10 @@ const modelQuotaMigrationPath = resolve(
 const inFlightRunMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0054-agent-run-in-flight.sql",
+);
+const citedBlocksMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0055-cited-article-blocks.sql",
 );
 
 const OPERATOR: OperatorActor = {
@@ -324,6 +329,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let preparationInputMigrationSql: string;
   let modelQuotaMigrationSql: string;
   let inFlightRunMigrationSql: string;
+  let citedBlocksMigrationSql: string;
   let destructiveSetupAllowed = false;
 
   beforeAll(async () => {
@@ -341,6 +347,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     preparationInputMigrationSql = await readFile(preparationInputMigrationPath, "utf8");
     modelQuotaMigrationSql = await readFile(modelQuotaMigrationPath, "utf8");
     inFlightRunMigrationSql = await readFile(inFlightRunMigrationPath, "utf8");
+    citedBlocksMigrationSql = await readFile(citedBlocksMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -371,6 +378,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await client.query(preparationInputMigrationSql);
       await client.query(modelQuotaMigrationSql);
       await client.query(inFlightRunMigrationSql);
+      await client.query(citedBlocksMigrationSql);
     } finally {
       client.release();
     }
@@ -904,7 +912,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         agentRunId: runIdentity,
         headline: "Durable headline",
         dek: null,
-        bodyMarkdown: "Durable body",
+        blocks: [{ kind: "context" as const, markdown: "Durable body", citations: [] }],
         createdBy: actor,
         createdAt: completedAt,
       };
@@ -1028,7 +1036,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
             agentRunId: revision.agentRunId,
             headline: revision.headline,
             dek: revision.dek,
-            bodyMarkdown: revision.bodyMarkdown,
+            bodyMarkdown: articleBodyMarkdown(revision.blocks),
           },
           evidence: run.input.evidence,
           unavailableSourceIds: run.input.unavailableSourceIds,
@@ -1117,6 +1125,62 @@ describePostgres("PostgreSQL persistence repositories", () => {
           transitionReceipt: decisionReceipt,
         }),
       ).resolves.toMatchObject({ ok: false });
+    });
+  });
+
+  describe("Article block grounding constraints", () => {
+    // The rule that a claim must say where it came from is enforced by the database, not only
+    // by the domain, so no write path can record an unverifiable assertion.
+    const blocks = (value: unknown) =>
+      pool
+        .query<{ valid: boolean }>(
+          "SELECT storyrail.article_blocks_are_valid($1::jsonb) AS valid",
+          [JSON.stringify(value)],
+        )
+        .then((result) => result.rows[0]?.valid);
+
+    const citation = {
+      sourceId: "source-blocks",
+      evidenceId: "preparation-blocks",
+      quote: "Rust 2024 marks the largest edition released to date",
+    };
+
+    it("accepts a claim carrying a complete citation", async () => {
+      await expect(
+        blocks([
+          { kind: "heading", markdown: "What happened", citations: [] },
+          { kind: "claim", markdown: "The edition is the largest so far.", citations: [citation] },
+          { kind: "context", markdown: "The release lands as expected.", citations: [] },
+        ]),
+      ).resolves.toBe(true);
+    });
+
+    it("refuses a claim that cites nothing", async () => {
+      await expect(
+        blocks([{ kind: "claim", markdown: "An unsupported assertion.", citations: [] }]),
+      ).resolves.toBe(false);
+    });
+
+    it("refuses attribution attached to prose that claims nothing", async () => {
+      await expect(
+        blocks([{ kind: "context", markdown: "Connective prose.", citations: [citation] }]),
+      ).resolves.toBe(false);
+    });
+
+    it("refuses an incomplete citation, an unknown kind, and an empty list", async () => {
+      await expect(
+        blocks([
+          {
+            kind: "claim",
+            markdown: "An assertion.",
+            citations: [{ ...citation, quote: "  " }],
+          },
+        ]),
+      ).resolves.toBe(false);
+      await expect(blocks([{ kind: "footnote", markdown: "Text", citations: [] }])).resolves.toBe(
+        false,
+      );
+      await expect(blocks([])).resolves.toBe(false);
     });
   });
 

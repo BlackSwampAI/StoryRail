@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import {
+  ARTICLE_BLOCK_KINDS,
   createArticle,
   createArticleRevision,
   type Article,
@@ -8,6 +9,16 @@ import {
 } from "@/domain/editorial";
 
 const nonEmpty = z.string().refine((value) => value.trim().length > 0 && value === value.trim());
+const citationSchema = z
+  .object({ sourceId: nonEmpty, evidenceId: nonEmpty, quote: nonEmpty })
+  .strict();
+const blockSchema = z
+  .object({
+    kind: z.enum(ARTICLE_BLOCK_KINDS),
+    markdown: nonEmpty,
+    citations: z.array(citationSchema),
+  })
+  .strict();
 const articleSchema = z
   .object({ id: nonEmpty, storyId: nonEmpty, assignmentId: nonEmpty, createdAt: nonEmpty })
   .strict();
@@ -20,7 +31,7 @@ const revisionSchema = z
     agentRunId: nonEmpty,
     headline: nonEmpty,
     dek: nonEmpty.nullable(),
-    bodyMarkdown: nonEmpty,
+    blocks: z.array(blockSchema).min(1),
     createdBy: z
       .object({ type: z.literal("agent"), role: z.literal("writer"), runId: nonEmpty })
       .strict(),
@@ -72,7 +83,8 @@ export function decodePostgresArticleRevision(row: {
     parsed.data.agentRunId !== row.agent_run_id
   )
     throw new PostgresArticleInvariantError();
-  const created = createArticleRevision(parsed.data as ArticleRevision);
+  // Identifiers are branded at the domain boundary; the decoded row carries plain strings.
+  const created = createArticleRevision(parsed.data as unknown as ArticleRevision);
   if (!created.ok) throw new PostgresArticleInvariantError();
   return created.revision;
 }

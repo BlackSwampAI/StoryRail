@@ -68,7 +68,7 @@ function fixture() {
     agentRunId: agentRunId("writer-run-38"),
     headline: "Headline",
     dek: null,
-    bodyMarkdown: "Body",
+    blocks: [{ kind: "context" as const, markdown: "Body", citations: [] }],
     createdBy: {
       type: "agent" as const,
       role: "writer" as const,

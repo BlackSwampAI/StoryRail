@@ -5,6 +5,7 @@ import { settleAgentRun } from "@/test/settle-agent-run";
 import type { StructuredModel, StructuredModelRequest } from "@/application/model";
 import type { StoryInspection } from "@/application/story-inspection";
 import {
+  articleBodyMarkdown,
   agentProfileId,
   agentRunId,
   articleId,
@@ -64,7 +65,7 @@ function fixture(): StoryInspection {
     agentRunId: agentRunId("writer-run-1-41"),
     headline: "Original headline",
     dek: null,
-    bodyMarkdown: "Original body.",
+    blocks: [{ kind: "context" as const, markdown: "Original body.", citations: [] }],
     createdBy: {
       type: "agent" as const,
       role: "writer" as const,
@@ -142,7 +143,7 @@ function fixture(): StoryInspection {
         agentRunId: revision.agentRunId,
         headline: revision.headline,
         dek: null,
-        bodyMarkdown: revision.bodyMarkdown,
+        bodyMarkdown: articleBodyMarkdown(revision.blocks),
       },
       evidence: [reference],
       unavailableSourceIds: [],

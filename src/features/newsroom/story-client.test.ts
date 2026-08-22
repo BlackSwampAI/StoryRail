@@ -268,6 +268,62 @@ describe("story-client", () => {
     expect(fetch).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    [
+      "a claim that cites nothing",
+      [{ kind: "claim", markdown: "An unsupported assertion.", citations: [] }],
+    ],
+    [
+      "attribution on prose that claims nothing",
+      [
+        {
+          kind: "context",
+          markdown: "Connective prose.",
+          citations: [{ sourceId: "s", evidenceId: "e", quote: "Quoted" }],
+        },
+      ],
+    ],
+    ["an unknown block kind", [{ kind: "footnote", markdown: "Text", citations: [] }]],
+    ["an empty block list", []],
+  ])("refuses an Article Revision carrying %s", async (_label, blocks) => {
+    // The workspace treats an inspection it cannot validate as unavailable rather than
+    // rendering an Article whose grounding claims do not hold together.
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(200, {
+        ok: true,
+        inspection: {
+          ...INSPECTION,
+          article: {
+            article: {
+              id: "article-client",
+              storyId: STORY.id,
+              assignmentId: "assignment-client",
+              createdAt: "drafted",
+            },
+            revisions: [
+              {
+                id: "revision-client",
+                articleId: "article-client",
+                revisionNumber: 1,
+                writerProfileId: "writer-client",
+                agentRunId: "run-client",
+                headline: "Headline",
+                dek: null,
+                blocks,
+                createdBy: { type: "agent", role: "writer", runId: "run-client" },
+                createdAt: "drafted",
+              },
+            ],
+          },
+        },
+      }),
+    );
+
+    await expect(createStoryClient({ fetch }).inspectStory(STORY.id)).resolves.toMatchObject({
+      kind: "unavailable",
+    });
+  });
+
   it("parses zero extractions, exact Markdown, nullable metadata, and failed evidence", async () => {
     const inspections = [
       {

@@ -5,6 +5,8 @@ import type { StoryInspectionRepository } from "@/application/story-inspection";
 import type { WriterModelResolution } from "@/application/writer-drafts";
 import {
   createArticleRevision,
+  unattributedArticleBlocks,
+  articleBodyMarkdown,
   recordAgentRun,
   transitionStory,
   type AgentRun,
@@ -273,7 +275,7 @@ export function createWriterRevision(dependencies: {
         agentRunId: revision.agentRunId,
         headline: revision.headline,
         dek: revision.dek,
-        bodyMarkdown: revision.bodyMarkdown,
+        bodyMarkdown: articleBodyMarkdown(revision.blocks),
       },
       directorReview: directorRun.review,
       reviewDecision: decision,
@@ -356,7 +358,9 @@ export function createWriterRevision(dependencies: {
         revisionNumber: (revision.revisionNumber + 1) as 2 | 3,
         writerProfileId: writerProfile.id,
         agentRunId: id,
-        ...parsed.data,
+        headline: parsed.data.headline,
+        dek: parsed.data.dek,
+        blocks: unattributedArticleBlocks(parsed.data.bodyMarkdown),
         createdBy: actor,
         createdAt: occurredAt,
       });
