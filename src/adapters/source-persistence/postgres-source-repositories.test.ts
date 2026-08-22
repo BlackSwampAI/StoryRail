@@ -7,6 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   articleBodyMarkdown,
   agentRunId,
+  agentToolCallId,
   agentProfileId,
   assignmentId,
   articleId,
@@ -52,6 +53,7 @@ import { createPostgresSourceTriageDecisionRepository } from "../source-triage-p
 import { createPostgresSourceEvidencePreparationRepository } from "../source-evidence-preparation-persistence/postgres-source-evidence-preparation-repository";
 import { createPostgresAgentProfileRepository } from "../agent-profile-persistence/postgres-agent-profile-repository";
 import { createPostgresAssignmentPersistence } from "../assignment-persistence/postgres-assignment-persistence";
+import { createPostgresAgentToolCallRepository } from "@/adapters/agent-tool-call-persistence";
 import { createPostgresAgentRunRepository } from "../agent-run-persistence/postgres-agent-run-repository";
 import { createPostgresWriterDraftPersistence } from "../article-persistence/postgres-writer-draft-persistence";
 import {
@@ -122,6 +124,10 @@ const ungroundedFailureMigrationPath = resolve(
 const directorSupportMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0057-director-support-check.sql",
+);
+const toolCallsMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0058-agent-tool-calls.sql",
 );
 
 const OPERATOR: OperatorActor = {
@@ -340,6 +346,29 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let citedBlocksMigrationSql: string;
   let ungroundedFailureMigrationSql: string;
   let directorSupportMigrationSql: string;
+  let toolCallsMigrationSql: string;
+
+  /** Every migration, in order. One list so a rebuild can never drift from the first build. */
+  const orderedMigrations = (): readonly string[] => [
+    sourceMigrationSql,
+    storyMigrationSql,
+    attachmentMigrationSql,
+    triageMigrationSql,
+    preparationMigrationSql,
+    agentProfileMigrationSql,
+    assignmentMigrationSql,
+    agentRunMigrationSql,
+    writerDraftMigrationSql,
+    directorReviewMigrationSql,
+    writerRevisionMigrationSql,
+    preparationInputMigrationSql,
+    modelQuotaMigrationSql,
+    inFlightRunMigrationSql,
+    citedBlocksMigrationSql,
+    ungroundedFailureMigrationSql,
+    directorSupportMigrationSql,
+    toolCallsMigrationSql,
+  ];
   let destructiveSetupAllowed = false;
 
   beforeAll(async () => {
@@ -360,6 +389,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     citedBlocksMigrationSql = await readFile(citedBlocksMigrationPath, "utf8");
     ungroundedFailureMigrationSql = await readFile(ungroundedFailureMigrationPath, "utf8");
     directorSupportMigrationSql = await readFile(directorSupportMigrationPath, "utf8");
+    toolCallsMigrationSql = await readFile(toolCallsMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -376,23 +406,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
       destructiveSetupAllowed = true;
       await client.query("DROP SCHEMA IF EXISTS storyrail CASCADE");
-      await client.query(sourceMigrationSql);
-      await client.query(storyMigrationSql);
-      await client.query(attachmentMigrationSql);
-      await client.query(triageMigrationSql);
-      await client.query(preparationMigrationSql);
-      await client.query(agentProfileMigrationSql);
-      await client.query(assignmentMigrationSql);
-      await client.query(agentRunMigrationSql);
-      await client.query(writerDraftMigrationSql);
-      await client.query(directorReviewMigrationSql);
-      await client.query(writerRevisionMigrationSql);
-      await client.query(preparationInputMigrationSql);
-      await client.query(modelQuotaMigrationSql);
-      await client.query(inFlightRunMigrationSql);
-      await client.query(citedBlocksMigrationSql);
-      await client.query(ungroundedFailureMigrationSql);
-      await client.query(directorSupportMigrationSql);
+      for (const migration of orderedMigrations()) await client.query(migration);
     } finally {
       client.release();
     }
@@ -404,7 +418,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     }
 
     await pool.query(
-      "TRUNCATE storyrail.review_decisions, storyrail.article_revisions, storyrail.articles, storyrail.agent_runs, storyrail.story_transition_receipts, storyrail.story_assignments, storyrail.source_evidence_preparations, storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.stories RESTART IDENTITY",
+      "TRUNCATE storyrail.agent_tool_calls, storyrail.review_decisions, storyrail.article_revisions, storyrail.articles, storyrail.agent_runs, storyrail.story_transition_receipts, storyrail.story_assignments, storyrail.source_evidence_preparations, storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.stories RESTART IDENTITY",
     );
     await pool.query("DELETE FROM storyrail.agent_profiles WHERE built_in = false");
   });
@@ -537,6 +551,93 @@ describePostgres("PostgreSQL persistence repositories", () => {
       });
     });
     describeAgentRunRepositoryContract(() => createPostgresAgentRunRepository({ pool }));
+  });
+
+  describe("durable tool calls", () => {
+    // A tool call is recorded as it happens, so a run that dies part-way still shows what it
+    // had already reached for.
+    it("appends calls in order, refuses duplicates, and reads them back", async () => {
+      const story = makeStory("tool-calls");
+      await createPostgresStoryRepository({ pool }).persist({ story });
+      const run = makeAgentRun(story, "tool-calls");
+      await createPostgresAgentRunRepository({ pool }).append(run);
+      const repository = createPostgresAgentToolCallRepository({ pool });
+      const call = (sequence: number, id: string) =>
+        ({
+          id: agentToolCallId(id),
+          runId: run.id,
+          storyId: story.id,
+          sequence,
+          tool: "fetch_url",
+          request: { url: "https://example.test" },
+          requestedAt: "requested",
+          completedAt: "completed",
+          outcome: "succeeded",
+          result: { url: "https://example.test", title: null, characters: 12 },
+        }) as never;
+
+      await expect(repository.append(call(1, "tool-call-1"))).resolves.toMatchObject({ ok: true });
+      await expect(
+        repository.append({
+          ...(call(2, "tool-call-2") as unknown as Record<string, unknown>),
+          outcome: "failed",
+          result: undefined,
+          failure: { code: "TOOL_BUDGET_EXHAUSTED", retryable: false, message: null },
+        } as never),
+      ).resolves.toMatchObject({ ok: true });
+
+      await expect(repository.append(call(1, "tool-call-3"))).resolves.toMatchObject({
+        ok: false,
+        error: { code: "AGENT_TOOL_CALL_SEQUENCE_CONFLICT" },
+      });
+      await expect(repository.append(call(3, "tool-call-1"))).resolves.toMatchObject({
+        ok: false,
+        error: { code: "AGENT_TOOL_CALL_ID_CONFLICT" },
+      });
+
+      await expect(repository.listByRunId(run.id)).resolves.toMatchObject([
+        { sequence: 1, outcome: "succeeded" },
+        { sequence: 2, outcome: "failed", failure: { code: "TOOL_BUDGET_EXHAUSTED" } },
+      ]);
+    });
+
+    it("refuses a recorded result large enough to be a copy of the material", async () => {
+      const story = makeStory("tool-call-size");
+      await createPostgresStoryRepository({ pool }).persist({ story });
+      const run = makeAgentRun(story, "tool-call-size");
+      await createPostgresAgentRunRepository({ pool }).append(run);
+      const client = await pool.connect();
+
+      try {
+        await client.query("BEGIN");
+        await expect(
+          client.query(
+            `INSERT INTO storyrail.agent_tool_calls
+               (tool_call_id, run_id, story_id, sequence, tool, outcome, payload)
+             VALUES ('oversized', $1, $2, 1, 'fetch_url', 'succeeded', $3::jsonb)`,
+            [
+              run.id,
+              story.id,
+              JSON.stringify({
+                id: "oversized",
+                runId: run.id,
+                storyId: story.id,
+                sequence: 1,
+                tool: "fetch_url",
+                request: { url: "https://example.test" },
+                requestedAt: "requested",
+                completedAt: "completed",
+                outcome: "succeeded",
+                result: "x".repeat(4_001),
+              }),
+            ],
+          ),
+        ).rejects.toMatchObject({ constraint: "agent_tool_calls_payload_shape_check" });
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    });
   });
 
   describe("AgentRuns", () => {
@@ -1726,6 +1827,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       expect(tables.rows.map((row) => row.table_name)).toEqual([
         "agent_profiles",
         "agent_runs",
+        "agent_tool_calls",
         "article_revisions",
         "articles",
         "review_decisions",
@@ -2234,7 +2336,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           },
         ]),
       );
-      expect(columns.rows).toHaveLength(80);
+      expect(columns.rows).toHaveLength(88);
     });
 
     it("creates the required primary, unique, foreign-key, and check constraints", async () => {
@@ -4072,17 +4174,9 @@ describePostgres("PostgreSQL persistence repositories", () => {
           error: { code: expect.stringMatching(/^(DUPLICATE_SOURCE|SOURCE_ID_CONFLICT)$/) },
         });
       } finally {
-        await pool.query(sourceMigrationSql);
-        await pool.query(storyMigrationSql);
-        await pool.query(attachmentMigrationSql);
-        await pool.query(triageMigrationSql);
-        await pool.query(preparationMigrationSql);
-        await pool.query(agentProfileMigrationSql);
-        await pool.query(assignmentMigrationSql);
-        await pool.query(agentRunMigrationSql);
-        await pool.query(writerDraftMigrationSql);
-        await pool.query(directorReviewMigrationSql);
-        await pool.query(writerRevisionMigrationSql);
+        // Rebuild the whole schema, not the part this case happened to need: a partial
+        // rebuild leaves every later case running against a schema that is missing migrations.
+        for (const migration of orderedMigrations()) await pool.query(migration);
       }
     });
 

@@ -16,6 +16,7 @@ export type AssignmentId = Identifier<"AssignmentId">;
 export type OperatorId = Identifier<"OperatorId">;
 export type TransitionId = Identifier<"TransitionId">;
 export type ReviewDecisionId = Identifier<"ReviewDecisionId">;
+export type AgentToolCallId = Identifier<"AgentToolCallId">;
 
 export const sourceId = (value: string): SourceId => value as SourceId;
 export const sourceExtractionId = (value: string): SourceExtractionId =>
@@ -30,6 +31,7 @@ export const agentProfileId = (value: string): AgentProfileId => value as AgentP
 export const assignmentId = (value: string): AssignmentId => value as AssignmentId;
 export const operatorId = (value: string): OperatorId => value as OperatorId;
 export const transitionId = (value: string): TransitionId => value as TransitionId;
+export const agentToolCallId = (value: string): AgentToolCallId => value as AgentToolCallId;
 export const reviewDecisionId = (value: string): ReviewDecisionId => value as ReviewDecisionId;
 
 export const STORY_STATES = [

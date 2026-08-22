@@ -19,6 +19,8 @@ export * from "./assignment";
 export * from "./assignment-types";
 export * from "./assignment-proposal";
 export * from "./assignment-proposal-types";
+export * from "./agent-tool-call";
+export * from "./agent-tool-call-types";
 export * from "./agent-run";
 export * from "./agent-run-types";
 export * from "./article";
