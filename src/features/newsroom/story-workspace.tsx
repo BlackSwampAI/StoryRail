@@ -764,6 +764,10 @@ export function StoryWorkspace({
   const [decisionPending, setDecisionPending] = useState(false);
   const [rejectionPending, setRejectionPending] = useState(false);
   const [rejectionOpen, setRejectionOpen] = useState(false);
+  const [publicationOpen, setPublicationOpen] = useState(false);
+  const [publicationPending, setPublicationPending] = useState(false);
+  const [publicationReason, setPublicationReason] = useState("");
+  const [publicationStatus, setPublicationStatus] = useState<string | null>(null);
   const [editingAssignment, setEditingAssignment] = useState(false);
   const [proposalReady, setProposalReady] = useState(durableProposal !== undefined);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
@@ -1054,6 +1058,28 @@ export function StoryWorkspace({
     };
   }, [anythingRunning, requests, story.id, onWriterCompleted]);
 
+  async function publish() {
+    if (publicationPending) return;
+    setPublicationPending(true);
+    setPublicationStatus(null);
+    try {
+      const result = await requests.publishStory(story.id, publicationReason);
+      if (result.kind !== "completed") {
+        setPublicationStatus(
+          result.kind === "application-failure"
+            ? `Publish failed: ${result.error.message}`
+            : "Publishing outcome is unavailable. Reopen this Story to confirm.",
+        );
+        return;
+      }
+      setPublicationOpen(false);
+      setPublicationReason("");
+      await refreshAfterReviewChange("Story published.");
+    } finally {
+      setPublicationPending(false);
+    }
+  }
+
   async function refreshAfterReviewChange(message: string) {
     const refreshed = await requests.inspectStory(story.id);
     if (refreshed.kind === "completed") onReviewStateChanged(refreshed.value);
@@ -1256,6 +1282,85 @@ export function StoryWorkspace({
                   {reviewSubmissionPending ? "Sending to Review…" : "Send to Review"}
                 </button>
               </section>
+            ) : story.state === "approved" ? (
+              <section className={styles.reviewTask} aria-labelledby="publication-heading">
+                <p className={styles.currentTaskLabel}>Current task · Publication</p>
+                <h2 id="publication-heading">Approved and ready to publish</h2>
+                <p>
+                  Publishing records the operator decision to release this Article and moves the
+                  Story to its final state. StoryRail does not deliver the Article anywhere yet.
+                </p>
+                {!publicationOpen ? (
+                  <button
+                    type="button"
+                    className={styles.primaryAction}
+                    disabled={editorialMutationPending}
+                    onClick={() => setPublicationOpen(true)}
+                  >
+                    Publish Story
+                  </button>
+                ) : (
+                  <form
+                    className={styles.decisionForm}
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void publish();
+                    }}
+                  >
+                    <label>
+                      Publication reason
+                      <textarea
+                        value={publicationReason}
+                        onChange={(event) => setPublicationReason(event.target.value)}
+                        required
+                        disabled={publicationPending}
+                      />
+                    </label>
+                    <div className={styles.taskActions}>
+                      <button
+                        type="submit"
+                        className={styles.primaryAction}
+                        disabled={publicationPending || publicationReason.trim().length === 0}
+                      >
+                        {publicationPending ? "Publishing…" : "Publish Story"}
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.secondaryAction}
+                        disabled={publicationPending}
+                        onClick={() => {
+                          setPublicationOpen(false);
+                          setPublicationReason("");
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                    {!publicationPending && publicationReason.trim().length === 0 ? (
+                      <p className={styles.formHint}>
+                        A reason is required before the Story can be published.
+                      </p>
+                    ) : null}
+                  </form>
+                )}
+                {publicationStatus ? (
+                  <p
+                    role={publicationStatus.startsWith("Publish") ? "alert" : "status"}
+                    className={styles.inlineAlert}
+                  >
+                    {publicationStatus}
+                  </p>
+                ) : null}
+              </section>
+            ) : story.state === "published" ? (
+              <section className={styles.reviewTask} aria-labelledby="published-heading">
+                <p className={styles.currentTaskLabel}>Published</p>
+                <h2 id="published-heading">This Story is published</h2>
+                <p>
+                  Published is terminal. The Article, its revisions, and every durable record behind
+                  them stay available.
+                </p>
+              </section>
             ) : story.state === "in_review" && directorRunning ? (
               <EditorialTaskPending
                 label="Current task · Director review"
@@ -1411,11 +1516,6 @@ export function StoryWorkspace({
                       Run Writer Revision
                     </button>
                   </section>
-                ) : null}
-                {story.state === "approved" ? (
-                  <p className={styles.decisionResult}>
-                    This Article revision is approved. Publishing is not part of this workflow.
-                  </p>
                 ) : null}
               </section>
             ) : null}

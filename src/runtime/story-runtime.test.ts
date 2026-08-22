@@ -214,6 +214,7 @@ describe("createStoryRuntime", () => {
       "listAgentProfiles",
       "assignStory",
       "rejectStory",
+      "publishStory",
       "submitStoryReview",
       "recordStoryReviewDecision",
       "close",

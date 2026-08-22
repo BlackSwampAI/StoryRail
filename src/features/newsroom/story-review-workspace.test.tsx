@@ -21,6 +21,7 @@ const requests: StoryClient = {
   createWriterDraft: vi.fn(unavailable),
   createWriterRevision: vi.fn(unavailable),
   rejectStory: vi.fn(unavailable),
+  publishStory: vi.fn(unavailable),
   submitReview: vi.fn(unavailable),
   runDirectorReview: vi.fn(unavailable),
   recordReviewDecision: vi.fn(unavailable),
