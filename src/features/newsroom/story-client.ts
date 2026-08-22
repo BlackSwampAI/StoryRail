@@ -64,6 +64,13 @@ export interface StoryClient {
     }>
   >;
   readonly generateAssignmentProposal: (storyId: string) => Promise<StoryClientResult<AgentRun>>;
+  /**
+   * Autopilot spans several runs, so the client only accepts the start. Progress is followed by
+   * inspecting the Story, which is the durable record of where the run has reached.
+   */
+  readonly startAutopilot: (
+    storyId: string,
+  ) => Promise<StoryClientResult<{ readonly runId: string }>>;
   readonly createWriterDraft: (storyId: string) => Promise<StoryClientResult<AgentRun>>;
   readonly createWriterRevision: (storyId: string) => Promise<StoryClientResult<AgentRun>>;
   readonly rejectStory: (
@@ -1011,6 +1018,39 @@ function isStartedRun(value: unknown): value is { readonly runId: string } {
 }
 
 /**
+ * Accepts a started run without following it. Autopilot's sequence outlives any single run, so
+ * the caller watches the Story instead of one run identity.
+ */
+async function acceptRun(
+  dependencies: Required<StoryClientDependencies>,
+  input: string,
+  applicationErrors: Readonly<Record<number, ReadonlySet<string>>>,
+): Promise<StoryClientResult<{ readonly runId: string }>> {
+  try {
+    const response = await dependencies.fetch(input, {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({}),
+    });
+    const body: unknown = await response.json();
+    if (!isRecord(body)) return unavailable();
+    if (response.status === 202 && body.ok === true && isStartedRun(body))
+      return { kind: "completed", value: { runId: body.runId } };
+    if (
+      response.status >= 400 &&
+      response.status < 500 &&
+      body.ok === false &&
+      isApplicationError(body.error) &&
+      applicationErrors[response.status]?.has(body.error.code) === true
+    )
+      return { kind: "application-failure", error: body.error };
+    return unavailable();
+  } catch {
+    return unavailable();
+  }
+}
+
+/**
  * Supervised agent endpoints accept the request and answer with the identity of a run that is
  * already durable, rather than holding the connection open for the model. The client follows
  * that run by inspecting the Story until it reaches a terminal outcome, so callers keep the
@@ -1213,6 +1253,14 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
         return unavailable();
       }
     },
+    startAutopilot: (storyId) =>
+      acceptRun(resolved, `/api/stories/${encodeURIComponent(storyId)}/autopilot`, {
+        400: new Set(["INVALID_JSON", "INVALID_REQUEST"]),
+        404: new Set(["STORY_NOT_FOUND"]),
+        409: new Set(["ASSIGNMENT_PROPOSAL_NOT_ALLOWED", "AGENT_RUN_ID_CONFLICT"]),
+        415: new Set(["UNSUPPORTED_MEDIA_TYPE"]),
+        422: new Set(["ASSIGNMENT_EDITOR_EVIDENCE_REQUIRED", "WRITER_PROFILE_REQUIRED"]),
+      }),
     generateAssignmentProposal: (storyId) =>
       startRun(
         resolved,

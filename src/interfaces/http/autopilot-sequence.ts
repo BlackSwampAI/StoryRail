@@ -1,0 +1,266 @@
+import type { StartAssignmentProposalResult } from "@/application/assignment-proposals";
+import {
+  MAX_REVISION_CYCLES,
+  type AgentRun,
+  type AgentRunId,
+  type ModelFailureCode,
+  type OperatorActor,
+  type StoryId,
+} from "@/domain/editorial";
+import type {
+  AssignmentEditorRuntime,
+  DirectorRuntime,
+  StoryRuntime,
+  WriterRuntime,
+} from "@/runtime";
+
+/**
+ * Autopilot is an operator-authorised policy, not a replacement for the operator. It decides
+ * only *when* each existing workflow runs; every durable record is still written by that
+ * workflow, with the operator who started the run as the actor. Two changes in posture are
+ * deliberate, and the recorded reasons say so rather than disguising them: the Director's
+ * recommendation is adopted as the decision, and no human reads the Article before publication.
+ */
+export const AUTOPILOT_ASSIGNMENT_REASON =
+  "Assigned by autopilot from the Assignment Editor suggestion.";
+export const AUTOPILOT_REVIEW_DECISION_REASON =
+  "Adopted the Director recommendation under autopilot.";
+export const AUTOPILOT_PUBLICATION_REASON = "Published by autopilot after Director approval.";
+
+export const AUTOPILOT_STEPS = [
+  "assignment_proposal",
+  "assignment",
+  "writer_draft",
+  "review_submission",
+  "director_review",
+  "review_decision",
+  "writer_revision",
+  "publication",
+] as const;
+export type AutopilotStep = (typeof AUTOPILOT_STEPS)[number];
+
+export type AutopilotStop =
+  /** A supervised run recorded a failure. Autopilot never retries: the failure is the answer. */
+  | {
+      readonly kind: "agent_run_failed";
+      readonly runId: AgentRunId;
+      readonly code: ModelFailureCode;
+    }
+  /** A workflow refused the step, so the Story stays exactly where the domain left it. */
+  | { readonly kind: "workflow_refused"; readonly code: string; readonly message: string }
+  /** The Director wants further changes but the domain's revision budget is spent. */
+  | { readonly kind: "revisions_exhausted" };
+
+export type AutopilotResult =
+  | { readonly ok: true; readonly storyId: StoryId; readonly revisionCycles: number }
+  | {
+      readonly ok: false;
+      readonly storyId: StoryId;
+      readonly stoppedAt: AutopilotStep;
+      readonly stop: AutopilotStop;
+    };
+
+export type AutopilotStartFailure = Extract<StartAssignmentProposalResult, { readonly ok: false }>;
+
+export type StartAutopilotResult =
+  | {
+      readonly ok: true;
+      readonly runId: AgentRunId;
+      readonly completion: Promise<AutopilotResult>;
+    }
+  | AutopilotStartFailure;
+
+export interface AutopilotRuntimes {
+  readonly story: Pick<
+    StoryRuntime,
+    | "inspectStory"
+    | "assignStory"
+    | "submitStoryReview"
+    | "recordStoryReviewDecision"
+    | "publishStory"
+  >;
+  readonly assignmentEditor: Pick<AssignmentEditorRuntime, "generateAssignmentProposal">;
+  readonly writer: Pick<WriterRuntime, "createWriterDraft" | "createWriterRevision">;
+  readonly director: Pick<DirectorRuntime, "runDirectorReview">;
+}
+
+type WorkflowError = { readonly code: string; readonly message: string };
+type RunCompletion<Run extends AgentRun> =
+  { readonly ok: true; readonly run: Run } | { readonly ok: false; readonly error: WorkflowError };
+interface StartedRun<Run extends AgentRun> {
+  readonly ok: true;
+  readonly runId: AgentRunId;
+  readonly completion: Promise<RunCompletion<Run>>;
+}
+type SettledRun<Run extends AgentRun> =
+  | { readonly ok: true; readonly run: Extract<Run, { readonly outcome: "succeeded" }> }
+  | { readonly ok: false; readonly result: AutopilotResult };
+
+function refused(
+  storyId: StoryId,
+  stoppedAt: AutopilotStep,
+  error: WorkflowError,
+): AutopilotResult {
+  return {
+    ok: false,
+    storyId,
+    stoppedAt,
+    stop: { kind: "workflow_refused", code: error.code, message: error.message },
+  };
+}
+
+/**
+ * Reduces a settled supervised run to the one thing the sequence needs: the successful run, or
+ * the reason to stop. A failed run stops the sequence rather than being retried — free models
+ * fail often enough that a silent retry would hide a real problem instead of reporting it.
+ */
+async function settle<Run extends AgentRun>(
+  storyId: StoryId,
+  stoppedAt: AutopilotStep,
+  started: StartedRun<Run>,
+): Promise<SettledRun<Run>> {
+  const completed = await started.completion;
+  if (!completed.ok) return { ok: false, result: refused(storyId, stoppedAt, completed.error) };
+  if (completed.run.outcome === "succeeded")
+    return { ok: true, run: completed.run as Extract<Run, { readonly outcome: "succeeded" }> };
+  const code: ModelFailureCode =
+    completed.run.outcome === "failed" ? completed.run.failure.code : "MODEL_REQUEST_FAILED";
+  return {
+    ok: false,
+    result: {
+      ok: false,
+      storyId,
+      stoppedAt,
+      stop: { kind: "agent_run_failed", runId: started.runId, code },
+    },
+  };
+}
+
+/**
+ * Drives one Story from `intake` to `published` by invoking the existing workflows in order.
+ * It never writes to the database itself, and it stops — leaving the Story exactly where the
+ * domain left it — the moment a step will not proceed.
+ */
+export function createAutopilot(runtimes: AutopilotRuntimes) {
+  const { story: stories, assignmentEditor, writer, director } = runtimes;
+
+  async function drive(
+    storyId: StoryId,
+    operator: OperatorActor,
+    proposalStarted: StartedRun<AgentRun>,
+  ): Promise<AutopilotResult> {
+    const proposed = await settle(storyId, "assignment_proposal", proposalStarted);
+    if (!proposed.ok) return proposed.result;
+    if (proposed.run.role !== "assignment_editor")
+      return refused(storyId, "assignment_proposal", {
+        code: "ASSIGNMENT_PROPOSAL_UNAVAILABLE",
+        message: "The Assignment Editor run did not carry a proposal.",
+      });
+    const { proposal } = proposed.run;
+
+    const assigned = await stories.assignStory({
+      storyId,
+      writerProfileId: proposal.writerProfileId,
+      angle: proposal.angle,
+      brief: proposal.brief,
+      constraints: proposal.constraints,
+      reason: AUTOPILOT_ASSIGNMENT_REASON,
+      assignedBy: operator,
+    });
+    if (!assigned.ok) return refused(storyId, "assignment", assigned.error);
+
+    const draftStarted = await writer.createWriterDraft({ storyId, requestedBy: operator });
+    if (!draftStarted.ok) return refused(storyId, "writer_draft", draftStarted.error);
+    const drafted = await settle(storyId, "writer_draft", draftStarted);
+    if (!drafted.ok) return drafted.result;
+
+    // The domain bounds this routing loop: `request_changes` is refused once the revision budget
+    // is spent, so autopilot passes through here a fixed number of times at most.
+    for (let cycle = 0; cycle <= MAX_REVISION_CYCLES; cycle += 1) {
+      const submitted = await stories.submitStoryReview({ storyId, submittedBy: operator });
+      if (!submitted.ok) return refused(storyId, "review_submission", submitted.error);
+
+      const reviewStarted = await director.runDirectorReview({ storyId, requestedBy: operator });
+      if (!reviewStarted.ok) return refused(storyId, "director_review", reviewStarted.error);
+      const reviewed = await settle(storyId, "director_review", reviewStarted);
+      if (!reviewed.ok) return reviewed.result;
+      const directorRun = reviewed.run;
+      if (directorRun.role !== "editor_in_chief")
+        return refused(storyId, "director_review", {
+          code: "DIRECTOR_REVIEW_UNAVAILABLE",
+          message: "The Director run did not carry a recommendation.",
+        });
+      const { recommendation } = directorRun.review;
+
+      if (recommendation === "request_changes") {
+        // Approving on the Director's behalf once the budget is spent is the one decision
+        // autopilot is not authorised to make, so it stops and leaves the Story in review.
+        const inspected = await stories.inspectStory(storyId);
+        if (!inspected.ok) return refused(storyId, "review_decision", inspected.error);
+        if (inspected.inspection.story.revisionCycle >= MAX_REVISION_CYCLES)
+          return {
+            ok: false,
+            storyId,
+            stoppedAt: "review_decision",
+            stop: { kind: "revisions_exhausted" },
+          };
+      }
+
+      const decided = await stories.recordStoryReviewDecision({
+        storyId,
+        directorRunId: directorRun.id,
+        decision: recommendation,
+        reason: AUTOPILOT_REVIEW_DECISION_REASON,
+        decidedBy: operator,
+      });
+      if (!decided.ok) return refused(storyId, "review_decision", decided.error);
+
+      if (recommendation === "approve") {
+        const published = await stories.publishStory({
+          storyId,
+          reason: AUTOPILOT_PUBLICATION_REASON,
+          publishedBy: operator,
+        });
+        if (!published.ok) return refused(storyId, "publication", published.error);
+        return { ok: true, storyId, revisionCycles: cycle };
+      }
+
+      const revisionStarted = await writer.createWriterRevision({ storyId, requestedBy: operator });
+      if (!revisionStarted.ok) return refused(storyId, "writer_revision", revisionStarted.error);
+      const revised = await settle(storyId, "writer_revision", revisionStarted);
+      if (!revised.ok) return revised.result;
+    }
+    return {
+      ok: false,
+      storyId,
+      stoppedAt: "review_decision",
+      stop: { kind: "revisions_exhausted" },
+    };
+  }
+
+  return {
+    /**
+     * Starts the run. The Assignment Editor is invoked before the caller is answered, so the
+     * real preconditions — an unknown Story, a Story that is not in intake, missing evidence —
+     * still fail fast, and the caller gets a durable run identity to follow, exactly as the
+     * single-step supervised endpoints do. Everything after that resolves through `completion`.
+     */
+    async start(command: {
+      readonly storyId: StoryId;
+      readonly requestedBy: OperatorActor;
+    }): Promise<StartAutopilotResult> {
+      const started = await assignmentEditor.generateAssignmentProposal({
+        storyId: command.storyId,
+        requestedBy: command.requestedBy,
+      });
+      if (!started.ok) return started;
+      return {
+        ok: true,
+        runId: started.runId,
+        completion: drive(command.storyId, command.requestedBy, started),
+      };
+    },
+  };
+}
+
+export type Autopilot = ReturnType<typeof createAutopilot>;

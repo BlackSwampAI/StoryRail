@@ -154,6 +154,10 @@ function clients() {
       kind: "unavailable",
       message: "The Story request could not be completed.",
     })),
+    startAutopilot: vi.fn<StoryClient["startAutopilot"]>(async () => ({
+      kind: "unavailable",
+      message: "The Story request could not be completed.",
+    })),
     generateAssignmentProposal: vi.fn<StoryClient["generateAssignmentProposal"]>(async () => ({
       kind: "unavailable",
       message: "The Story request could not be completed.",
