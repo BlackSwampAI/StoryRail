@@ -9,6 +9,7 @@ import type { StoryListItem } from "@/application/story-listing";
 import { STORY_STATES, type AgentProfile, type StoryId, type StoryState } from "@/domain/editorial";
 
 import { AccountMenu } from "./account-menu";
+import { applyTheme, readStoredTheme, type NewsroomThemeId } from "./theme";
 import { ProfileWorkspace, SettingsWorkspace } from "./account-workspace";
 import { AgentProfilesWorkspace } from "./agent-profiles-workspace";
 import { agentProfileClient, type AgentProfileClient } from "./agent-profile-client";
@@ -68,6 +69,13 @@ export function NewsroomShell({
   const [focusedSourceId, setFocusedSourceId] = useState<string | null>(null);
   const [staff, setStaff] = useState<StaffState>({ kind: "loading" });
   const [activeWriter, setActiveWriter] = useState<AgentProfile | null>(null);
+  // The stored choice is only readable in the browser; on the server this resolves to the
+  // default, which is also what the first paint uses.
+  const [theme, setTheme] = useState<NewsroomThemeId>(readStoredTheme);
+
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
 
   const loadStories = useCallback(async () => {
     setListing({ kind: "loading" });
@@ -502,7 +510,9 @@ export function NewsroomShell({
               {workspaceMode === "profile" ? <ProfileWorkspace /> : null}
             </div>
             <div hidden={workspaceMode !== "settings"}>
-              {workspaceMode === "settings" ? <SettingsWorkspace /> : null}
+              {workspaceMode === "settings" ? (
+                <SettingsWorkspace theme={theme} onThemeChange={setTheme} />
+              ) : null}
             </div>
             <div hidden={workspaceMode !== "agents"}>
               {workspaceMode === "agents" ? (

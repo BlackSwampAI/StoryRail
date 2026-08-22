@@ -1,6 +1,7 @@
 "use client";
 
 import styles from "./newsroom-shell.module.css";
+import { NEWSROOM_THEMES, type NewsroomThemeId } from "./theme";
 import {
   SCAFFOLD_OPERATOR,
   SCAFFOLD_SETTINGS,
@@ -114,7 +115,12 @@ export function ProfileWorkspace() {
   );
 }
 
-export function SettingsWorkspace() {
+export interface SettingsWorkspaceProps {
+  readonly theme: NewsroomThemeId;
+  readonly onThemeChange: (theme: NewsroomThemeId) => void;
+}
+
+export function SettingsWorkspace({ theme, onThemeChange }: SettingsWorkspaceProps) {
   return (
     <section className={styles.accountWorkspace} aria-labelledby="settings-title">
       <header className={styles.sourceWorkspaceHeader}>
@@ -129,12 +135,45 @@ export function SettingsWorkspace() {
       </ScaffoldNotice>
 
       <nav className={styles.settingsIndex} aria-label="Settings sections">
+        <a href="#settings-appearance">Appearance</a>
         {SCAFFOLD_SETTINGS.map((section) => (
           <a key={section.id} href={`#settings-${section.id}`}>
             {section.title}
           </a>
         ))}
       </nav>
+
+      {/* The one setting that is real: it changes only how the newsroom looks. */}
+      <section className={styles.settingsSection} aria-labelledby="settings-appearance">
+        <header>
+          <h3 id="settings-appearance">Appearance</h3>
+          <p>Pick how the newsroom looks. This is the one setting here that works.</p>
+        </header>
+        <div className={styles.themeChoices} role="radiogroup" aria-label="Theme">
+          {NEWSROOM_THEMES.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              role="radio"
+              aria-checked={theme === option.id}
+              className={styles.themeChoice}
+              data-theme-preview={option.id}
+              onClick={() => onThemeChange(option.id)}
+            >
+              <span className={styles.themeSwatch} aria-hidden="true">
+                <i data-swatch="page" />
+                <i data-swatch="panel" />
+                <i data-swatch="accent" />
+              </span>
+              <span>
+                <strong>{option.label}</strong>
+                <small>{option.description}</small>
+              </span>
+              <span className={styles.themeScheme}>{option.scheme}</span>
+            </button>
+          ))}
+        </div>
+      </section>
 
       {SCAFFOLD_SETTINGS.map((section) => (
         <Section key={section.id} section={section} />

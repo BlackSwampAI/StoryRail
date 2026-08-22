@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { AccountMenu } from "./account-menu";
 import { SCAFFOLD_SETTINGS } from "./account-scaffold";
+import { NEWSROOM_THEMES } from "./theme";
 import { ProfileWorkspace, SettingsWorkspace } from "./account-workspace";
 
 describe("account scaffolding", () => {
@@ -39,13 +40,26 @@ describe("account scaffolding", () => {
     expect(screen.getByText("Not implemented")).toBeVisible();
   });
 
+  it("lets the operator choose a theme, the one setting that works", () => {
+    const onThemeChange = vi.fn();
+    render(<SettingsWorkspace theme="newsroom" onThemeChange={onThemeChange} />);
+
+    const group = screen.getByRole("radiogroup", { name: "Theme" });
+    const options = within(group).getAllByRole("radio");
+    expect(options).toHaveLength(NEWSROOM_THEMES.length);
+    expect(within(group).getByRole("radio", { name: /Newsroom/ })).toBeChecked();
+
+    fireEvent.click(within(group).getByRole("radio", { name: /Newsprint/ }));
+    expect(onThemeChange).toHaveBeenCalledWith("newsprint");
+  });
+
   it("lays out every roadmap section with no working control", () => {
-    render(<SettingsWorkspace />);
+    render(<SettingsWorkspace theme="newsroom" onThemeChange={vi.fn()} />);
 
     for (const section of SCAFFOLD_SETTINGS) {
       expect(screen.getByRole("heading", { name: section.title })).toBeVisible();
     }
-    // Scaffolding must not look operable: nothing here is wired to anything.
+    // Scaffolding must not look operable, with one exception: choosing a theme really works.
     for (const control of screen.getAllByRole("button")) {
       expect(control).toBeDisabled();
     }
