@@ -1407,6 +1407,7 @@ export function StoryWorkspace({
               writerName={assignment?.writerProfile.name ?? "Writer"}
               headingId="current-task-heading"
               measurement={measureRevisionGrounding(inspection, latestRevision)}
+              inspection={inspection}
             />
             {story.state === "changes_requested" && revisionRunning ? (
               <EditorialTaskPending
