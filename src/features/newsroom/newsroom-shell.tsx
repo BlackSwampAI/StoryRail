@@ -8,6 +8,9 @@ import type { StoryInspection } from "@/application/story-inspection";
 import type { StoryListItem } from "@/application/story-listing";
 import { STORY_STATES, type AgentProfile, type StoryId, type StoryState } from "@/domain/editorial";
 
+import { AccountMenu } from "./account-menu";
+import { applyTheme, readStoredTheme, type NewsroomThemeId } from "./theme";
+import { ProfileWorkspace, SettingsWorkspace } from "./account-workspace";
 import { AgentProfilesWorkspace } from "./agent-profiles-workspace";
 import { agentProfileClient, type AgentProfileClient } from "./agent-profile-client";
 import { STORY_STATE_LABELS } from "./newsroom-state";
@@ -21,7 +24,7 @@ import type { SourceInboxClient } from "./source-inbox-client";
 import { StoryWorkspace } from "./story-workspace";
 import { storyClient, type StoryClient } from "./story-client";
 
-type WorkspaceMode = "story" | "source-inbox" | "source-intake" | "agents";
+type WorkspaceMode = "story" | "source-inbox" | "source-intake" | "agents" | "profile" | "settings";
 
 export interface NewsroomShellProps {
   readonly requestSourceEvidence?: RequestSourceEvidenceUrl;
@@ -66,6 +69,13 @@ export function NewsroomShell({
   const [focusedSourceId, setFocusedSourceId] = useState<string | null>(null);
   const [staff, setStaff] = useState<StaffState>({ kind: "loading" });
   const [activeWriter, setActiveWriter] = useState<AgentProfile | null>(null);
+  // The stored choice is only readable in the browser; on the server this resolves to the
+  // default, which is also what the first paint uses.
+  const [theme, setTheme] = useState<NewsroomThemeId>(readStoredTheme);
+
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
 
   const loadStories = useCallback(async () => {
     setListing({ kind: "loading" });
@@ -352,6 +362,22 @@ export function NewsroomShell({
 
         workspace={
           <main className={styles.workspace}>
+            <div className={styles.workspaceNavigation}>
+              <p className={styles.workspaceBreadcrumb}>
+                {workspaceMode === "profile" || workspaceMode === "settings"
+                  ? "Account"
+                  : "Newsroom"}
+              </p>
+              <AccountMenu
+                activeItem={
+                  workspaceMode === "profile" || workspaceMode === "settings"
+                    ? workspaceMode
+                    : undefined
+                }
+                onOpenProfile={() => openWorkspace("profile")}
+                onOpenSettings={() => openWorkspace("settings")}
+              />
+            </div>
             <div hidden={workspaceMode !== "story"}>
               {storySelection.kind === "loaded" ? (
                 <StoryWorkspace
@@ -478,6 +504,14 @@ export function NewsroomShell({
                     setWorkspaceMode("source-inbox");
                   }}
                 />
+              ) : null}
+            </div>
+            <div hidden={workspaceMode !== "profile"}>
+              {workspaceMode === "profile" ? <ProfileWorkspace /> : null}
+            </div>
+            <div hidden={workspaceMode !== "settings"}>
+              {workspaceMode === "settings" ? (
+                <SettingsWorkspace theme={theme} onThemeChange={setTheme} />
               ) : null}
             </div>
             <div hidden={workspaceMode !== "agents"}>
