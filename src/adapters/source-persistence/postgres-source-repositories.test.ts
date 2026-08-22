@@ -115,6 +115,10 @@ const citedBlocksMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0055-cited-article-blocks.sql",
 );
+const ungroundedFailureMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0056-ungrounded-output-failure-code.sql",
+);
 
 const OPERATOR: OperatorActor = {
   type: "operator",
@@ -330,6 +334,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let modelQuotaMigrationSql: string;
   let inFlightRunMigrationSql: string;
   let citedBlocksMigrationSql: string;
+  let ungroundedFailureMigrationSql: string;
   let destructiveSetupAllowed = false;
 
   beforeAll(async () => {
@@ -348,6 +353,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     modelQuotaMigrationSql = await readFile(modelQuotaMigrationPath, "utf8");
     inFlightRunMigrationSql = await readFile(inFlightRunMigrationPath, "utf8");
     citedBlocksMigrationSql = await readFile(citedBlocksMigrationPath, "utf8");
+    ungroundedFailureMigrationSql = await readFile(ungroundedFailureMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -379,6 +385,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await client.query(modelQuotaMigrationSql);
       await client.query(inFlightRunMigrationSql);
       await client.query(citedBlocksMigrationSql);
+      await client.query(ungroundedFailureMigrationSql);
     } finally {
       client.release();
     }
@@ -1181,6 +1188,54 @@ describePostgres("PostgreSQL persistence repositories", () => {
         false,
       );
       await expect(blocks([])).resolves.toBe(false);
+    });
+  });
+
+  describe("model failure codes", () => {
+    // An ungrounded response is well formed and unsupported, which is a different problem from
+    // a malformed one. The database accepts it as its own code so the record says which it was.
+    const accepts = (code: string) =>
+      pool
+        .query<{ valid: boolean }>(
+          "SELECT storyrail.model_failure_is_valid(jsonb_build_object('code', $1::text, 'retryable', true)) AS valid",
+          [code],
+        )
+        .then((result) => result.rows[0]?.valid);
+
+    it("accepts an ungrounded output failure alongside the existing codes", async () => {
+      await expect(accepts("MODEL_OUTPUT_UNGROUNDED")).resolves.toBe(true);
+      await expect(accepts("MODEL_OUTPUT_INVALID")).resolves.toBe(true);
+      await expect(accepts("MODEL_OUTPUT_UNSUPPORTED")).resolves.toBe(false);
+    });
+
+    it("accepts grounding findings only on an ungrounded failure", async () => {
+      const withFindings = (code: string, findings: unknown) =>
+        pool
+          .query<{ valid: boolean }>(
+            `SELECT storyrail.model_failure_is_valid(
+               jsonb_build_object('code', $1::text, 'retryable', true, 'findings', $2::jsonb)
+             ) AS valid`,
+            [code, JSON.stringify(findings)],
+          )
+          .then((result) => result.rows[0]?.valid);
+      const finding = {
+        blockIndex: 0,
+        citationIndex: 1,
+        code: "CITATION_QUOTE_UNSUPPORTED",
+        quote: "Never written anywhere",
+        evidenceId: "prepared-a",
+      };
+
+      await expect(withFindings("MODEL_OUTPUT_UNGROUNDED", [finding])).resolves.toBe(true);
+      // Findings explain a grounding refusal and mean nothing attached to any other failure.
+      await expect(withFindings("MODEL_REQUEST_FAILED", [finding])).resolves.toBe(false);
+      await expect(withFindings("MODEL_OUTPUT_UNGROUNDED", [])).resolves.toBe(false);
+      await expect(
+        withFindings("MODEL_OUTPUT_UNGROUNDED", [{ ...finding, code: "CITATION_MADE_UP" }]),
+      ).resolves.toBe(false);
+      await expect(
+        withFindings("MODEL_OUTPUT_UNGROUNDED", [{ ...finding, quote: "  " }]),
+      ).resolves.toBe(false);
     });
   });
 

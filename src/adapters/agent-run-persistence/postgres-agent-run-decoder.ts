@@ -26,6 +26,26 @@ function exact(value: Record<string, unknown>, keys: readonly string[]): boolean
 }
 
 const nonEmpty = z.string().refine((value) => value.trim().length > 0 && value === value.trim());
+const groundingFindingSchema = z
+  .object({
+    blockIndex: z.number().int().min(0),
+    citationIndex: z.number().int().min(0),
+    code: z.enum([
+      "CITATION_EVIDENCE_UNKNOWN",
+      "CITATION_SOURCE_MISMATCH",
+      "CITATION_QUOTE_UNSUPPORTED",
+    ]),
+    quote: z.string().min(1),
+    evidenceId: z.string().min(1),
+  })
+  .strict();
+const failureSchema = z
+  .object({
+    code: z.enum(MODEL_FAILURE_CODES),
+    retryable: z.boolean(),
+    findings: z.array(groundingFindingSchema).min(1).optional(),
+  })
+  .strict();
 const actor = z.discriminatedUnion("type", [
   z.object({ type: z.literal("operator"), operatorId: nonEmpty }).strict(),
   z.object({ type: z.literal("agent"), role: z.enum(AGENT_ROLES), runId: nonEmpty }).strict(),
@@ -195,7 +215,7 @@ const schema = z.union([
       ...assignmentCommon,
       ...completed,
       outcome: z.literal("failed"),
-      failure: z.object({ code: z.enum(MODEL_FAILURE_CODES), retryable: z.boolean() }).strict(),
+      failure: failureSchema,
     })
     .strict(),
   z
@@ -221,7 +241,7 @@ const schema = z.union([
       ...writerRevisionCommon,
       ...completed,
       outcome: z.literal("failed"),
-      failure: z.object({ code: z.enum(MODEL_FAILURE_CODES), retryable: z.boolean() }).strict(),
+      failure: failureSchema,
     })
     .strict(),
   z
@@ -229,7 +249,7 @@ const schema = z.union([
       ...writerCommon,
       ...completed,
       outcome: z.literal("failed"),
-      failure: z.object({ code: z.enum(MODEL_FAILURE_CODES), retryable: z.boolean() }).strict(),
+      failure: failureSchema,
     })
     .strict(),
   z.object({ ...directorCommon, ...completed, outcome: z.literal("succeeded"), review }).strict(),
@@ -238,7 +258,7 @@ const schema = z.union([
       ...directorCommon,
       ...completed,
       outcome: z.literal("failed"),
-      failure: z.object({ code: z.enum(MODEL_FAILURE_CODES), retryable: z.boolean() }).strict(),
+      failure: failureSchema,
     })
     .strict(),
 ]);

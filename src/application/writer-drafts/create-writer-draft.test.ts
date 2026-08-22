@@ -142,7 +142,17 @@ describe("createWriterDraft", () => {
       void request;
       return {
         ok: true as const,
-        output: { headline: "Draft", dek: null, bodyMarkdown: "Body" },
+        output: {
+          headline: "Draft",
+          dek: null,
+          blocks: [
+            {
+              kind: "claim",
+              markdown: "The evidence says so.",
+              citations: [{ sourceId: "source-a", evidenceId: "prepared-a", quote: "Evidence" }],
+            },
+          ],
+        },
       };
     });
     const model: StructuredModel = {
@@ -245,6 +255,73 @@ describe("createWriterDraft", () => {
     expect(append.mock.calls[0]?.[0]).toMatchObject({ outcome: "running" });
     expect(complete).toHaveBeenCalledOnce();
     expect(complete.mock.calls[0]?.[0]).toMatchObject({ outcome: "failed" });
+    expect(persist).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "a quote that is absent from the cited evidence",
+      { sourceId: "source-a", evidenceId: "prepared-a", quote: "Never written anywhere" },
+    ],
+    [
+      "evidence this Assignment does not have",
+      { sourceId: "source-a", evidenceId: "prepared-elsewhere", quote: "Evidence" },
+    ],
+    [
+      "a Source that does not own the cited evidence",
+      { sourceId: "source-elsewhere", evidenceId: "prepared-a", quote: "Evidence" },
+    ],
+  ])("refuses a well-formed draft resting on %s", async (_label, citation) => {
+    // The response parses perfectly; the claim simply is not supported. Nothing durable is
+    // written, so an unverifiable assertion never reaches the Article at all.
+    const facts = fixture();
+    const complete = vi.fn(async (run: AgentRun) => ({ ok: true as const, run }));
+    const persist = vi.fn();
+    const model: StructuredModel = {
+      descriptor: { provider: "openrouter", model: "writer" },
+      limits: { maximumInputCharacters: 60_000 },
+      generateStructured: vi.fn(async () => ({
+        ok: true as const,
+        output: {
+          headline: "Draft",
+          dek: null,
+          blocks: [{ kind: "claim", markdown: "A confident assertion.", citations: [citation] }],
+        },
+      })) as StructuredModel["generateStructured"],
+    };
+    const workflow = createWriterDraft({
+      inspections: {
+        inspect: vi.fn(async () => ({ ok: true as const, inspection: facts.inspection })),
+      },
+      runs: {
+        append: vi.fn(async (run: AgentRun) => ({ ok: true as const, run })),
+        complete,
+        listByStoryId: vi.fn(),
+      },
+      persistence: { persist },
+      resolveModel: () => ({ ok: true, model }),
+      createAgentRunId: () => agentRunId("run-ungrounded"),
+      createArticleId: () => articleId("unused"),
+      createRevisionId: () => articleRevisionId("unused"),
+      createTransitionId: () => transitionId("unused"),
+      now: () => "now",
+    });
+
+    expect(
+      await settleAgentRun(
+        workflow({ storyId: facts.story.id, requestedBy: facts.assignment.assignedBy }),
+      ),
+    ).toMatchObject({
+      ok: true,
+      run: { outcome: "failed", failure: { code: "MODEL_OUTPUT_UNGROUNDED", retryable: true } },
+    });
+    // The refusal records which citation it could not support, so the operator is not left with
+    // a bare code and no way to see what went wrong.
+    expect(complete.mock.calls[0]?.[0]).toMatchObject({
+      failure: {
+        findings: [{ blockIndex: 0, citationIndex: 0, quote: citation.quote }],
+      },
+    });
     expect(persist).not.toHaveBeenCalled();
   });
 

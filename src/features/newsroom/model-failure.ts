@@ -14,6 +14,8 @@ const MODEL_FAILURE_EXPLANATIONS: Readonly<Record<ModelFailureCode, string>> = {
   MODEL_REQUEST_FAILED: "The model provider could not be reached. Running it again may succeed.",
   MODEL_RESPONSE_REJECTED: "The model provider refused the request.",
   MODEL_OUTPUT_INVALID: "The model replied in a shape StoryRail could not accept.",
+  MODEL_OUTPUT_UNGROUNDED:
+    "The model cited evidence that does not contain what it quoted. Nothing was recorded; running it again may succeed.",
 };
 
 export function modelFailureExplanation(code: ModelFailureCode): string {

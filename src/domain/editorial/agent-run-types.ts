@@ -1,3 +1,4 @@
+import type { GroundingFinding } from "./article-grounding";
 import type { AssignmentProposal } from "./assignment-proposal-types";
 import type { DirectorReviewRecommendation } from "./director-review-types";
 import type { ReviewDecision } from "./review-decision-types";
@@ -21,6 +22,17 @@ export interface EvidenceReference {
   readonly relevance: string;
   readonly evidenceKind: "prepared" | "raw";
   readonly evidenceId: SourceEvidencePreparationId | SourceExtractionId;
+}
+
+/**
+ * Why a supervised run failed. A grounding failure also records which citations could not be
+ * supported: a run that says only that it was refused leaves the operator with the same opacity
+ * the citations were introduced to remove.
+ */
+export interface AgentRunFailure {
+  readonly code: ModelFailureCode;
+  readonly retryable: boolean;
+  readonly findings?: readonly GroundingFinding[];
 }
 
 export interface AssignmentProposalAgentRunInput {
@@ -55,7 +67,7 @@ export type AssignmentProposalAgentRun = AssignmentProposalAgentRunCommon &
     | { readonly outcome: "succeeded"; readonly proposal: AssignmentProposal }
     | {
         readonly outcome: "failed";
-        readonly failure: { readonly code: ModelFailureCode; readonly retryable: boolean };
+        readonly failure: AgentRunFailure;
       }
   );
 
@@ -98,7 +110,7 @@ export type WriterArticleDraftAgentRun = WriterArticleDraftAgentRunCommon &
       }
     | {
         readonly outcome: "failed";
-        readonly failure: { readonly code: ModelFailureCode; readonly retryable: boolean };
+        readonly failure: AgentRunFailure;
       }
   );
 
@@ -136,7 +148,7 @@ export type WriterArticleRevisionAgentRun = WriterArticleRevisionAgentRunCommon 
       }
     | {
         readonly outcome: "failed";
-        readonly failure: { readonly code: ModelFailureCode; readonly retryable: boolean };
+        readonly failure: AgentRunFailure;
       }
   );
 
@@ -181,7 +193,7 @@ export type DirectorArticleReviewAgentRun = DirectorArticleReviewAgentRunCommon 
     | { readonly outcome: "succeeded"; readonly review: DirectorReviewRecommendation }
     | {
         readonly outcome: "failed";
-        readonly failure: { readonly code: ModelFailureCode; readonly retryable: boolean };
+        readonly failure: AgentRunFailure;
       }
   );
 
