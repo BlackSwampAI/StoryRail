@@ -110,3 +110,89 @@ export function verifyArticleGrounding(
 
   return findings.length === 0 ? { ok: true } : { ok: false, findings };
 }
+
+/**
+ * How much of a Revision rests on its evidence, and how much of it is the evidence restated.
+ *
+ * These answer two different questions, and a Revision can score badly on either. `groundedShare`
+ * asks whether the article's assertions are supported. `derivedShare` asks whether the article
+ * added anything: prose that is largely lifted from its sources is grounded and worthless, and a
+ * system that reported only the first number would call that a success.
+ */
+export interface ArticleGroundingMeasurement {
+  readonly claimBlocks: number;
+  readonly contextBlocks: number;
+  readonly headingBlocks: number;
+  readonly citations: number;
+  /**
+   * Characters of cited prose as a share of all prose that asserts or explains, headings aside.
+   * Weighted by length so that splitting one long claim into several does not improve the score.
+   * `null` when the Revision contains no prose to weigh.
+   */
+  readonly groundedShare: number | null;
+  /**
+   * Share of the Revision's word sequences that also occur verbatim in its evidence. High values
+   * mean the source has been restated rather than reported on. `null` when the Revision is too
+   * short to sequence.
+   */
+  readonly derivedShare: number | null;
+}
+
+/**
+ * Long enough that ordinary shared phrasing does not register, short enough to catch a sentence
+ * carried over with a word changed.
+ */
+const SEQUENCE_WORDS = 8;
+
+/** Emphasis and code markers differ between an Article and its evidence without changing words. */
+function words(value: string): readonly string[] {
+  return comparable(value)
+    .toLowerCase()
+    .replace(/[*_`#>]/g, "")
+    .split(" ")
+    .filter((word) => word.length > 0);
+}
+
+function sequences(value: string): ReadonlySet<string> {
+  const spoken = words(value);
+  const found = new Set<string>();
+  for (let index = 0; index + SEQUENCE_WORDS <= spoken.length; index += 1)
+    found.add(spoken.slice(index, index + SEQUENCE_WORDS).join(" "));
+  return found;
+}
+
+export function measureArticleGrounding(
+  blocks: readonly ArticleBlock[],
+  evidence: readonly GroundingEvidence[],
+): ArticleGroundingMeasurement {
+  const counted = { claim: 0, context: 0, heading: 0 };
+  let citations = 0;
+  let citedCharacters = 0;
+  let uncitedCharacters = 0;
+  const prose: string[] = [];
+
+  for (const block of blocks) {
+    counted[block.kind] += 1;
+    citations += block.citations.length;
+    if (block.kind === "heading") continue;
+    prose.push(block.markdown);
+    if (block.kind === "claim") citedCharacters += block.markdown.trim().length;
+    else uncitedCharacters += block.markdown.trim().length;
+  }
+
+  const weighed = citedCharacters + uncitedCharacters;
+  const written = sequences(prose.join("\n\n"));
+  const supplied = new Set<string>();
+  for (const item of evidence)
+    for (const sequence of sequences(item.content)) supplied.add(sequence);
+  const carriedOver = [...written].filter((sequence) => supplied.has(sequence)).length;
+
+  return {
+    claimBlocks: counted.claim,
+    contextBlocks: counted.context,
+    headingBlocks: counted.heading,
+    citations,
+    groundedShare: weighed === 0 ? null : citedCharacters / weighed,
+    derivedShare: written.size === 0 ? null : carriedOver / written.size,
+  };
+}

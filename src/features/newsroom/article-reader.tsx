@@ -1,5 +1,10 @@
-import { articleBodyMarkdown, type ArticleRevision } from "@/domain/editorial";
+import {
+  articleBodyMarkdown,
+  type ArticleGroundingMeasurement,
+  type ArticleRevision,
+} from "@/domain/editorial";
 
+import { GroundingSummary } from "./grounding-summary";
 import styles from "./newsroom-shell.module.css";
 import { SafeMarkdown } from "./safe-markdown";
 
@@ -7,7 +12,13 @@ export function ArticleReader({
   revision,
   writerName,
   headingId,
-}: Readonly<{ revision: ArticleRevision; writerName: string; headingId: string }>) {
+  measurement,
+}: Readonly<{
+  revision: ArticleRevision;
+  writerName: string;
+  headingId: string;
+  measurement: ArticleGroundingMeasurement;
+}>) {
   return (
     <article className={styles.articleReader} aria-labelledby={headingId}>
       <header className={styles.articleHeader}>
@@ -18,6 +29,7 @@ export function ArticleReader({
           Revision {revision.revisionNumber} · {writerName}
         </p>
       </header>
+      <GroundingSummary measurement={measurement} />
       <SafeMarkdown markdown={articleBodyMarkdown(revision.blocks)} />
     </article>
   );
