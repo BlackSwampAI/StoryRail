@@ -24,6 +24,7 @@ function isSuccessfulProposal(
 import { ArticleReader } from "./article-reader";
 import { EditorialTaskPending } from "./editorial-task-pending";
 import { modelFailureMessage } from "./model-failure";
+import { autopilotProgress, resolveAutopilotFollow } from "./autopilot-follow";
 import { STORY_STATE_LABELS } from "./newsroom-state";
 import { WRITER_ASSIGNMENT_DROP_ID, WRITER_DRAG_TYPE, type StaffState } from "./newsroom-staff";
 import styles from "./newsroom-shell.module.css";
@@ -777,6 +778,16 @@ export function StoryWorkspace({
   const [rejectionReason, setRejectionReason] = useState("");
   const [rejectionStatus, setRejectionStatus] = useState<string | null>(null);
   const [runs, setRuns] = useState<readonly AgentRun[]>(agentRuns);
+  const [autopilotPending, setAutopilotPending] = useState(false);
+  const [autopilotStatus, setAutopilotStatus] = useState<string | null>(null);
+  // What autopilot looked like when it was last seen moving. The durable record is the only
+  // authority on where an automated run has reached, so following one means watching that
+  // record advance rather than trusting a local flag.
+  const [autopilotWatch, setAutopilotWatch] = useState<{
+    readonly priorRunIds: ReadonlySet<string>;
+    readonly progress: string;
+    readonly observedAt: number;
+  } | null>(null);
 
   // A run recorded as in flight is the authority on what is happening, not local component
   // state. Reopening the Story mid-run therefore rejoins it instead of showing an idle
@@ -1058,6 +1069,73 @@ export function StoryWorkspace({
     };
   }, [anythingRunning, requests, story.id, onWriterCompleted]);
 
+  const autopilotRunning = autopilotWatch !== null;
+  // The in-flight poll above stops as soon as no run is running, which is true in every gap
+  // between two autopilot steps. An automated run therefore needs its own follow: it keeps
+  // inspecting the Story until publication, a failure, or a durable silence.
+  useEffect(() => {
+    if (autopilotWatch === null) return;
+    let active = true;
+    const timer = setInterval(() => {
+      void (async () => {
+        const refreshed = await requests.inspectStory(story.id);
+        if (!active || refreshed.kind !== "completed") return;
+        setRuns(refreshed.value.agentRuns);
+        const progress = autopilotProgress(refreshed.value);
+        const observedAt = Date.now();
+        const moved = progress !== autopilotWatch.progress;
+        const follow = resolveAutopilotFollow({
+          inspection: refreshed.value,
+          priorRunIds: autopilotWatch.priorRunIds,
+          unchangedForMs: moved ? 0 : observedAt - autopilotWatch.observedAt,
+        });
+        if (follow.kind === "settled") {
+          setAutopilotWatch(null);
+          setAutopilotStatus(follow.message);
+          onReviewStateChanged(refreshed.value);
+          return;
+        }
+        if (moved) {
+          setAutopilotWatch({ priorRunIds: autopilotWatch.priorRunIds, progress, observedAt });
+          onReviewStateChanged(refreshed.value);
+        }
+      })();
+    }, IN_FLIGHT_POLL_INTERVAL_MS);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [autopilotWatch, requests, story.id, onReviewStateChanged]);
+
+  async function startAutopilot() {
+    if (autopilotPending || autopilotRunning) return;
+    setAutopilotPending(true);
+    setAutopilotStatus(null);
+    try {
+      const result = await requests.startAutopilot(story.id);
+      if (result.kind !== "completed") {
+        setAutopilotStatus(
+          result.kind === "application-failure"
+            ? `Autopilot could not start: ${result.error.message}`
+            : "Autopilot could not be started. Reopen this Story to check.",
+        );
+        return;
+      }
+      setAutopilotWatch({
+        priorRunIds: new Set(runs.map((run) => run.id)),
+        progress: autopilotProgress({ story, agentRuns: runs }),
+        observedAt: Date.now(),
+      });
+      setAutopilotStatus(
+        "Autopilot is running this Story to publication. Every record is still written as you.",
+      );
+    } catch {
+      setAutopilotStatus("Autopilot could not be started. Reopen this Story to check.");
+    } finally {
+      setAutopilotPending(false);
+    }
+  }
+
   async function publish() {
     if (publicationPending) return;
     setPublicationPending(true);
@@ -1219,6 +1297,14 @@ export function StoryWorkspace({
       {notice ? (
         <p role="status" className={styles.workspaceNotice}>
           {notice}
+        </p>
+      ) : null}
+      {autopilotStatus ? (
+        <p
+          role={autopilotStatus.startsWith("Autopilot could not") ? "alert" : "status"}
+          className={styles.workspaceNotice}
+        >
+          {autopilotStatus}
         </p>
       ) : null}
 
@@ -1760,7 +1846,20 @@ export function StoryWorkspace({
                   >
                     Assign manually
                   </button>
+                  <button
+                    type="button"
+                    className={styles.tertiaryAction}
+                    disabled={autopilotPending || autopilotRunning}
+                    onClick={() => void startAutopilot()}
+                  >
+                    {autopilotRunning ? "Autopilot is running…" : "Run autopilot"}
+                  </button>
                 </div>
+                <p className={styles.autopilotExplainer}>
+                  Autopilot adopts the Director&apos;s recommendation as the decision and publishes
+                  without a human reading the Article. Every record is still written as you, and
+                  every reason says autopilot made the call.
+                </p>
                 {proposalStatus ? (
                   <p
                     role={

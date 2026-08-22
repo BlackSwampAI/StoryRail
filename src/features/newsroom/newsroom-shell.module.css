@@ -2038,6 +2038,15 @@
   margin-top: 1.5rem;
 }
 
+/* Autopilot changes who decides, so the card says what it will do before it is started. */
+.autopilotExplainer {
+  margin: 1rem 0 0;
+  color: var(--tone-97);
+  font-size: 0.85rem;
+  line-height: 1.55;
+  max-width: 58ch;
+}
+
 .primaryAction,
 .secondaryAction,
 .tertiaryAction,

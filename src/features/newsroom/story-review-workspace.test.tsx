@@ -17,6 +17,7 @@ const requests: StoryClient = {
   attachSource: vi.fn(unavailable),
   inspectStory: vi.fn(unavailable),
   assignStory: vi.fn(unavailable),
+  startAutopilot: vi.fn(unavailable),
   generateAssignmentProposal: vi.fn(unavailable),
   createWriterDraft: vi.fn(unavailable),
   createWriterRevision: vi.fn(unavailable),
