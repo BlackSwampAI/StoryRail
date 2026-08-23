@@ -120,6 +120,7 @@ function workflow(options: {
     },
     toolCalls: {
       append: vi.fn(async (call) => ({ ok: true as const, call })),
+      complete: vi.fn(async (call) => ({ ok: true as const, call })),
       listByRunId: vi.fn(),
     },
     persistence: { attach },

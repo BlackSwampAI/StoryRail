@@ -224,3 +224,45 @@ export function unsupportedDirectorQuotes(
     })
     .map(([name]) => name);
 }
+
+/**
+ * Whether a corrected draft changed only what it was asked to change.
+ *
+ * A correction turn sends the whole draft back, so nothing about the exchange stops a Writer
+ * from rewriting blocks nobody objected to, or slipping in a new claim that happens to be
+ * validly cited. Telling it not to is a prompt instruction; checking is an invariant.
+ *
+ * A block may be corrected in any way, including being restated as the Writer's own framing
+ * where the claim cannot be supported. It may not be removed, and no block may be added: the
+ * draft keeps its shape, and only the passages named in the findings may differ.
+ */
+export function correctionStayedInScope(
+  before: readonly ArticleBlock[],
+  after: readonly ArticleBlock[],
+  findings: readonly GroundingFinding[],
+): boolean {
+  if (before.length !== after.length) return false;
+  const permitted = new Set(findings.map(({ blockIndex }) => blockIndex));
+  return before.every((block, index) => {
+    if (permitted.has(index)) return true;
+    const replacement = after[index];
+    return replacement !== undefined && identicalBlocks(block, replacement);
+  });
+}
+
+function identicalBlocks(left: ArticleBlock, right: ArticleBlock): boolean {
+  return (
+    left.kind === right.kind &&
+    left.markdown === right.markdown &&
+    left.citations.length === right.citations.length &&
+    left.citations.every((citation, index) => {
+      const other = right.citations[index];
+      return (
+        other !== undefined &&
+        citation.sourceId === other.sourceId &&
+        citation.evidenceId === other.evidenceId &&
+        citation.quote === other.quote
+      );
+    })
+  );
+}

@@ -41,6 +41,14 @@ export interface RunToolAssistedOptions<Output> {
   readonly now: () => string;
 }
 
+/**
+ * The audit record could not be written. The exchange stops rather than continuing with a tool
+ * result nothing durable accounts for.
+ */
+function unrecordable<Output>(): StructuredModelResult<Output> {
+  return { ok: false, failure: { code: "MODEL_REQUEST_FAILED", retryable: true } };
+}
+
 function refusal(
   code: ToolFailureCode,
   message: string,
@@ -89,6 +97,25 @@ export async function runToolAssisted<Output>(
     for (const request of requests) {
       const requestedAt = options.now();
       const tool = options.registry.find(request.name);
+
+      // The intent is durable before anything external happens. If it cannot be recorded, the
+      // exchange stops: a model acting on material with no durable trace of where it came from
+      // is exactly what the tool record exists to prevent.
+      const intent = recordAgentToolCall({
+        id: options.createToolCallId(),
+        runId: options.runId,
+        storyId: options.storyId,
+        sequence: recorded.length + 1,
+        tool: request.name,
+        request: request.arguments as { readonly [key: string]: never },
+        requestedAt,
+        completedAt: null,
+        outcome: "running",
+      });
+      if (!intent.ok) return { result: unrecordable(), calls: recorded };
+      const opened = await options.calls.append(intent.call);
+      if (!opened.ok) return { result: unrecordable(), calls: recorded };
+
       const outcome =
         used >= options.maximumCalls
           ? {
@@ -115,22 +142,16 @@ export async function runToolAssisted<Output>(
 
       if (used < options.maximumCalls) used += 1;
       const candidate = recordAgentToolCall({
-        id: options.createToolCallId(),
-        runId: options.runId,
-        storyId: options.storyId,
-        sequence: recorded.length + 1,
-        tool: request.name,
-        request: request.arguments as { readonly [key: string]: never },
-        requestedAt,
+        ...intent.call,
         completedAt: options.now(),
         ...(outcome.ok
           ? { outcome: "succeeded" as const, result: outcome.record }
           : { outcome: "failed" as const, failure: outcome.failure }),
-      });
-      if (candidate.ok) {
-        const appended = await options.calls.append(candidate.call);
-        if (appended.ok) recorded.push(appended.call);
-      }
+      } as AgentToolCall);
+      if (!candidate.ok) return { result: unrecordable(), calls: recorded };
+      const closed = await options.calls.complete(candidate.call);
+      if (!closed.ok) return { result: unrecordable(), calls: recorded };
+      recorded.push(closed.call);
 
       transcript.push({
         kind: "resolved",

@@ -16,6 +16,8 @@ const MODEL_FAILURE_EXPLANATIONS: Readonly<Record<ModelFailureCode, string>> = {
   MODEL_OUTPUT_INVALID: "The model replied in a shape StoryRail could not accept.",
   MODEL_RUN_ABANDONED:
     "The process running this stopped before the model answered. Nothing was recorded from it; run it again.",
+  MODEL_CORRECTION_OUT_OF_SCOPE:
+    "The Writer was asked to fix specific citations and rewrote work nobody objected to. The draft was refused.",
   MODEL_OUTPUT_UNGROUNDED:
     "The model cited evidence that does not contain what it quoted. Nothing was recorded; running it again may succeed.",
 };

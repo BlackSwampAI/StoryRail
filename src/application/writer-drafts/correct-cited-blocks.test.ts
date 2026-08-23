@@ -125,6 +125,8 @@ describe("giving the Writer one chance to correct its citations", () => {
     ]);
 
     expect(request.unsupported[0]?.problem).toContain("belongs to a different Source");
-    expect(request.instruction).toContain("Do not add new claims");
+    expect(request.instruction).toContain(
+      "every block not listed below must come back byte for byte unchanged",
+    );
   });
 });

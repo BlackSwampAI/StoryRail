@@ -15,8 +15,29 @@ function harness(
   turns: readonly ToolAssistedTurn<{ answer: string }>[],
   tools: readonly EditorialTool[],
   maximumCalls = 3,
+  faults: { readonly failAppend?: boolean; readonly failComplete?: boolean } = {},
 ) {
+  const recordedOrder: string[] = [];
   const seen: unknown[] = [];
+  const appendMock = vi.fn(async (call: AgentToolCall) => {
+    recordedOrder.push("append running");
+    if (faults.failAppend === true)
+      return {
+        ok: false as const,
+        error: { code: "AGENT_TOOL_CALL_ID_CONFLICT" as const, message: "no" },
+      };
+    appended.push(call);
+    return { ok: true as const, call };
+  });
+  const completeMock = vi.fn(async (call: AgentToolCall) => {
+    recordedOrder.push("complete");
+    return faults.failComplete === true
+      ? {
+          ok: false as const,
+          error: { code: "AGENT_TOOL_CALL_NOT_RUNNING" as const, message: "no" },
+        }
+      : { ok: true as const, call };
+  });
   const generateWithTools = vi.fn(async (request: { transcript: unknown; tools: unknown }) => {
     seen.push(request.transcript);
     const next = turns[seen.length - 1];
@@ -29,16 +50,17 @@ function harness(
   return {
     seen,
     appended,
+    recordedOrder,
+    appendMock,
+    completeMock,
     generateWithTools,
     run: () =>
       runToolAssisted({
         model: { supportsTools: true, generateWithTools } as unknown as ToolAssistedModel,
         registry: createToolRegistry(tools),
         calls: {
-          append: vi.fn(async (call: AgentToolCall) => {
-            appended.push(call);
-            return { ok: true as const, call };
-          }),
+          append: appendMock,
+          complete: completeMock,
           listByRunId: vi.fn(async () => []),
         },
         systemPrompt: "system",
@@ -54,7 +76,7 @@ function harness(
   };
 }
 
-const fetcher = (name = "fetch_url"): EditorialTool => ({
+const fetcher = (name = "fetch_url") => ({
   declaration: { name, description: "Retrieve a page.", parameters: { type: "object" } },
   execute: vi.fn(async () => ({
     ok: true as const,
@@ -238,6 +260,64 @@ describe("driving a model that has been offered tools", () => {
         (invocation) => (invocation[0] as unknown as { tools: readonly unknown[] }).tools.length,
       ),
     ).toEqual([1, 1, 1, 0]);
+  });
+
+  it("records what it is about to do before it reaches outside the system", async () => {
+    // A process that dies mid-retrieval has still retrieved something. The intent is durable
+    // first so that can never happen unrecorded.
+    const tool = fetcher();
+    const test = harness(
+      [
+        { kind: "tools", calls: [{ callId: "a", name: "fetch_url", arguments: {} }] },
+        { kind: "output", output: { answer: "done" } },
+      ],
+      [tool],
+    );
+
+    await test.run();
+
+    const appendedAt = test.appendMock.mock.invocationCallOrder[0] ?? 0;
+    const ranAt = tool.execute.mock.invocationCallOrder[0] ?? 0;
+    const completedAt = test.completeMock.mock.invocationCallOrder[0] ?? 0;
+    expect(appendedAt).toBeLessThan(ranAt);
+    expect(ranAt).toBeLessThan(completedAt);
+    expect(test.appended[0]).toMatchObject({ outcome: "running", completedAt: null });
+  });
+
+  it("stops the exchange when the intent cannot be recorded", async () => {
+    // A model acting on material with no durable trace of where it came from is exactly what
+    // the tool record exists to prevent.
+    const tool = fetcher();
+    const test = harness(
+      [{ kind: "tools", calls: [{ callId: "a", name: "fetch_url", arguments: {} }] }],
+      [tool],
+      3,
+      { failAppend: true },
+    );
+
+    const { result, calls } = await test.run();
+
+    expect(result).toMatchObject({ ok: false });
+    expect(calls).toHaveLength(0);
+    expect(tool.execute).not.toHaveBeenCalled();
+  });
+
+  it("stops the exchange when the outcome cannot be recorded", async () => {
+    const tool = fetcher();
+    const test = harness(
+      [{ kind: "tools", calls: [{ callId: "a", name: "fetch_url", arguments: {} }] }],
+      [tool],
+      3,
+      { failComplete: true },
+    );
+
+    const { result } = await test.run();
+
+    // The tool did run — that cannot be undone — and the exchange stops rather than handing
+    // the model a result nothing durable accounts for.
+    expect(tool.execute).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ ok: false });
+    expect(test.generateWithTools).toHaveBeenCalledOnce();
   });
 
   it("gives up when the model keeps reaching for tools instead of answering", async () => {
