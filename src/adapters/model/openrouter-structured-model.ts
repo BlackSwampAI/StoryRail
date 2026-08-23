@@ -37,7 +37,13 @@ interface OpenRouterChatModel {
 export const DEFAULT_MAXIMUM_INPUT_CHARACTERS = 60_000;
 
 export interface CreateOpenRouterStructuredModelOptions {
-  readonly apiKey: string;
+  /**
+   * Resolved when a request is made, never when the model is built. The runtime providers cache
+   * the runtime they construct for the life of the process, so a key read at construction would
+   * be the key that process used until it restarted, and a key changed by an operator would
+   * appear to do nothing.
+   */
+  readonly resolveApiKey: () => Promise<string>;
   readonly model: string;
   readonly timeoutMilliseconds?: number;
   readonly maximumInputCharacters?: number;
@@ -101,9 +107,6 @@ function mapFailure<Output>(error: unknown): StructuredModelResult<Output> {
 export function createOpenRouterStructuredModel(
   options: CreateOpenRouterStructuredModelOptions,
 ): StructuredModel {
-  if (options.apiKey.trim().length === 0) {
-    throw new OpenRouterStructuredModelConfigurationError("OPENROUTER_API_KEY_REQUIRED");
-  }
   const modelSlug = options.model.trim();
   if (modelSlug.length === 0) {
     throw new OpenRouterStructuredModelConfigurationError("MODEL_REQUIRED");
@@ -111,7 +114,6 @@ export function createOpenRouterStructuredModel(
   const createChatModel =
     options.createChatModel ??
     ((configuration) => new ChatOpenRouter(configuration) as unknown as OpenRouterChatModel);
-  const chatModel = createChatModel({ apiKey: options.apiKey, model: modelSlug, maxRetries: 0 });
   const timeout = options.timeoutMilliseconds ?? 60_000;
 
   return Object.freeze({
@@ -122,7 +124,22 @@ export function createOpenRouterStructuredModel(
     async generateStructured<Output>(
       request: StructuredModelRequest<Output>,
     ): Promise<StructuredModelResult<Output>> {
+      // A key the store cannot produce is, from the run's point of view, a request that could
+      // not be authenticated. Recording it as one keeps the failure inside the Agent Run the
+      // operator is looking at rather than throwing out of a route as an unexplained 500, and it
+      // is not retryable: nothing changes until somebody enters a key.
+      let apiKey: string;
       try {
+        apiKey = await options.resolveApiKey();
+        if (apiKey.trim().length === 0) {
+          throw new OpenRouterStructuredModelConfigurationError("OPENROUTER_API_KEY_REQUIRED");
+        }
+      } catch {
+        return failed("MODEL_AUTHENTICATION_FAILED", false);
+      }
+
+      try {
+        const chatModel = createChatModel({ apiKey, model: modelSlug, maxRetries: 0 });
         const structured = chatModel.withStructuredOutput(
           request.schema as ZodType<Record<string, unknown>>,
           { name: "storyrail_structured_response", strict: true },

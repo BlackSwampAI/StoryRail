@@ -12,6 +12,7 @@ import {
   type AgentProfile,
   type AgentRun,
   type AgentRunId,
+  type CredentialUnavailableError,
   type EditorialActor,
   type EvidenceReference,
   type SourceId,
@@ -70,8 +71,18 @@ export type GenerateAssignmentProposalFailure = {
         readonly code: "AGENT_RUN_ID_CONFLICT";
         readonly message: string;
         readonly runId: AgentRunId;
-      };
+      }
+    // Nothing was proposed and no run was recorded, because there is no usable key.
+    | CredentialUnavailableError;
 };
+
+/**
+ * The model a proposal will run on, or the named reason there is none. A result rather than a
+ * model, so the workflow can decline before it records a run for work it cannot do.
+ */
+export type AssignmentEditorModelResolution =
+  | { readonly ok: true; readonly model: StructuredModel }
+  | { readonly ok: false; readonly error: CredentialUnavailableError };
 
 export type GenerateAssignmentProposalResult =
   { readonly ok: true; readonly run: AgentRun } | GenerateAssignmentProposalFailure;
@@ -111,7 +122,10 @@ export function createGenerateAssignmentProposal(dependencies: {
   readonly inspections: StoryInspectionRepository;
   readonly profiles: AgentProfileRepository;
   readonly runs: AgentRunRepository;
-  readonly model: StructuredModel;
+  // Built when a proposal starts rather than when the runtime is, because both the model
+  // identifier and the credential behind it are per-Site configuration that can change without
+  // the process ever restarting.
+  readonly resolveModel: () => Promise<AssignmentEditorModelResolution>;
   readonly createAgentRunId: () => AgentRunId;
   /** The newsroom's standards, in force when the run starts. Absent is normal. */
   readonly readNewsroomStandards?: () => Promise<string | null>;
@@ -223,13 +237,16 @@ export function createGenerateAssignmentProposal(dependencies: {
       unavailableSourceIds,
       writerProfileIds: writers.map(({ id: writerId }) => writerId),
     };
+    const resolvedModel = await dependencies.resolveModel();
+    if (!resolvedModel.ok) return resolvedModel;
+    const { model } = resolvedModel;
     const identity = {
       id,
       storyId: story.id,
       profileId: editor.id,
       role: "assignment_editor" as const,
       operation: "assignment_proposal" as const,
-      model: dependencies.model.descriptor,
+      model: model.descriptor,
       prompt: ASSIGNMENT_EDITOR_PROMPT,
       requestedBy: command.requestedBy,
       startedAt,
@@ -258,7 +275,7 @@ export function createGenerateAssignmentProposal(dependencies: {
     // completion it produces continue past this point.
     const completion = (async (): Promise<GenerateAssignmentProposalResult> => {
       const standards = (await dependencies.readNewsroomStandards?.()) ?? null;
-      const generated = await dependencies.model
+      const generated = await model
         .generateStructured({
           systemPrompt: withNewsroomStandards(
             assignmentEditorSystemPrompt(editor.instructions),

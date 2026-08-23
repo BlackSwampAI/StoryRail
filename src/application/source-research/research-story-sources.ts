@@ -22,6 +22,8 @@ import {
   type AgentRunId,
   type AgentToolCallId,
   type AttachedResearchSource,
+  type CredentialUnavailableCode,
+  type CredentialUnavailableError,
   type EditorialActor,
   type EvidenceReference,
   type ModelDescriptor,
@@ -84,6 +86,7 @@ export type ResearchStorySourcesResult =
           | "RESEARCH_EVIDENCE_REQUIRED"
           | "RESEARCHER_PROFILE_UNAVAILABLE"
           | "RESEARCHER_MODEL_UNAVAILABLE"
+          | CredentialUnavailableCode
           | "AGENT_RUN_ID_CONFLICT";
         readonly message: string;
         readonly storyId?: StoryId;
@@ -105,7 +108,12 @@ export type ResearcherModelResolution =
   | { readonly ok: true; readonly model: ToolAssistedModel }
   | {
       readonly ok: false;
-      readonly error: { readonly code: "RESEARCHER_MODEL_UNAVAILABLE"; readonly message: string };
+      // A credential that is missing or unreadable resolves to a failure here, before a run is
+      // recorded, so the operator is told about the credential rather than about research that
+      // was never attempted.
+      readonly error:
+        | { readonly code: "RESEARCHER_MODEL_UNAVAILABLE"; readonly message: string }
+        | CredentialUnavailableError;
     };
 
 /**
@@ -125,7 +133,9 @@ export function createResearchStorySources(dependencies: {
   readonly extractor: SourceExtractor;
   /** What the newsroom has already published. Absent leaves the run without an archive. */
   readonly archive?: ArchiveRepository;
-  readonly resolveModel: (descriptor: ModelDescriptor | null) => ResearcherModelResolution;
+  // Resolution is asynchronous because the model identifier is per-Site configuration read
+  // from the store when the run starts, not a value the process was started with.
+  readonly resolveModel: (descriptor: ModelDescriptor | null) => Promise<ResearcherModelResolution>;
   readonly createAgentRunId: () => AgentRunId;
   readonly createToolCallId: () => AgentToolCallId;
   readonly createSourceId: () => SourceId;
@@ -208,7 +218,7 @@ export function createResearchStorySources(dependencies: {
           storyId: story.id,
         },
       };
-    const resolved = dependencies.resolveModel(profile.model);
+    const resolved = await dependencies.resolveModel(profile.model);
     if (!resolved.ok) return { ok: false, error: { ...resolved.error, storyId: story.id } };
 
     const id = dependencies.createAgentRunId();

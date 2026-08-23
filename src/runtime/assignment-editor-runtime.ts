@@ -13,9 +13,10 @@ import {
   type StartAssignmentProposalResult,
   type GenerateAssignmentProposalCommand,
 } from "@/application/assignment-proposals";
-import { agentRunId, type SiteId } from "@/domain/editorial";
+import { OPENROUTER_API_KEY_SLOT, agentRunId, type SiteId } from "@/domain/editorial";
 
 import { resolveSiteId } from "./site-configuration";
+import { createSiteStore } from "./site-store";
 import {
   loadAssignmentEditorRuntimeConfiguration,
   type AssignmentEditorRuntimeConfiguration,
@@ -52,15 +53,31 @@ export function createAssignmentEditorRuntime(
     return history.at(-1)?.text ?? null;
   };
   const createUuid = options.createUuid ?? randomUUID;
+  const store = createSiteStore({
+    pool,
+    siteId: options.siteId,
+    credentialKey: options.configuration.credentialKey,
+  });
   const generateAssignmentProposal = createGenerateAssignmentProposal({
     readNewsroomStandards,
     inspections: createPostgresStoryInspectionRepository({ pool, siteId: options.siteId }),
     profiles: createPostgresAgentProfileRepository({ pool, siteId: options.siteId }),
     runs: createPostgresAgentRunRepository({ pool }),
-    model: createOpenRouterStructuredModel({
-      apiKey: options.configuration.openRouterApiKey,
-      model: options.configuration.model,
-    }),
+    // The model this newsroom proposes assignments with, read when a proposal starts so a change
+    // in the settings screen reaches the next proposal rather than the next restart. The key is
+    // resolved here, before a run is recorded, so a newsroom with none is told about the key
+    // rather than shown a proposal that failed.
+    resolveModel: async () => {
+      const key = await store.resolveApiKey(OPENROUTER_API_KEY_SLOT);
+      if (!key.ok) return { ok: false as const, error: key.error };
+      return {
+        ok: true as const,
+        model: createOpenRouterStructuredModel({
+          resolveApiKey: async () => key.apiKey,
+          model: (await store.readModelIds()).assignmentEditor,
+        }),
+      };
+    },
     createAgentRunId: () => agentRunId(createUuid()),
     now: options.now ?? (() => new Date().toISOString()),
   });

@@ -7,15 +7,22 @@ import { resolveWriterModel } from "./writer-runtime";
 import type { StructuredModel } from "@/application/model";
 
 describe("Writer runtime configuration", () => {
-  it("allows a missing default model for Profile-owned model resolution", () => {
+  it("takes no OpenRouter key from the environment, because a key belongs to a Site", () => {
     expect(
       loadWriterRuntimeConfiguration({
         STORYRAIL_DATABASE_URL: "postgres://db",
         OPENROUTER_API_KEY: "key",
+        STORYRAIL_WRITER_MODEL: "ignored/model",
       }),
-    ).toEqual({ databaseUrl: "postgres://db", openRouterApiKey: "key", defaultModel: null });
+    ).toEqual({ databaseUrl: "postgres://db", credentialKey: null });
   });
-  it("requires database and OpenRouter configuration only when the lazy runtime is created", () => {
+  it("starts without an encryption key, so an installation with no credentials still runs", () => {
+    expect(loadWriterRuntimeConfiguration({ STORYRAIL_DATABASE_URL: "postgres://db" })).toEqual({
+      databaseUrl: "postgres://db",
+      credentialKey: null,
+    });
+  });
+  it("requires the database URL only when the lazy runtime is created", () => {
     expect(() => loadWriterRuntimeConfiguration({})).toThrow(WriterRuntimeConfigurationError);
   });
   it("prefers a Profile OpenRouter model, falls back to the default, and rejects unsupported providers", () => {

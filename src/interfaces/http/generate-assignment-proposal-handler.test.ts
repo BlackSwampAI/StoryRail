@@ -101,9 +101,7 @@ describe("generate Assignment proposal HTTP handler", () => {
   it("returns a safe 503 for missing execution configuration and redacts unexpected failures", async () => {
     const unavailable = createGenerateAssignmentProposalHttpHandler({
       getRuntime: () => {
-        throw new AssignmentEditorRuntimeConfigurationError(
-          "STORYRAIL_ASSIGNMENT_EDITOR_MODEL_REQUIRED",
-        );
+        throw new AssignmentEditorRuntimeConfigurationError();
       },
       environment: { NODE_ENV: "test", STORYRAIL_OPERATOR_ID: "operator-http-0030" },
     });

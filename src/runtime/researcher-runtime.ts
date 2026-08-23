@@ -18,6 +18,8 @@ import {
   type StartSourceResearchResult,
 } from "@/application/source-research";
 import {
+  FIRECRAWL_API_KEY_SLOT,
+  OPENROUTER_API_KEY_SLOT,
   agentRunId,
   agentToolCallId,
   sourceExtractionId,
@@ -29,6 +31,7 @@ import {
 } from "@/domain/editorial";
 
 import { resolveSiteId } from "./site-configuration";
+import { createSiteStore } from "./site-store";
 import {
   loadResearcherRuntimeConfiguration,
   type ResearcherRuntimeConfiguration,
@@ -62,8 +65,18 @@ export function createResearcherRuntime(options: {
     return history.at(-1)?.text ?? null;
   };
   const uuid = options.createUuid ?? randomUUID;
-  const resolveModel = (descriptor: ModelDescriptor | null): ResearcherModelResolution => {
-    const slug = descriptor?.model ?? options.configuration.defaultModel;
+  const store = createSiteStore({
+    pool,
+    siteId: options.siteId,
+    credentialKey: options.configuration.credentialKey,
+  });
+  const resolveModel = async (
+    descriptor: ModelDescriptor | null,
+  ): Promise<ResearcherModelResolution> => {
+    // Resolved before the run is recorded, so a newsroom with no key is told about the key.
+    const key = await store.resolveApiKey(OPENROUTER_API_KEY_SLOT);
+    if (!key.ok) return { ok: false, error: key.error };
+    const slug = descriptor?.model ?? (await store.readModelIds()).researcher;
     if (!slug || (descriptor && descriptor.provider !== "openrouter"))
       return {
         ok: false,
@@ -77,16 +90,10 @@ export function createResearcherRuntime(options: {
     return {
       ok: true,
       model: withOpenRouterTools(
-        createOpenRouterStructuredModel({
-          apiKey: options.configuration.openRouterApiKey,
-          model: slug,
-        }),
+        createOpenRouterStructuredModel({ resolveApiKey: async () => key.apiKey, model: slug }),
         {
-          chatModel: new ChatOpenRouter({
-            apiKey: options.configuration.openRouterApiKey,
-            model: slug,
-            maxRetries: 0,
-          }) as never,
+          resolveChatModel: async () =>
+            new ChatOpenRouter({ apiKey: key.apiKey, model: slug, maxRetries: 0 }) as never,
           mapFailure: () => ({
             ok: false,
             failure: { code: "MODEL_REQUEST_FAILED", retryable: true },
@@ -103,7 +110,9 @@ export function createResearcherRuntime(options: {
     runs: createPostgresAgentRunRepository({ pool }),
     toolCalls: createPostgresAgentToolCallRepository({ pool }),
     persistence: createPostgresResearchPersistence({ pool, siteId: options.siteId }),
-    extractor: createFirecrawlSourceExtractor({ apiKey: options.configuration.firecrawlApiKey }),
+    extractor: createFirecrawlSourceExtractor({
+      resolveApiKey: () => store.resolveApiKey(FIRECRAWL_API_KEY_SLOT),
+    }),
     archive: createPostgresArchiveRepository({ pool, siteId: options.siteId }),
     resolveModel,
     createAgentRunId: () => agentRunId(uuid()),

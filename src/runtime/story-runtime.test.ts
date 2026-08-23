@@ -234,6 +234,10 @@ describe("createStoryRuntime", () => {
       "rejectStory",
       "publishStory",
       "submitStoryReview",
+      "readSiteSettings",
+      "updateSiteSettings",
+      "setSiteCredential",
+      "removeSiteCredential",
       "recordStoryReviewDecision",
       "close",
     ]);

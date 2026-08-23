@@ -20,6 +20,14 @@ function statusFor(result: PrepareSourceEvidenceResult): number {
       return 422;
     case "SOURCE_EVIDENCE_PREPARATION_ID_CONFLICT":
       return 409;
+    // Nothing was attempted, and the newsroom cannot attempt it until an operator acts. Named
+    // separately so the response says which credential and which of the two remedies applies.
+    case "OPENROUTER_API_KEY_REQUIRED":
+    case "FIRECRAWL_API_KEY_REQUIRED":
+    case "CREDENTIAL_NOT_CONFIGURED":
+    case "CREDENTIAL_KEY_UNAVAILABLE":
+    case "CREDENTIAL_UNREADABLE":
+      return 503;
   }
 }
 

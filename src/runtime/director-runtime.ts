@@ -13,6 +13,7 @@ import {
   type StartRunDirectorReviewResult,
 } from "@/application/director-reviews";
 import {
+  OPENROUTER_API_KEY_SLOT,
   agentRunId,
   type EditorialActor,
   type ModelDescriptor,
@@ -20,6 +21,7 @@ import {
   type StoryId,
 } from "@/domain/editorial";
 import { resolveSiteId } from "./site-configuration";
+import { createSiteStore } from "./site-store";
 import {
   loadDirectorRuntimeConfiguration,
   type DirectorRuntimeConfiguration,
@@ -78,15 +80,27 @@ export function createDirectorRuntime(options: {
     return history.at(-1)?.text ?? null;
   };
   const uuid = options.createUuid ?? randomUUID;
+  const store = createSiteStore({
+    pool,
+    siteId: options.siteId,
+    credentialKey: options.configuration.credentialKey,
+  });
   const workflow = createRunDirectorReview({
     readNewsroomStandards,
     inspections: createPostgresStoryInspectionRepository({ pool, siteId: options.siteId }),
     profiles: createPostgresAgentProfileRepository({ pool, siteId: options.siteId }),
     runs: createPostgresAgentRunRepository({ pool }),
-    resolveModel: (descriptor) =>
-      resolveDirectorModel(descriptor, options.configuration.defaultModel, (model) =>
-        createOpenRouterStructuredModel({ apiKey: options.configuration.openRouterApiKey, model }),
-      ),
+    // The model and the key behind it are read when a review starts, so a change to either
+    // reaches the next review rather than the next restart. The credential is resolved before
+    // the run is recorded, so a newsroom with no key is told that rather than shown a review
+    // that failed.
+    resolveModel: async (descriptor) => {
+      const key = await store.resolveApiKey(OPENROUTER_API_KEY_SLOT);
+      if (!key.ok) return { ok: false as const, error: key.error };
+      return resolveDirectorModel(descriptor, (await store.readModelIds()).director, (model) =>
+        createOpenRouterStructuredModel({ resolveApiKey: async () => key.apiKey, model }),
+      );
+    },
     createAgentRunId: () => agentRunId(uuid()),
     now: options.now ?? (() => new Date().toISOString()),
   });

@@ -1,45 +1,29 @@
+import { resolveCredentialKey } from "./credential-configuration";
+
+/**
+ * What this runtime needs before it can be built, which is now only how to reach the database and
+ * how to read what the database is holding. The connector credentials and the model identifiers
+ * it used to take are per-Site values resolved when a run needs them.
+ */
 export interface SourceEvidenceRuntimeConfiguration {
   readonly databaseUrl: string;
-  readonly firecrawlApiKey: string;
+  /** Null when no key is set. An installation with no credentials stored still starts. */
+  readonly credentialKey: string | null;
 }
 
 export class SourceEvidenceRuntimeConfigurationError extends Error {
-  constructor(readonly code: "STORYRAIL_DATABASE_URL_REQUIRED" | "FIRECRAWL_API_KEY_REQUIRED") {
-    const variableName =
-      code === "STORYRAIL_DATABASE_URL_REQUIRED" ? "STORYRAIL_DATABASE_URL" : "FIRECRAWL_API_KEY";
+  readonly code = "STORYRAIL_DATABASE_URL_REQUIRED" as const;
 
-    super(`${variableName} is required.`);
+  constructor() {
+    super("STORYRAIL_DATABASE_URL is required.");
     this.name = "SourceEvidenceRuntimeConfigurationError";
   }
 }
 
-function requireEnvironmentValue(
-  environment: NodeJS.ProcessEnv,
-  variableName: "STORYRAIL_DATABASE_URL" | "FIRECRAWL_API_KEY",
-  code: "STORYRAIL_DATABASE_URL_REQUIRED" | "FIRECRAWL_API_KEY_REQUIRED",
-): string {
-  const value = environment[variableName];
-
-  if (value === undefined || value.trim().length === 0) {
-    throw new SourceEvidenceRuntimeConfigurationError(code);
-  }
-
-  return value;
-}
-
 export function loadSourceEvidenceRuntimeConfiguration(
-  environment: NodeJS.ProcessEnv = process.env,
+  environment: Readonly<Partial<NodeJS.ProcessEnv>> = process.env,
 ): SourceEvidenceRuntimeConfiguration {
-  const databaseUrl = requireEnvironmentValue(
-    environment,
-    "STORYRAIL_DATABASE_URL",
-    "STORYRAIL_DATABASE_URL_REQUIRED",
-  );
-  const firecrawlApiKey = requireEnvironmentValue(
-    environment,
-    "FIRECRAWL_API_KEY",
-    "FIRECRAWL_API_KEY_REQUIRED",
-  );
-
-  return Object.freeze({ databaseUrl, firecrawlApiKey });
+  const databaseUrl = environment.STORYRAIL_DATABASE_URL?.trim();
+  if (!databaseUrl) throw new SourceEvidenceRuntimeConfigurationError();
+  return Object.freeze({ databaseUrl, credentialKey: resolveCredentialKey(environment) });
 }

@@ -9,7 +9,6 @@ import {
   sourceExtractionId,
   sourceId,
   type ExtractedSourceDocument,
-  type RecordSourceExtractionResult,
   type SourceExtractionFailure,
   type SourceExtractorDescriptor,
   type UrlSource,
@@ -20,6 +19,7 @@ import {
   type RunSourceExtraction,
   type RunSourceExtractionCommand,
   type RunSourceExtractionDependencies,
+  type RunSourceExtractionResult,
 } from "./run-source-extraction";
 
 vi.mock("@/domain/editorial", async (importOriginal) => {
@@ -305,7 +305,7 @@ describe("createRunSourceExtraction", () => {
     const domainResult = recordSourceExtractionMock.mock.results[0]!.value;
 
     expect(result).toBe(domainResult);
-    const compatibleResult: RecordSourceExtractionResult = result;
+    const compatibleResult: RunSourceExtractionResult = result;
     expect(compatibleResult).toBe(result);
   });
 
@@ -533,7 +533,7 @@ describe("createRunSourceExtraction", () => {
     });
     const dependencies: RunSourceExtractionDependencies =
       makeDependencies(providerNeutralExtractor);
-    const run: (command: RunSourceExtractionCommand) => Promise<RecordSourceExtractionResult> =
+    const run: (command: RunSourceExtractionCommand) => Promise<RunSourceExtractionResult> =
       createRunSourceExtraction(dependencies);
 
     expect(run).toBeTypeOf("function");

@@ -23,6 +23,14 @@ function status(result: GenerateAssignmentProposalFailure): number {
       return 422;
     case "ASSIGNMENT_EDITOR_PROFILE_UNAVAILABLE":
       return 500;
+    // Nothing was attempted, and the newsroom cannot attempt it until an operator acts. Named
+    // separately so the response says which credential and which of the two remedies applies.
+    case "OPENROUTER_API_KEY_REQUIRED":
+    case "FIRECRAWL_API_KEY_REQUIRED":
+    case "CREDENTIAL_NOT_CONFIGURED":
+    case "CREDENTIAL_KEY_UNAVAILABLE":
+    case "CREDENTIAL_UNREADABLE":
+      return 503;
   }
 }
 

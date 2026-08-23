@@ -5,6 +5,8 @@ import type { AgentRunRepository, StartAgentRun } from "@/application/agent-runs
 import type { StructuredModel } from "@/application/model";
 import type { StoryInspectionRepository } from "@/application/story-inspection";
 import {
+  type CredentialUnavailableCode,
+  type CredentialUnavailableError,
   withNewsroomStandards,
   agentProfileId,
   articleBodyMarkdown,
@@ -70,10 +72,15 @@ export type DirectorModelResolution =
   | { readonly ok: true; readonly model: StructuredModel }
   | {
       readonly ok: false;
-      readonly error: {
-        readonly code: "DIRECTOR_MODEL_UNSUPPORTED" | "DIRECTOR_MODEL_UNAVAILABLE";
-        readonly message: string;
-      };
+      // A credential that is missing or unreadable resolves to a failure here, before a run is
+      // recorded, so the operator is told about the credential rather than about a review that
+      // was never attempted.
+      readonly error:
+        | {
+            readonly code: "DIRECTOR_MODEL_UNSUPPORTED" | "DIRECTOR_MODEL_UNAVAILABLE";
+            readonly message: string;
+          }
+        | CredentialUnavailableError;
     };
 
 export type RunDirectorReviewResult =
@@ -91,6 +98,7 @@ export type RunDirectorReviewResult =
           | "DIRECTOR_EVIDENCE_UNAVAILABLE"
           | "DIRECTOR_MODEL_UNSUPPORTED"
           | "DIRECTOR_MODEL_UNAVAILABLE"
+          | CredentialUnavailableCode
           | "DIRECTOR_REVIEW_ALREADY_SUCCEEDED"
           | "AGENT_RUN_ID_CONFLICT";
         readonly message: string;
@@ -114,7 +122,9 @@ export function createRunDirectorReview(dependencies: {
   readonly inspections: StoryInspectionRepository;
   readonly profiles: AgentProfileRepository;
   readonly runs: AgentRunRepository;
-  readonly resolveModel: (descriptor: ModelDescriptor | null) => DirectorModelResolution;
+  // Resolution is asynchronous because the model identifier is per-Site configuration read
+  // from the store when the run starts, not a value the process was started with.
+  readonly resolveModel: (descriptor: ModelDescriptor | null) => Promise<DirectorModelResolution>;
   readonly createAgentRunId: () => AgentRunId;
   /** The newsroom's standards, in force when the run starts. Absent is normal. */
   readonly readNewsroomStandards?: () => Promise<string | null>;
@@ -242,7 +252,7 @@ export function createRunDirectorReview(dependencies: {
           storyId: story.id,
         },
       };
-    const resolved = dependencies.resolveModel(profile.model);
+    const resolved = await dependencies.resolveModel(profile.model);
     if (!resolved.ok) return { ok: false, error: { ...resolved.error, storyId: story.id } };
 
     const id = dependencies.createAgentRunId();

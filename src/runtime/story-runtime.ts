@@ -20,6 +20,17 @@ import { createPostgresStoryRepository } from "@/adapters/story-persistence";
 import { createPostgresStoryPublicationPersistence } from "@/adapters/story-publication-persistence";
 import { createPostgresStoryRejectionPersistence } from "@/adapters/story-rejection-persistence";
 import { createPostgresStorySourceAttachmentRepository } from "@/adapters/story-source-persistence";
+import { createAesGcmCredentialCipher } from "@/adapters/credential-cipher";
+import { createPostgresSiteCredentialRepository } from "@/adapters/site-credential-persistence";
+import { createPostgresSiteSettingsRepository } from "@/adapters/site-settings-persistence";
+import {
+  createSetSiteCredential,
+  type SetSiteCredentialWorkflow,
+} from "@/application/site-credentials";
+import {
+  createUpdateSiteSettings,
+  type UpdateSiteSettingsWorkflow,
+} from "@/application/site-settings";
 import { createPostgresSourceInboxRepository } from "@/adapters/source-inbox";
 import { createPostgresSourceTriageDecisionRepository } from "@/adapters/source-triage-persistence";
 import type { SourceInboxRepository } from "@/application/source-inbox";
@@ -59,10 +70,13 @@ import {
   type AgentRunId,
   type OperatorActor,
   type ReviewDecisionValue,
+  type CredentialSlot,
   type SiteId,
 } from "@/domain/editorial";
 
+import { resolveCredentialKey } from "./credential-configuration";
 import { resolveSiteId } from "./site-configuration";
+import { DEFAULT_SITE_MODEL_IDS } from "./site-store";
 
 export interface StoryRuntime {
   readonly listNewsroomStandards: import("@/application/newsroom-standards").NewsroomStandardsRepository["list"];
@@ -88,6 +102,15 @@ export interface StoryRuntime {
     readonly storyId: import("@/domain/editorial").StoryId;
     readonly submittedBy: OperatorActor;
   }) => Promise<SubmitStoryReviewResult>;
+  readonly readSiteSettings: () => Promise<{
+    readonly settings: import("@/domain/editorial").SiteSettings;
+    readonly credentials: readonly import("@/domain/editorial").ConfiguredCredential[];
+  }>;
+  readonly updateSiteSettings: UpdateSiteSettingsWorkflow;
+  readonly setSiteCredential: SetSiteCredentialWorkflow;
+  readonly removeSiteCredential: (
+    slot: import("@/domain/editorial").CredentialSlot,
+  ) => Promise<boolean>;
   readonly recordStoryReviewDecision: (command: {
     readonly storyId: import("@/domain/editorial").StoryId;
     readonly directorRunId: AgentRunId;
@@ -101,6 +124,8 @@ export interface StoryRuntime {
 export interface CreateStoryRuntimeOptions {
   readonly databaseUrl: string;
   readonly siteId: SiteId;
+  /** Null when no key is set, which is an installation that has stored no credentials yet. */
+  readonly credentialKey?: string | null;
   readonly now?: () => string;
   readonly createUuid?: () => string;
   readonly createPool?: (configuration: PoolConfig) => Pool;
@@ -213,6 +238,17 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
     createTransitionId: () => transitionId(createUuid()),
     now,
   });
+  const siteCredentials = createPostgresSiteCredentialRepository({ pool, siteId: site });
+  const siteSettings = createPostgresSiteSettingsRepository({ pool, siteId: site });
+  const setSiteCredential = createSetSiteCredential({
+    credentials: siteCredentials,
+    siteId: site,
+    cipher: options.credentialKey
+      ? createAesGcmCredentialCipher({ key: options.credentialKey })
+      : null,
+    now,
+  });
+  const updateSiteSettings = createUpdateSiteSettings({ settings: siteSettings, now });
   let closePromise: Promise<void> | undefined;
 
   return Object.freeze({
@@ -232,6 +268,19 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
     rejectStory,
     publishStory,
     submitStoryReview,
+    // Settings and the list of configured credentials are read together because they are one
+    // screen. The credentials half carries hints and never ciphertext, which is a property of
+    // the query rather than of this method remembering to strip anything.
+    async readSiteSettings() {
+      const [stored, credentials] = await Promise.all([
+        siteSettings.find(),
+        siteCredentials.listConfigured(),
+      ]);
+      return { settings: stored ?? { models: DEFAULT_SITE_MODEL_IDS }, credentials };
+    },
+    updateSiteSettings,
+    setSiteCredential,
+    removeSiteCredential: (slot: CredentialSlot) => siteCredentials.remove(slot),
     recordStoryReviewDecision,
     close() {
       closePromise ??= Promise.resolve().then(() => pool.end());
@@ -252,6 +301,7 @@ export function createStoryRuntimeFromEnvironment(
   return createStoryRuntime({
     databaseUrl,
     siteId: resolveSiteId(options.environment ?? process.env),
+    credentialKey: resolveCredentialKey(options.environment ?? process.env),
     now: options.now,
     createUuid: options.createUuid,
     createPool: options.createPool,

@@ -30,7 +30,7 @@ afterEach(() => {
 });
 
 describe("loadSourceEvidenceRuntimeConfiguration", () => {
-  it("loads only the two approved values and preserves them exactly", () => {
+  it("loads only the database URL and the encryption key, and leaves the environment alone", () => {
     const reads: PropertyKey[] = [];
     const suppliedEnvironment = makeEnvironment({
       STORYRAIL_DATABASE_URL: DATABASE_URL,
@@ -47,13 +47,12 @@ describe("loadSourceEvidenceRuntimeConfiguration", () => {
 
     const configuration = loadSourceEvidenceRuntimeConfiguration(environment);
 
-    expect(configuration).toEqual({
-      databaseUrl: DATABASE_URL,
-      firecrawlApiKey: FIRECRAWL_API_KEY,
-    });
+    expect(configuration).toEqual({ databaseUrl: DATABASE_URL.trim(), credentialKey: null });
     expect(Object.isFrozen(configuration)).toBe(true);
     expect(suppliedEnvironment).toEqual(before);
-    expect(reads).toEqual(["STORYRAIL_DATABASE_URL", "FIRECRAWL_API_KEY"]);
+    // Firecrawl is conspicuously absent: the key is a per-Site credential now, and a runtime
+    // that read it here would hand the same key to every newsroom the installation runs.
+    expect(reads).toEqual(["STORYRAIL_DATABASE_URL", "STORYRAIL_CREDENTIAL_KEY"]);
   });
 
   it.each([undefined, "", " \t\n "])(
@@ -74,30 +73,6 @@ describe("loadSourceEvidenceRuntimeConfiguration", () => {
     },
   );
 
-  it("gives the database failure precedence when both variables are absent", () => {
-    const error = captureConfigurationError(makeEnvironment());
-
-    expect(error.code).toBe("STORYRAIL_DATABASE_URL_REQUIRED");
-  });
-
-  it.each([undefined, "", " \t\n "])(
-    "uses the safe Firecrawl error for a missing or blank API key (%j)",
-    (firecrawlApiKey) => {
-      const error = captureConfigurationError(
-        makeEnvironment({
-          STORYRAIL_DATABASE_URL: DATABASE_URL,
-          FIRECRAWL_API_KEY: firecrawlApiKey,
-        }),
-      );
-
-      expect(error).toMatchObject({
-        name: "SourceEvidenceRuntimeConfigurationError",
-        code: "FIRECRAWL_API_KEY_REQUIRED",
-        message: "FIRECRAWL_API_KEY is required.",
-      });
-    },
-  );
-
   it("keeps configuration error messages free of values and diagnostics", () => {
     const rawDiagnostic = [
       DATABASE_URL,
@@ -113,14 +88,7 @@ describe("loadSourceEvidenceRuntimeConfiguration", () => {
         RAW_DIAGNOSTIC: rawDiagnostic.join("\n"),
       }),
     );
-    const firecrawlError = captureConfigurationError(
-      makeEnvironment({
-        STORYRAIL_DATABASE_URL: DATABASE_URL,
-        RAW_DIAGNOSTIC: rawDiagnostic.join("\n"),
-      }),
-    );
-
-    for (const error of [databaseError, firecrawlError]) {
+    for (const error of [databaseError]) {
       for (const forbidden of rawDiagnostic) {
         expect(error.message).not.toContain(forbidden);
       }

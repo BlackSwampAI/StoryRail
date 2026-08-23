@@ -4,6 +4,8 @@ import type { AgentRunRepository, StartAgentRun } from "@/application/agent-runs
 import type { StructuredModel } from "@/application/model";
 import type { StoryInspectionRepository } from "@/application/story-inspection";
 import {
+  type CredentialUnavailableCode,
+  type CredentialUnavailableError,
   withNewsroomStandards,
   ARTICLE_BLOCK_KINDS,
   createArticle,
@@ -94,10 +96,15 @@ export type WriterModelResolution =
   | { readonly ok: true; readonly model: StructuredModel }
   | {
       readonly ok: false;
-      readonly error: {
-        readonly code: "WRITER_MODEL_UNSUPPORTED" | "WRITER_MODEL_UNAVAILABLE";
-        readonly message: string;
-      };
+      // A credential that is missing or unreadable resolves to a failure here, before a run is
+      // recorded, so the operator is told about the credential rather than about a model call
+      // that was never made.
+      readonly error:
+        | {
+            readonly code: "WRITER_MODEL_UNSUPPORTED" | "WRITER_MODEL_UNAVAILABLE";
+            readonly message: string;
+          }
+        | CredentialUnavailableError;
     };
 
 export type CreateWriterDraftResult =
@@ -124,6 +131,7 @@ export type CreateWriterDraftResult =
           | "WRITER_EVIDENCE_REQUIRED"
           | "WRITER_MODEL_UNSUPPORTED"
           | "WRITER_MODEL_UNAVAILABLE"
+          | CredentialUnavailableCode
           | "AGENT_RUN_ID_CONFLICT"
           | "WRITER_DRAFT_CONFLICT";
         readonly message: string;
@@ -147,7 +155,9 @@ export function createWriterDraft(dependencies: {
   readonly inspections: StoryInspectionRepository;
   readonly runs: AgentRunRepository;
   readonly persistence: WriterDraftPersistence;
-  readonly resolveModel: (descriptor: ModelDescriptor | null) => WriterModelResolution;
+  // Resolution is asynchronous because the model identifier is per-Site configuration read
+  // from the store when the run starts, not a value the process was started with.
+  readonly resolveModel: (descriptor: ModelDescriptor | null) => Promise<WriterModelResolution>;
   readonly createAgentRunId: () => AgentRunId;
   readonly createArticleId: () => ArticleId;
   readonly createRevisionId: () => ArticleRevisionId;
@@ -251,7 +261,7 @@ export function createWriterDraft(dependencies: {
         },
       };
 
-    const resolved = dependencies.resolveModel(writerProfile.model);
+    const resolved = await dependencies.resolveModel(writerProfile.model);
     if (!resolved.ok) return { ok: false, error: { ...resolved.error, storyId: story.id } };
     const id = dependencies.createAgentRunId();
     const startedAt = dependencies.now();

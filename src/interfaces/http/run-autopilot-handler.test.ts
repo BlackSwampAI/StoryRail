@@ -132,7 +132,7 @@ describe("run autopilot HTTP handler", () => {
   it("reports autopilot as unavailable when a runtime is not configured", async () => {
     const response = await createRunAutopilotHttpHandler({
       getRuntimes: () => {
-        throw new AssignmentEditorRuntimeConfigurationError("OPENROUTER_API_KEY_REQUIRED");
+        throw new AssignmentEditorRuntimeConfigurationError();
       },
       environment,
       after: () => {},

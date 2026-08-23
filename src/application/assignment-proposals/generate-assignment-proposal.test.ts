@@ -186,7 +186,7 @@ function setup(
     },
     profiles: createReferenceAgentProfileRepository(profiles),
     runs,
-    model,
+    resolveModel: async () => ({ ok: true as const, model }),
     createAgentRunId: () => agentRunId("run-0030"),
     now: vi.fn().mockReturnValueOnce("started").mockReturnValueOnce("completed"),
   });
@@ -275,7 +275,7 @@ describe("generateAssignmentProposal", () => {
       },
       profiles: createReferenceAgentProfileRepository([editor, builtInWriter]),
       runs: configured.runs,
-      model: configured.model,
+      resolveModel: async () => ({ ok: true as const, model: configured.model }),
       createAgentRunId: () => agentRunId("unused"),
       now: () => "unused",
     });

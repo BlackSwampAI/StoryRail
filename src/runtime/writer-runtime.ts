@@ -19,6 +19,7 @@ import {
   type StartCreateWriterRevisionResult,
 } from "@/application/writer-revisions";
 import {
+  OPENROUTER_API_KEY_SLOT,
   agentRunId,
   articleId,
   articleRevisionId,
@@ -29,6 +30,7 @@ import {
   type StoryId,
 } from "@/domain/editorial";
 import { resolveSiteId } from "./site-configuration";
+import { createSiteStore } from "./site-store";
 import {
   loadWriterRuntimeConfiguration,
   type WriterRuntimeConfiguration,
@@ -91,15 +93,31 @@ export function createWriterRuntime(options: {
     return history.at(-1)?.text ?? null;
   };
   const uuid = options.createUuid ?? randomUUID;
+  const store = createSiteStore({
+    pool,
+    siteId: options.siteId,
+    credentialKey: options.configuration.credentialKey,
+  });
+  // Both the model identifier and the key behind it are read per run. A Writer switched to a
+  // different model, or a key replaced after it expired, reaches the next draft rather than the
+  // next restart.
+  //
+  // The credential is resolved here rather than inside the model, because this is the last point
+  // at which a missing one can be reported as itself. A run is recorded immediately after this
+  // returns, and a run recorded for work that was never attempted is a fabricated fact.
+  const resolveModel = async (descriptor: ModelDescriptor | null) => {
+    const key = await store.resolveApiKey(OPENROUTER_API_KEY_SLOT);
+    if (!key.ok) return { ok: false as const, error: key.error };
+    return resolveWriterModel(descriptor, (await store.readModelIds()).writer, (model) =>
+      createOpenRouterStructuredModel({ resolveApiKey: async () => key.apiKey, model }),
+    );
+  };
   const workflow = createWriterDraft({
     readNewsroomStandards,
     inspections: createPostgresStoryInspectionRepository({ pool, siteId: options.siteId }),
     runs: createPostgresAgentRunRepository({ pool }),
     persistence: createPostgresWriterDraftPersistence({ pool }),
-    resolveModel: (descriptor) =>
-      resolveWriterModel(descriptor, options.configuration.defaultModel, (model) =>
-        createOpenRouterStructuredModel({ apiKey: options.configuration.openRouterApiKey, model }),
-      ),
+    resolveModel,
     createAgentRunId: () => agentRunId(uuid()),
     createArticleId: () => articleId(uuid()),
     createRevisionId: () => articleRevisionId(uuid()),
@@ -111,10 +129,7 @@ export function createWriterRuntime(options: {
     inspections: createPostgresStoryInspectionRepository({ pool, siteId: options.siteId }),
     runs: createPostgresAgentRunRepository({ pool }),
     persistence: createPostgresWriterRevisionPersistence({ pool }),
-    resolveModel: (descriptor) =>
-      resolveWriterModel(descriptor, options.configuration.defaultModel, (model) =>
-        createOpenRouterStructuredModel({ apiKey: options.configuration.openRouterApiKey, model }),
-      ),
+    resolveModel,
     createAgentRunId: () => agentRunId(uuid()),
     createRevisionId: () => articleRevisionId(uuid()),
     createTransitionId: () => transitionId(uuid()),

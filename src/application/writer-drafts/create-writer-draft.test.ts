@@ -5,6 +5,8 @@ import { createWriterDraft } from "./create-writer-draft";
 import type { WriterDraftPersistence } from "./writer-draft-persistence";
 import type { StructuredModel, StructuredModelRequest } from "@/application/model";
 import {
+  credentialUnavailable,
+  OPENROUTER_API_KEY_SLOT,
   agentProfileId,
   agentRunId,
   articleId,
@@ -178,7 +180,7 @@ describe("createWriterDraft", () => {
         listByStoryId: vi.fn(),
       },
       persistence: { persist },
-      resolveModel: () => ({
+      resolveModel: async () => ({
         ok: true,
         model,
       }),
@@ -235,7 +237,7 @@ describe("createWriterDraft", () => {
       },
       runs: { append, complete, listByStoryId: vi.fn() },
       persistence: { persist },
-      resolveModel: () => ({
+      resolveModel: async () => ({
         ok: true,
         model,
       }),
@@ -299,7 +301,7 @@ describe("createWriterDraft", () => {
         listByStoryId: vi.fn(),
       },
       persistence: { persist },
-      resolveModel: () => ({ ok: true, model }),
+      resolveModel: async () => ({ ok: true, model }),
       createAgentRunId: () => agentRunId("run-ungrounded"),
       createArticleId: () => articleId("unused"),
       createRevisionId: () => articleRevisionId("unused"),
@@ -353,5 +355,46 @@ describe("createWriterDraft", () => {
       ),
     ).toMatchObject({ ok: false, error: { code: "WRITER_EVIDENCE_REQUIRED" } });
     expect(resolveModel).not.toHaveBeenCalled();
+  });
+
+  it("records no Agent Run when the newsroom has no OpenRouter key", async () => {
+    const facts = fixture();
+    const append = vi.fn();
+    const workflow = createWriterDraft({
+      inspections: {
+        inspect: vi.fn(async () => ({ ok: true as const, inspection: facts.inspection })),
+      },
+      runs: { append, complete: vi.fn(), listByStoryId: vi.fn() },
+      persistence: { persist: vi.fn() },
+      resolveModel: async () => ({
+        ok: false as const,
+        error: credentialUnavailable(
+          OPENROUTER_API_KEY_SLOT,
+          "CREDENTIAL_NOT_CONFIGURED",
+          "No openrouter_api_key has been configured for this newsroom.",
+        ),
+      }),
+      createAgentRunId: () => agentRunId("unused"),
+      createArticleId: () => articleId("unused"),
+      createRevisionId: () => articleRevisionId("unused"),
+      createTransitionId: () => transitionId("unused"),
+      now: () => "now",
+    });
+
+    const result = await settleAgentRun(
+      workflow({ storyId: facts.story.id, requestedBy: facts.assignment.assignedBy }),
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "OPENROUTER_API_KEY_REQUIRED",
+        reason: "CREDENTIAL_NOT_CONFIGURED",
+        slot: "openrouter_api_key",
+      },
+    });
+    // A run says a Writer was asked to write. None was, so recording one would be a fiction that
+    // outlives the missing key.
+    expect(append).not.toHaveBeenCalled();
   });
 });
