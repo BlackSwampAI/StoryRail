@@ -2,15 +2,19 @@
 
 [![CI](https://github.com/BlackSwampAI/StoryRail/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/BlackSwampAI/StoryRail/actions/workflows/ci.yml)
 
-> An agent-first editorial control plane that turns incoming evidence into deliberate, reviewable publishing work.
+> An agentic editorial system where evidence, claims, model actions, review decisions, and publication provenance are inspectable and mechanically constrained instead of merely prompted.
 
-StoryRail helps solo publishers and small editorial teams preserve source evidence, decide what deserves coverage, organize Stories, and coordinate bounded, supervised editorial agents. It is a headless editorial system, not a page-building CMS.
+StoryRail helps solo publishers and small editorial teams preserve source evidence, decide what deserves coverage, organize Stories, and run bounded editorial agents whose work can be checked rather than trusted. It is a headless editorial system, not a page-building CMS.
+
+Plenty of tools can chain a researcher, a writer, and an editor together. What is unusual here is that the chain is held to its evidence: a reader can open any claim and see the passage that supports it, a Writer that cites something the evidence does not contain is refused before anything is written, a Director cannot approve work without quoting the passage it judged, and every external tool call becomes part of the durable record.
 
 **Status: pre-alpha and under active development. StoryRail is not production-ready.**
 
 ## What is StoryRail?
 
 StoryRail separates evidence acquisition, editorial decisions, writing, review, and publication into explicit stages with durable state and human supervision.
+
+The constraints are mechanical rather than prompted. An Article is an ordered list of blocks, and a block that asserts a fact must carry the Source, the evidence record, and the passage it relied on. That passage is checked against the evidence before anything is persisted, in the domain and again in a database constraint, so an unsupported claim is as impossible to record as an invalid state transition.
 
 Its central distinction is **Source ≠ Story**:
 
@@ -28,7 +32,7 @@ Traditional CMS products begin with an article editor. StoryRail begins earlier:
 source evidence → editorial decision → Story → assignment → writing → review → publication
 ```
 
-Small teams need to preserve provenance, make automation inspectable, and keep editorial and publishing decisions under operator control. The current pre-alpha exposes those primitives manually before automating them with agents.
+Small teams need to preserve provenance, make automation inspectable, and keep editorial and publishing decisions under operator control. Every stage can be driven by hand; automation is an operator-authorised policy over the same durable workflows, never a separate path around them.
 
 ## Current workflow
 
@@ -44,19 +48,25 @@ flowchart LR
     DECIDE -->|New Story| NEW[Persisted Story + Source]
     DECIDE -->|Existing Story| EXISTING[Attach Source to Story]
     DECIDE -->|Skip| SKIP[Durable skip decision]
-    NEW --> PROPOSE[Optional supervised Assignment Editor suggestion]
-    EXISTING --> PROPOSE
+    NEW --> RESEARCH[Optional Researcher: retrieve and attach more Sources]
+    EXISTING --> RESEARCH
+    RESEARCH --> PROPOSE[Optional supervised Assignment Editor suggestion]
     PROPOSE --> ASSIGNMENT_REVIEW[Operator review and editing]
     ASSIGNMENT_REVIEW --> ASSIGN[Durable Assignment + intake-to-assigned transition]
     ASSIGN --> WRITE[Supervised Writer + Article Revision 1]
-    WRITE --> SUBMIT[Operator sends Article to review]
-    SUBMIT --> DIRECTOR[Advisory Director review]
-    DIRECTOR --> OPERATOR{Operator decision}
+    WRITE --> GROUND{Every claim supported by its cited evidence?}
+    GROUND -->|No| CORRECT[One citation correction, then refusal]
+    GROUND -->|Yes| SUBMIT[Article sent to review]
+    SUBMIT --> DIRECTOR[Director review, quoting what it judged]
+    DIRECTOR --> OPERATOR{Review decision}
     OPERATOR -->|Approve| APPROVED[Approved]
     OPERATOR -->|Request changes| CHANGES[Changes requested]
     CHANGES --> REVISE[Supervised Writer + next immutable revision]
-    REVISE --> SUBMIT
+    REVISE --> GROUND
+    APPROVED --> PUBLISH[Operator publication + terminal transition]
 ```
+
+Every step above can be taken by hand. **Autopilot** runs the same sequence unattended from an Intake Story, optionally researching first, writing each durable record through the same workflows with the operator as the actor.
 
 Prepared Evidence is model-derived, cleaned evidence. It never replaces the immutable raw extraction; both histories remain available for audit and survive triage and reload.
 
@@ -83,12 +93,27 @@ Durable Profiles configure the Assignment Editor, Writer, and Director/editor-in
 - Explicit operator rejection from Intake, Assigned, In Progress, In Review, or Changes Requested, with a required reason and an atomic terminal Story transition receipt.
 - Supervised Writer revisions after Request Changes, with immutable Revision 2/3 history, exact evidence reuse, operator-owned revision direction, and an atomic return to In Progress.
 - Operator review and editing of suggestions in the existing Assignment form; the manual Assignment remains the authoritative state-mutation boundary and remains attributed to the operator.
+- Operator publication of an Approved Story as a durable terminal transition with a required reason.
+- **Cited Articles.** A Revision is an ordered list of blocks. A `claim` block must carry at least one citation naming the Source, the evidence record, and the passage relied on; `context` blocks are the Writer's own prose and carry none. Both rules hold in the domain and in database constraints.
+- **Mechanical grounding.** Every quote is checked against the evidence the Assignment actually carries before anything is persisted. Typography, re-wrapping, and over-escaping are forgiven; paraphrase, invention, and quoting across a paragraph break are not. A refused draft records which citations failed and what they claimed to quote.
+- **One citation correction.** A Writer whose citations do not hold is handed the specific findings against it and may correct them once, checked again by the same rule. A corrected draft is recorded as corrected, never as clean.
+- **Grounding measurement.** Every Revision reports how much of its prose is attributed to evidence and how much occurs verbatim in that evidence, derived on demand so it applies to Revisions written before citations existed.
+- **A provenance reader.** Any claim in the Article opens to show the passage it rests on, the Source as a followable link, and whether the record read was prepared or raw. Uncited prose is labelled as the Writer's own framing.
+- **A Director that must point at what it read.** Six checks including claim support, each required to quote the passage of the Article it judges, verified against that Article before the review is recorded.
+- **A working record.** Runs, transitions, and review decisions interleaved in the order they happened, with the model, duration, and — for a refusal — the exact passages that could not be supported.
+- **Bounded tool access.** Tools declare themselves through an open registry with JSON Schema, so an operator's own tools can be added. Two ceilings bound an exchange, calls are recorded durably, and tool output is handed to models as untrusted data.
+- **A Researcher.** Reads the evidence already attached, follows what it points at, retrieves those pages, and attaches what is worth citing. Only a page it actually retrieved can be attached, and retrieved material becomes a Source with its own immutable extraction.
+- **Autopilot.** An operator-authorised policy that runs an Intake Story to publication unattended, optionally researching first. Every durable record is still written by the same workflows with the operator as the actor, and every reason says the decision was made under autopilot.
 
 ## Where StoryRail is going
 
-The planned alpha path continues from a Story through an Assignment Editor, a structured Assignment, a configurable Writer, a persisted Article, and independent Director/editor-in-chief review. The intended bounded revision loop ends in an operator-controlled approval or rejection, followed by a separate, explicit publish/export transition.
+The editorial path from Source to publication is implemented end to end and can run unattended. The work ahead is durability, curation, and delivery rather than new stages:
 
-Automatic Assignment Editor decisions and automatic Director decisions are not implemented. Future work includes publication and retrieval hardening.
+- **Durable automation and reconciliation.** Autopilot sequencing is still in-memory. Nothing durable records that a Story is under a policy run, so a process that dies between steps leaves a run marked `running` forever. Tool calls are recorded after the external call rather than before it. Both need the treatment AgentRuns already got.
+- **A correction-scope invariant.** The citation correction turn is told not to rewrite unrelated blocks; nothing yet enforces it.
+- **Richer automation provenance.** An autopilot decision is attributed to the operator who authorised the run, with a reason that says so. A distinct execution mode would let an audit separate "Chris authorised this" from "the system executed this particular decision."
+- **A knowledge corpus.** House style as instructions, and reference knowledge as citable evidence, kept deliberately distinct so a Writer can never cite the style guide as support for a news claim.
+- **Publishing destinations.** Publication is a durable editorial transition today; where a published Story is delivered remains a separate, replaceable concern.
 
 ## Core concepts
 
@@ -103,7 +128,13 @@ Automatic Assignment Editor decisions and automatic Director decisions are not i
 - **Assignment Proposal** — a supervised Assignment Editor suggestion that prefills the manual Assignment form but cannot create an Assignment or transition a Story.
 - **AgentRun** — one immutable execution record containing bounded input references, configuration, timing, and a structured success or failure outcome.
 - **Writer and Article** — supervised Writer execution creates immutable Article revisions from the Assignment and exact durable evidence; it cannot browse, use tools, or send work to review.
-- **Director** — an independently supervised advisory review role whose recommendation cannot mutate Article or Story state.
+- **Director** — an independently supervised advisory review role whose recommendation cannot mutate Article or Story state, and which must quote the passage each of its checks judged.
+- **Article Block** — one ordered piece of a Revision, labelled `claim`, `context`, or `heading`. The label decides whether attribution is required or forbidden.
+- **Citation** — the Source, the evidence record, and the verbatim passage a claim rests on, stored so support can be checked rather than trusted.
+- **Grounding** — the mechanical check that every cited passage appears in the evidence it names, owned by the Source it names. It runs before anything durable is written.
+- **Researcher** — a bounded role that retrieves further evidence for a Story and attaches what is worth citing, recording every tool call it makes.
+- **Tool Call** — a durable record of what an agent reached for and what came back. It is an audit fact, not a copy of the material, which becomes evidence with its own record.
+- **Autopilot** — an operator-authorised policy that runs the existing workflows in sequence without further clicks. It decides only when each step runs; it writes nothing itself.
 
 ## Architecture
 
@@ -134,10 +165,11 @@ pnpm dev
 
 Before starting the app, configure `.env` and apply every SQL file in `database/migrations/` externally in numeric order. StoryRail does not currently include a migration runner and does not apply migrations automatically; use the PostgreSQL administration or migration tool appropriate to your environment.
 
-For an existing development database already migrated through 0031, maintainers can apply Batch 0038 with the installed `pg` package (no host `psql` required):
+Every migration is plain SQL and safe to apply with any tool. Where no host `psql` is available, the installed `pg` package can apply them in order:
 
 ```bash
-STORYRAIL_DATABASE_URL=postgresql://storyrail:storyrail_dev@127.0.0.1:5432/storyrail node --input-type=module --eval "import { readFile } from 'node:fs/promises'; import pg from 'pg'; const client = new pg.Client({ connectionString: process.env.STORYRAIL_DATABASE_URL }); await client.connect(); try { await client.query(await readFile('database/migrations/0038-supervised-director-review.sql', 'utf8')); } finally { await client.end(); }"
+STORYRAIL_DATABASE_URL=postgresql://user:password@127.0.0.1:5432/storyrail \
+  node --input-type=module --eval "import { readdir, readFile } from 'node:fs/promises'; import pg from 'pg'; const files = (await readdir('database/migrations')).filter((name) => name.endsWith('.sql')).sort(); const client = new pg.Client({ connectionString: process.env.STORYRAIL_DATABASE_URL }); await client.connect(); try { for (const file of files) { await client.query(await readFile(\`database/migrations/\${file}\`, 'utf8')); console.log('applied', file); } } finally { await client.end(); }"
 ```
 
 Open [http://localhost:3000](http://localhost:3000) to use the development newsroom.
@@ -176,7 +208,9 @@ pnpm build
 
 ## Project status and limitations
 
-StoryRail is a development-oriented pre-alpha. It currently has no authentication, migrations are external/manual, and some anti-bot publishers remain inaccessible through Firecrawl. Supervised Assignment proposals, manual Assignment, bounded Writer drafting/revision, Director review, operator approval/request-changes decisions, and explicit operator rejection are implemented. Publishing is not.
+StoryRail is a development-oriented pre-alpha. It has no authentication, migrations are external and manual, and some anti-bot publishers remain inaccessible through Firecrawl.
+
+The editorial path is implemented from Source intake through research, assignment, cited drafting, review, and publication, and can run unattended. What is not yet safe for production is the durability of that automation: autopilot sequencing is held in memory, so a process that dies mid-sequence leaves a run marked `running` with nothing to resume or abandon it, and tool calls are recorded after the external call rather than before. Free and low-cost models also fail a meaningful share of the time; StoryRail records those failures rather than retrying silently, so an unattended run may stop partway with a durable reason.
 
 ## Technical documentation
 
