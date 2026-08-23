@@ -93,7 +93,7 @@ When `STORYRAIL_TEST_DATABASE_URL` is absent, `pnpm test` skips the PostgreSQL s
 - [Application workflows](architecture/application-workflows.md) — use-case orchestration and repository ports.
 - [Adapters and runtime composition](architecture/adapters-and-runtime.md) — PostgreSQL, Firecrawl, and OpenRouter adapters composed into focused runtimes including the Director runtime.
 - [HTTP API endpoints](architecture/http-api.md) — Next.js route handlers and status code maps.
-- [PostgreSQL schema and migrations](architecture/database-schema.md) — the `storyrail` schema and migrations `0012`–`0054`.
+- [PostgreSQL schema and migrations](architecture/database-schema.md) — the `storyrail` schema and migrations `0012`–`0061`.
 - [Newsroom UI shell](architecture/newsroom-ui.md) — resizable desk, staff sidebar, Story workspace with assignment, writing, Writer revision, review submission, Director review, operator decision, and operator Story rejection, and SafeMarkdown.
 - [Repository source map](architecture/source-map.md) — canonical file and directory locations.
 - [Engineering workflow and testing](engineering-workflow.md) — branch/batch discipline, verification ownership, CI contract, and the testing strategy.
