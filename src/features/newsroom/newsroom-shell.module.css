@@ -473,6 +473,56 @@
   overflow-wrap: anywhere;
 }
 
+/*
+ * Creating a Writer lives at the foot of this page, below the whole standards editor, so the
+ * grid offers no way to get there. This tile is a link to that form and nothing more: it does
+ * not open a dialog, because there is no dialog to open, and an affordance that promises one
+ * would be worse than the scroll it replaces.
+ */
+.newWriterTile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  border: 1px dashed var(--tone-45);
+  border-radius: 0.9rem;
+  background: none;
+  padding: 1.25rem;
+  min-height: 8rem;
+  color: var(--tone-114);
+  font-size: 0.92rem;
+  font-weight: 700;
+  text-align: center;
+  text-decoration: none;
+}
+
+.newWriterTile:hover {
+  border-color: var(--tone-54);
+  color: var(--tone-149);
+}
+
+.newWriterTile:focus-visible {
+  outline: 3px solid var(--tone-107);
+  outline-offset: 3px;
+}
+
+.newWriterTileMark {
+  display: grid;
+  place-items: center;
+  border: 1px solid currentcolor;
+  border-radius: 999px;
+  width: 2rem;
+  height: 2rem;
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+/* The form is a scroll target, never a tab stop of its own. */
+.profileForm:focus {
+  outline: none;
+}
+
 .profileForm {
   display: grid;
   gap: 0.75rem;
@@ -2432,7 +2482,9 @@
 .primaryAction:disabled,
 .secondaryAction:disabled,
 .tertiaryAction:disabled {
-  cursor: wait;
+  /* Inert, not working. The wait cursor is reserved for a control that is actually busy, the
+     way .storyCreationForm gates it behind aria-busy. */
+  cursor: not-allowed;
   opacity: 0.6;
 }
 
@@ -3383,7 +3435,13 @@
   text-transform: uppercase;
 }
 
-.profileCard {
+/*
+ * The operator card on the account screen. Named for the screen it belongs to because a plain
+ * .profileCard here silently took over the Agent Profile cards defined earlier in this file:
+ * CSS Modules scope a class to its stylesheet, not to the component that uses it, so two
+ * components asking for the same name get the same class and the later rule wins.
+ */
+.accountProfileCard {
   display: flex;
   align-items: center;
   gap: 1.1rem;
@@ -3393,12 +3451,12 @@
   padding: 1.25rem;
 }
 
-.profileCard h2 {
+.accountProfileCard h2 {
   margin: 0 0 0.2rem;
   color: var(--tone-149);
 }
 
-.profileCard p {
+.accountProfileCard p {
   margin: 0;
   color: var(--tone-92);
   font-size: 0.9rem;

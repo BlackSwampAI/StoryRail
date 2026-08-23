@@ -68,6 +68,18 @@ describe("AgentProfilesWorkspace", () => {
     expect(screen.getByText("No agents are running")).toBeVisible();
   });
 
+  it("offers a link from the profile grid to the creation form it actually has", async () => {
+    render(<AgentProfilesWorkspace requests={client()} />);
+    const link = await screen.findByRole("link", { name: /New Writer profile/ });
+
+    // A link, not a button: creating a Writer happens in the form at the foot of this page and
+    // nowhere else, so the affordance must go there rather than imply a dialog that does not exist.
+    expect(link).toHaveAttribute("href", "#create-writer-profile");
+    expect(
+      screen.getByRole("heading", { name: "Create Writer profile" }).closest("form"),
+    ).toHaveAttribute("id", "create-writer-profile");
+  });
+
   it("posts exact no-model configuration and shows the authoritative created profile without reload", async () => {
     const created = {
       id: agentProfileId("custom-workspace-0027"),
