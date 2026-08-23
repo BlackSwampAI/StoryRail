@@ -7,6 +7,7 @@ import type {
   AgentRunId,
   EditorialActor,
   OperatorId,
+  SiteId,
   SourceId,
   StoryId,
   StorySourceAttachment,
@@ -19,6 +20,7 @@ import type {
 
 export interface CreatePostgresStorySourceAttachmentRepositoryOptions {
   readonly pool: Pool;
+  readonly siteId: SiteId;
 }
 
 interface AttachmentPayloadRow extends QueryResultRow {
@@ -126,6 +128,7 @@ function serializeAttachment(attachment: StorySourceAttachment): string {
 
 async function findAttachment(
   pool: Pool,
+  siteId: SiteId,
   storyIdentity: StoryId,
   sourceIdentity: SourceId,
 ): Promise<StorySourceAttachment | null> {
@@ -133,14 +136,16 @@ async function findAttachment(
     `SELECT story_id, source_id, payload
      FROM storyrail.story_source_attachments
      WHERE story_id = $1
-       AND source_id = $2`,
-    [storyIdentity, sourceIdentity],
+       AND source_id = $2
+       AND site_id = $3`,
+    [storyIdentity, sourceIdentity, siteId],
   );
   return result.rows[0] ? decodeAttachment(result.rows[0]) : null;
 }
 
 async function parentExists(
   pool: Pool,
+  siteId: SiteId,
   table: "stories" | "url_sources",
   id: string,
 ): Promise<boolean> {
@@ -150,8 +155,9 @@ async function parentExists(
        SELECT 1
        FROM storyrail.${table}
        WHERE ${identityColumn} = $1
+         AND site_id = $2
      ) AS exists`,
-    [id],
+    [id, siteId],
   );
 
   if (typeof result.rows[0]?.exists !== "boolean") {
@@ -164,28 +170,30 @@ async function parentExists(
 export function createPostgresStorySourceAttachmentRepository(
   options: CreatePostgresStorySourceAttachmentRepositoryOptions,
 ): StorySourceAttachmentRepository {
-  const { pool } = options;
+  const { pool, siteId } = options;
 
   return {
     async attach({ attachment }): Promise<AttachStorySourceResult> {
       const payload = serializeAttachment(attachment);
       const inserted = await pool.query<AttachmentPayloadRow>(
-        `INSERT INTO storyrail.story_source_attachments (story_id, source_id, payload)
-         SELECT $1, $2, $3::jsonb
+        `INSERT INTO storyrail.story_source_attachments (story_id, source_id, payload, site_id)
+         SELECT $1, $2, $3::jsonb, $4
          FROM storyrail.stories
          CROSS JOIN storyrail.url_sources
          WHERE stories.story_id = $1
            AND url_sources.source_id = $2
+           AND stories.site_id = $4
+           AND url_sources.site_id = $4
          ON CONFLICT DO NOTHING
          RETURNING story_id, source_id, payload`,
-        [attachment.storyId, attachment.sourceId, payload],
+        [attachment.storyId, attachment.sourceId, payload, siteId],
       );
 
       if (inserted.rows[0]) {
         return { ok: true, attachment: decodeAttachment(inserted.rows[0]) };
       }
 
-      const existing = await findAttachment(pool, attachment.storyId, attachment.sourceId);
+      const existing = await findAttachment(pool, siteId, attachment.storyId, attachment.sourceId);
 
       if (existing) {
         if (isDeepStrictEqual(existing, attachment)) {
@@ -204,7 +212,7 @@ export function createPostgresStorySourceAttachmentRepository(
         };
       }
 
-      if (!(await parentExists(pool, "stories", attachment.storyId))) {
+      if (!(await parentExists(pool, siteId, "stories", attachment.storyId))) {
         return {
           ok: false,
           error: {
@@ -215,7 +223,7 @@ export function createPostgresStorySourceAttachmentRepository(
         };
       }
 
-      if (!(await parentExists(pool, "url_sources", attachment.sourceId))) {
+      if (!(await parentExists(pool, siteId, "url_sources", attachment.sourceId))) {
         return {
           ok: false,
           error: {

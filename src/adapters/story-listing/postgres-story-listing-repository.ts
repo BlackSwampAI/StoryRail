@@ -3,10 +3,11 @@ import { isDeepStrictEqual } from "node:util";
 import type { Pool, QueryResultRow } from "pg";
 
 import type { StoryListItem, StoryListingRepository } from "@/application/story-listing";
-import { STORY_STATES, type Story, type StoryState } from "@/domain/editorial";
+import { STORY_STATES, type SiteId, type Story, type StoryState } from "@/domain/editorial";
 
 export interface CreatePostgresStoryListingRepositoryOptions {
   readonly pool: Pool;
+  readonly siteId: SiteId;
 }
 
 interface StoryListingRow extends QueryResultRow {
@@ -77,7 +78,7 @@ function decodeSourceCount(value: unknown): number {
 export function createPostgresStoryListingRepository(
   options: CreatePostgresStoryListingRepositoryOptions,
 ): StoryListingRepository {
-  const { pool } = options;
+  const { pool, siteId } = options;
 
   return {
     async list(): Promise<readonly StoryListItem[]> {
@@ -90,8 +91,10 @@ export function createPostgresStoryListingRepository(
          FROM storyrail.stories AS story
          LEFT JOIN storyrail.story_source_attachments AS attachment
            ON attachment.story_id = story.story_id
+         WHERE story.site_id = $1
          GROUP BY story.story_id, story.state, story.revision_cycle, story.payload
          ORDER BY story.story_id COLLATE "C" ASC`,
+        [siteId],
       );
 
       return result.rows.map((row) => ({

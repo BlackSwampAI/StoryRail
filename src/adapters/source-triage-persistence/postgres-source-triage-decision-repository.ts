@@ -13,6 +13,7 @@ import {
   type AgentRunId,
   type EditorialActor,
   type OperatorId,
+  type SiteId,
   type SourceId,
   type SourceTriageDecision,
   type SourceTriageDecisionKind,
@@ -134,13 +135,16 @@ async function exists(pool: Pool, sql: string, parameters: readonly unknown[]): 
 
 export function createPostgresSourceTriageDecisionRepository(options: {
   readonly pool: Pool;
+  readonly siteId: SiteId;
 }): SourceTriageDecisionRepository {
   const findBySourceId = async (sourceIdentity: SourceId) => {
     const result = await options.pool.query<TriageRow>(
-      `SELECT source_id, decision, story_id, payload
-       FROM storyrail.source_triage_decisions
-       WHERE source_id = $1`,
-      [sourceIdentity],
+      `SELECT triage.source_id, triage.decision, triage.story_id, triage.payload
+       FROM storyrail.source_triage_decisions AS triage
+       JOIN storyrail.url_sources AS source ON source.source_id = triage.source_id
+       WHERE triage.source_id = $1
+         AND source.site_id = $2`,
+      [sourceIdentity, options.siteId],
     );
     return result.rows[0] ? decodeDecision(result.rows[0]) : null;
   };
@@ -154,6 +158,7 @@ export function createPostgresSourceTriageDecisionRepository(options: {
          SELECT $1, $2, $3, $4::jsonb
          FROM storyrail.url_sources AS source
          WHERE source.source_id = $1
+           AND source.site_id = $5
            AND (
              ($2 = 'skip' AND NOT EXISTS (
                SELECT 1 FROM storyrail.story_source_attachments
@@ -167,7 +172,7 @@ export function createPostgresSourceTriageDecisionRepository(options: {
            )
          ON CONFLICT DO NOTHING
          RETURNING source_id, decision, story_id, payload`,
-        [decision.sourceId, decision.decision, decision.storyId, payload],
+        [decision.sourceId, decision.decision, decision.storyId, payload, options.siteId],
       );
       if (inserted.rows[0]) {
         return { ok: true, triageDecision: decodeDecision(inserted.rows[0]) };
@@ -189,8 +194,10 @@ export function createPostgresSourceTriageDecisionRepository(options: {
 
       const sourceExists = await exists(
         options.pool,
-        `SELECT EXISTS (SELECT 1 FROM storyrail.url_sources WHERE source_id = $1) AS exists`,
-        [decision.sourceId],
+        `SELECT EXISTS (
+           SELECT 1 FROM storyrail.url_sources WHERE source_id = $1 AND site_id = $2
+         ) AS exists`,
+        [decision.sourceId, options.siteId],
       );
       if (!sourceExists) {
         return {

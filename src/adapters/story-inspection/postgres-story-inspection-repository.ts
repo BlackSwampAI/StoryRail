@@ -14,6 +14,7 @@ import type {
   CanonicalSourceUrl,
   EditorialActor,
   OperatorId,
+  SiteId,
   SourceEvidencePreparation,
   SourceExtraction,
   SourceId,
@@ -43,6 +44,7 @@ import { decodePostgresReviewDecision } from "../review-persistence";
 
 export interface CreatePostgresStoryInspectionRepositoryOptions {
   readonly pool: Pool;
+  readonly siteId: SiteId;
 }
 
 interface StoryInspectionRow extends QueryResultRow {
@@ -421,7 +423,7 @@ function decodeReviewDecisions(row: StoryInspectionRow): ReviewDecision[] {
 export function createPostgresStoryInspectionRepository(
   options: CreatePostgresStoryInspectionRepositoryOptions,
 ): StoryInspectionRepository {
-  const { pool } = options;
+  const { pool, siteId } = options;
 
   return {
     async inspect(storyIdentity): Promise<InspectStoryResult> {
@@ -521,8 +523,9 @@ export function createPostgresStoryInspectionRepository(
          LEFT JOIN storyrail.articles AS article
            ON article.story_id = story.story_id
          WHERE story.story_id = $1
+           AND story.site_id = $2
          ORDER BY attachment.source_id COLLATE "C" ASC`,
-        [storyIdentity],
+        [storyIdentity, siteId],
       );
 
       if (result.rows.length === 0) {

@@ -12,6 +12,7 @@ import {
   type CanonicalSourceUrl,
   type EditorialActor,
   type OperatorId,
+  type SiteId,
   type SourceEvidencePreparation,
   type SourceExtraction,
   type SourceId,
@@ -109,6 +110,7 @@ function preparations(value: unknown, sourceId: SourceId): SourceEvidencePrepara
 
 export function createPostgresSourceInboxRepository(options: {
   readonly pool: Pool;
+  readonly siteId: SiteId;
 }): SourceInboxRepository {
   return {
     async listPending() {
@@ -127,7 +129,8 @@ export function createPostgresSourceInboxRepository(options: {
                   WHERE preparation.source_id = source.source_id
                 ), '[]'::jsonb) AS preparation_payloads
          FROM storyrail.url_sources AS source
-         WHERE NOT EXISTS (
+         WHERE source.site_id = $1
+         AND NOT EXISTS (
            SELECT 1 FROM storyrail.story_source_attachments AS attachment
            WHERE attachment.source_id = source.source_id
          )
@@ -136,6 +139,7 @@ export function createPostgresSourceInboxRepository(options: {
            WHERE triage.source_id = source.source_id
          )
          ORDER BY source.source_id COLLATE "C" ASC`,
+        [options.siteId],
       );
       return result.rows.map((row) => {
         const durableSource = source(row);

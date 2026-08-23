@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createFirecrawlSourceExtractor } from "@/adapters/source-extraction";
 import { createPostgresSourceRepositories } from "@/adapters/source-persistence";
+import { siteId } from "@/domain/editorial";
 import { createRunSourceExtraction } from "@/application/source-extraction";
 import {
   createExtractPersistedSource,
@@ -78,6 +79,7 @@ vi.mock("@/application/source-evidence", async (importOriginal) => {
   };
 });
 
+const SITE = siteId("site-default");
 const DATABASE_URL = "opaque-runtime-database-configuration";
 const FIRECRAWL_API_KEY = "opaque-runtime-firecrawl-configuration";
 const SOURCE_UUID = "10000000-0000-4000-8000-000000000013";
@@ -176,6 +178,7 @@ function makeRuntimeOptions(
 ): CreateSourceEvidenceRuntimeOptions {
   return {
     configuration: { databaseUrl: DATABASE_URL, firecrawlApiKey: FIRECRAWL_API_KEY },
+    siteId: SITE,
     fetch: successfulFetch(),
     now: vi.fn(() => RECEIVED_AT),
     createUuid: vi.fn(() => SOURCE_UUID),
@@ -213,7 +216,10 @@ describe("createSourceEvidenceRuntime", () => {
     expect(createPool).toHaveBeenCalledOnce();
     expect(createPool).toHaveBeenCalledWith({ connectionString: DATABASE_URL });
     expect(createPostgresSourceRepositories).toHaveBeenCalledOnce();
-    expect(createPostgresSourceRepositories).toHaveBeenCalledWith({ pool: controlledPool.pool });
+    expect(createPostgresSourceRepositories).toHaveBeenCalledWith({
+      pool: controlledPool.pool,
+      siteId: SITE,
+    });
     expect(createFirecrawlSourceExtractor).toHaveBeenCalledOnce();
     expect(createFirecrawlSourceExtractor).toHaveBeenCalledWith({
       apiKey: FIRECRAWL_API_KEY,
@@ -507,7 +513,7 @@ describe("createSourceEvidenceRuntimeFromEnvironment", () => {
       createPool,
     });
 
-    expect(reads).toEqual(["STORYRAIL_DATABASE_URL", "FIRECRAWL_API_KEY"]);
+    expect(reads).toEqual(["STORYRAIL_DATABASE_URL", "FIRECRAWL_API_KEY", "STORYRAIL_SITE_ID"]);
     expect(createPool).toHaveBeenCalledWith({ connectionString: DATABASE_URL });
     expect(createFirecrawlSourceExtractor).toHaveBeenCalledWith({
       apiKey: FIRECRAWL_API_KEY,

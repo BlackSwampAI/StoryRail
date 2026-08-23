@@ -13,8 +13,9 @@ import {
   type StartAssignmentProposalResult,
   type GenerateAssignmentProposalCommand,
 } from "@/application/assignment-proposals";
-import { agentRunId } from "@/domain/editorial";
+import { agentRunId, type SiteId } from "@/domain/editorial";
 
+import { resolveSiteId } from "./site-configuration";
 import {
   loadAssignmentEditorRuntimeConfiguration,
   type AssignmentEditorRuntimeConfiguration,
@@ -28,6 +29,7 @@ export interface AssignmentEditorRuntime {
 }
 
 export interface CreateAssignmentEditorRuntimeOptions {
+  readonly siteId: SiteId;
   readonly configuration: AssignmentEditorRuntimeConfiguration;
   readonly now?: () => string;
   readonly createUuid?: () => string;
@@ -43,14 +45,17 @@ export function createAssignmentEditorRuntime(
   // The standards in force when a run starts. Read per run rather than cached, so an edit
   // reaches the next piece of work rather than the next restart.
   const readNewsroomStandards = async (): Promise<string | null> => {
-    const history = await createPostgresNewsroomStandardsRepository({ pool }).list();
+    const history = await createPostgresNewsroomStandardsRepository({
+      pool,
+      siteId: options.siteId,
+    }).list();
     return history.at(-1)?.text ?? null;
   };
   const createUuid = options.createUuid ?? randomUUID;
   const generateAssignmentProposal = createGenerateAssignmentProposal({
     readNewsroomStandards,
-    inspections: createPostgresStoryInspectionRepository({ pool }),
-    profiles: createPostgresAgentProfileRepository({ pool }),
+    inspections: createPostgresStoryInspectionRepository({ pool, siteId: options.siteId }),
+    profiles: createPostgresAgentProfileRepository({ pool, siteId: options.siteId }),
     runs: createPostgresAgentRunRepository({ pool }),
     model: createOpenRouterStructuredModel({
       apiKey: options.configuration.openRouterApiKey,
@@ -79,6 +84,7 @@ export function createAssignmentEditorRuntimeFromEnvironment(
 ): AssignmentEditorRuntime {
   return createAssignmentEditorRuntime({
     configuration: loadAssignmentEditorRuntimeConfiguration(options.environment),
+    siteId: resolveSiteId(options.environment ?? process.env),
     now: options.now,
     createUuid: options.createUuid,
     createPool: options.createPool,

@@ -4,7 +4,7 @@ import type {
   AttachResearchedSourceResult,
   ResearchPersistence,
 } from "@/application/source-research";
-import { attachSourceToStory } from "@/domain/editorial";
+import { attachSourceToStory, type SiteId } from "@/domain/editorial";
 
 /**
  * A researched Source, the evidence behind it, and its attachment are written in one
@@ -14,6 +14,7 @@ import { attachSourceToStory } from "@/domain/editorial";
  */
 export function createPostgresResearchPersistence(dependencies: {
   readonly pool: Pool;
+  readonly siteId: SiteId;
 }): ResearchPersistence {
   return {
     async attach(command): Promise<AttachResearchedSourceResult> {
@@ -34,12 +35,19 @@ export function createPostgresResearchPersistence(dependencies: {
       try {
         await client.query("BEGIN");
         const stored = await client.query(
-          `INSERT INTO storyrail.url_sources (source_id, canonical_url, payload)
-           VALUES ($1, $2, $3::jsonb)
+          `INSERT INTO storyrail.url_sources (source_id, canonical_url, payload, site_id)
+           VALUES ($1, $2, $3::jsonb, $4)
            ON CONFLICT DO NOTHING
            RETURNING source_id`,
-          [command.source.id, command.source.canonicalUrl, JSON.stringify(command.source)],
+          [
+            command.source.id,
+            command.source.canonicalUrl,
+            JSON.stringify(command.source),
+            dependencies.siteId,
+          ],
         );
+        // Already recorded means already recorded *here*. A canonical URL is unique within a
+        // newsroom, so a page another Site ingested first is still new evidence to this one.
         if (stored.rowCount === 0) {
           await client.query("ROLLBACK");
           return {
@@ -61,9 +69,14 @@ export function createPostgresResearchPersistence(dependencies: {
           ],
         );
         await client.query(
-          `INSERT INTO storyrail.story_source_attachments (story_id, source_id, payload)
-           VALUES ($1, $2, $3::jsonb)`,
-          [command.storyId, command.source.id, JSON.stringify(attachment.attachment)],
+          `INSERT INTO storyrail.story_source_attachments (story_id, source_id, payload, site_id)
+           VALUES ($1, $2, $3::jsonb, $4)`,
+          [
+            command.storyId,
+            command.source.id,
+            JSON.stringify(attachment.attachment),
+            dependencies.siteId,
+          ],
         );
         await client.query("COMMIT");
         return {

@@ -6,6 +6,7 @@ import type {
   AgentRole,
   CanonicalSourceUrl,
   EditorialActor,
+  SiteId,
   SourceExtraction,
   SourceExtractionId,
   SourceId,
@@ -28,6 +29,7 @@ export interface PostgresSourceRepositories {
 
 export interface CreatePostgresSourceRepositoriesOptions {
   readonly pool: Pool;
+  readonly siteId: SiteId;
 }
 
 interface PayloadRow extends QueryResultRow {
@@ -110,12 +112,17 @@ function serialize(value: UrlSource | SourceExtraction): string {
   return serialized;
 }
 
-async function findSourceById(pool: Pool, sourceIdentity: SourceId): Promise<UrlSource | null> {
+async function findSourceById(
+  pool: Pool,
+  siteId: SiteId,
+  sourceIdentity: SourceId,
+): Promise<UrlSource | null> {
   const result = await pool.query<PayloadRow>(
     `SELECT payload
      FROM storyrail.url_sources
-     WHERE source_id = $1`,
-    [sourceIdentity],
+     WHERE source_id = $1
+       AND site_id = $2`,
+    [sourceIdentity, siteId],
   );
   const row = result.rows[0];
   return row ? decodeUrlSource(row.payload) : null;
@@ -123,13 +130,16 @@ async function findSourceById(pool: Pool, sourceIdentity: SourceId): Promise<Url
 
 async function findExtractionById(
   pool: Pool,
+  siteId: SiteId,
   extractionIdentity: SourceExtractionId,
 ): Promise<SourceExtraction | null> {
   const result = await pool.query<PayloadRow>(
-    `SELECT payload
-     FROM storyrail.source_extractions
-     WHERE extraction_id = $1`,
-    [extractionIdentity],
+    `SELECT extraction.payload
+     FROM storyrail.source_extractions AS extraction
+     JOIN storyrail.url_sources AS source ON source.source_id = extraction.source_id
+     WHERE extraction.extraction_id = $1
+       AND source.site_id = $2`,
+    [extractionIdentity, siteId],
   );
   const row = result.rows[0];
   return row ? decodePostgresSourceExtraction(row.payload, invariantError) : null;
@@ -138,24 +148,24 @@ async function findExtractionById(
 export function createPostgresSourceRepositories(
   options: CreatePostgresSourceRepositoriesOptions,
 ): PostgresSourceRepositories {
-  const { pool } = options;
+  const { pool, siteId } = options;
 
   const sources: UrlSourceRepository = {
     async persist({ source }): Promise<PersistUrlSourceResult> {
       const payload = serialize(source);
       const inserted = await pool.query<PayloadRow>(
-        `INSERT INTO storyrail.url_sources (source_id, canonical_url, payload)
-         VALUES ($1, $2, $3::jsonb)
+        `INSERT INTO storyrail.url_sources (source_id, canonical_url, payload, site_id)
+         VALUES ($1, $2, $3::jsonb, $4)
          ON CONFLICT DO NOTHING
          RETURNING payload`,
-        [source.id, source.canonicalUrl, payload],
+        [source.id, source.canonicalUrl, payload, siteId],
       );
 
       if (inserted.rows[0]) {
         return { ok: true, source: decodeUrlSource(inserted.rows[0].payload) };
       }
 
-      const existingById = await findSourceById(pool, source.id);
+      const existingById = await findSourceById(pool, siteId, source.id);
 
       if (existingById) {
         if (isDeepStrictEqual(existingById, source)) {
@@ -186,19 +196,30 @@ export function createPostgresSourceRepositories(
         };
       }
 
-      throw invariantError();
+      // A canonical URL is unique per Site, so the only collision left is the identifier, held
+      // by a Source on another Site. That the other Site exists is not this Site's business; that
+      // the identifier is already spoken for is.
+      return {
+        ok: false,
+        error: {
+          code: "SOURCE_ID_CONFLICT",
+          message: "A different Source with the same Source ID already exists.",
+          sourceId: source.id,
+        },
+      };
     },
 
     async findById(sourceIdentity) {
-      return findSourceById(pool, sourceIdentity);
+      return findSourceById(pool, siteId, sourceIdentity);
     },
 
     async findByCanonicalUrl(canonicalUrl: CanonicalSourceUrl) {
       const result = await pool.query<PayloadRow>(
         `SELECT payload
          FROM storyrail.url_sources
-         WHERE canonical_url = $1`,
-        [canonicalUrl],
+         WHERE canonical_url = $1
+           AND site_id = $2`,
+        [canonicalUrl, siteId],
       );
       const row = result.rows[0];
       return row ? decodeUrlSource(row.payload) : null;
@@ -218,9 +239,10 @@ export function createPostgresSourceRepositories(
          SELECT $1, $2, $3, $4::jsonb
          FROM storyrail.url_sources
          WHERE source_id = $2
+           AND site_id = $5
          ON CONFLICT DO NOTHING
          RETURNING payload`,
-        [extraction.id, extraction.sourceId, extraction.outcome, payload],
+        [extraction.id, extraction.sourceId, extraction.outcome, payload, siteId],
       );
 
       if (inserted.rows[0]) {
@@ -230,7 +252,7 @@ export function createPostgresSourceRepositories(
         };
       }
 
-      const existingById = await findExtractionById(pool, extraction.id);
+      const existingById = await findExtractionById(pool, siteId, extraction.id);
 
       if (existingById) {
         if (isDeepStrictEqual(existingById, extraction)) {
@@ -247,7 +269,7 @@ export function createPostgresSourceRepositories(
         };
       }
 
-      const referencedSource = await findSourceById(pool, extraction.sourceId);
+      const referencedSource = await findSourceById(pool, siteId, extraction.sourceId);
 
       if (!referencedSource) {
         return {
@@ -265,11 +287,13 @@ export function createPostgresSourceRepositories(
 
     async listBySourceId(sourceIdentity) {
       const result = await pool.query<PayloadRow>(
-        `SELECT payload
-         FROM storyrail.source_extractions
-         WHERE source_id = $1
-         ORDER BY append_position ASC`,
-        [sourceIdentity],
+        `SELECT extraction.payload
+         FROM storyrail.source_extractions AS extraction
+         JOIN storyrail.url_sources AS source ON source.source_id = extraction.source_id
+         WHERE extraction.source_id = $1
+           AND source.site_id = $2
+         ORDER BY extraction.append_position ASC`,
+        [sourceIdentity, siteId],
       );
       return result.rows.map((row) => decodePostgresSourceExtraction(row.payload, invariantError));
     },

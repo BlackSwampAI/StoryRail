@@ -3,9 +3,11 @@
 import type { Pool } from "pg";
 import { describe, expect, it, vi } from "vitest";
 
-import { storyId } from "@/domain/editorial";
+import { siteId, storyId } from "@/domain/editorial";
 
 import { createPostgresArchiveRepository } from "./postgres-archive-repository";
+
+const SITE = siteId("site-default");
 
 const REVISION = {
   id: "revision-archive",
@@ -39,7 +41,10 @@ function repositoryFor(rows: readonly Record<string, unknown>[]) {
   const query = vi.fn(async (_sql: string, _values: readonly unknown[]) => ({ rows }));
   return {
     query,
-    repository: createPostgresArchiveRepository({ pool: { query } as unknown as Pool }),
+    repository: createPostgresArchiveRepository({
+      pool: { query } as unknown as Pool,
+      siteId: SITE,
+    }),
   };
 }
 
@@ -78,7 +83,9 @@ describe("createPostgresArchiveRepository", () => {
       "inline & const | anything",
       "story-now",
       5,
+      SITE,
     ]);
+    expect(query.mock.calls[0]?.[0]).toContain("story.site_id = $4::text");
     expect(query.mock.calls[0]?.[0]).toContain("story.state = 'published'");
   });
 
@@ -87,7 +94,7 @@ describe("createPostgresArchiveRepository", () => {
 
     await repository.search({ terms: "anything", limit: 500, excludeStoryId: null });
 
-    expect(query.mock.calls[0]?.[1]).toEqual(["anything", null, 5]);
+    expect(query.mock.calls[0]?.[1]).toEqual(["anything", null, 5, SITE]);
   });
 
   it("does not reach the database for an empty query", async () => {
@@ -122,6 +129,7 @@ describe("createPostgresArchiveRepository", () => {
           throw failure;
         }),
       } as unknown as Pool,
+      siteId: SITE,
     });
 
     await expect(

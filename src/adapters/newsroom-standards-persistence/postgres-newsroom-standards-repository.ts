@@ -5,7 +5,7 @@ import type {
   AppendNewsroomStandardsResult,
   NewsroomStandardsRepository,
 } from "@/application/newsroom-standards";
-import { recordNewsroomStandards, type NewsroomStandards } from "@/domain/editorial";
+import { recordNewsroomStandards, type NewsroomStandards, type SiteId } from "@/domain/editorial";
 
 export class PostgresNewsroomStandardsInvariantError extends Error {
   constructor() {
@@ -27,14 +27,15 @@ const schema = z
 
 export function createPostgresNewsroomStandardsRepository(dependencies: {
   readonly pool: Pool;
+  readonly siteId: SiteId;
 }): NewsroomStandardsRepository {
   return {
     async append(standards: NewsroomStandards): Promise<AppendNewsroomStandardsResult> {
       try {
         await dependencies.pool.query(
-          `INSERT INTO storyrail.newsroom_standards (standards_id, revision_number, payload)
-           VALUES ($1, $2, $3::jsonb)`,
-          [standards.id, standards.revisionNumber, JSON.stringify(standards)],
+          `INSERT INTO storyrail.newsroom_standards (standards_id, revision_number, payload, site_id)
+           VALUES ($1, $2, $3::jsonb, $4)`,
+          [standards.id, standards.revisionNumber, JSON.stringify(standards), dependencies.siteId],
         );
         return { ok: true, standards };
       } catch (caught) {
@@ -52,7 +53,10 @@ export function createPostgresNewsroomStandardsRepository(dependencies: {
 
     async list(): Promise<readonly NewsroomStandards[]> {
       const { rows } = await dependencies.pool.query<{ payload: unknown }>(
-        "SELECT payload FROM storyrail.newsroom_standards ORDER BY revision_number",
+        `SELECT payload FROM storyrail.newsroom_standards
+         WHERE site_id = $1
+         ORDER BY revision_number`,
+        [dependencies.siteId],
       );
       return rows.map((row) => {
         const parsed = schema.safeParse(row.payload);

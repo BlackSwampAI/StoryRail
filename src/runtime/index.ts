@@ -46,3 +46,4 @@ export * from "./director-configuration";
 export * from "./director-runtime";
 export * from "./researcher-configuration";
 export * from "./researcher-runtime";
+export * from "./site-configuration";
