@@ -157,6 +157,11 @@ export type WriterArticleDraftAgentRun = WriterArticleDraftAgentRunCommon &
         readonly outcome: "succeeded";
         readonly articleId: ArticleId;
         readonly revisionId: ArticleRevisionId;
+        /**
+         * Citations the Writer had to be told about and then fixed. Present only where that
+         * happened, so a corrected draft is never recorded as a clean one.
+         */
+        readonly corrected?: readonly GroundingFinding[];
       }
     | {
         readonly outcome: "failed";
@@ -195,6 +200,8 @@ export type WriterArticleRevisionAgentRun = WriterArticleRevisionAgentRunCommon 
         readonly outcome: "succeeded";
         readonly articleId: ArticleId;
         readonly revisionId: ArticleRevisionId;
+        /** Citations the Writer had to be told about and then fixed. */
+        readonly corrected?: readonly GroundingFinding[];
       }
     | {
         readonly outcome: "failed";

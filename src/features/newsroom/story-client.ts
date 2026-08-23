@@ -855,7 +855,10 @@ function isWriterAgentRun(value: unknown): value is AgentRun {
   ];
   if (value.outcome === "running") return hasExactKeys(value, common);
   return value.outcome === "succeeded"
-    ? hasExactKeys(value, [...common, "articleId", "revisionId"]) &&
+    ? (hasExactKeys(value, [...common, "articleId", "revisionId"]) ||
+        (hasExactKeys(value, [...common, "articleId", "revisionId", "corrected"]) &&
+          Array.isArray(value.corrected) &&
+          value.corrected.length > 0)) &&
         isString(value.articleId) &&
         isString(value.revisionId)
     : value.outcome === "failed" &&

@@ -256,6 +256,7 @@ const schema = z.union([
       outcome: z.literal("succeeded"),
       articleId: nonEmpty,
       revisionId: nonEmpty,
+      corrected: z.array(groundingFindingSchema).min(1).optional(),
     })
     .strict(),
   z
@@ -347,6 +348,10 @@ export function decodePostgresAgentRun(row: {
                     : "proposal",
           ]),
       ...(row.outcome === "succeeded" && row.role === "writer" ? ["revisionId"] : []),
+      // Present only where the Writer had to be told which citations were wrong.
+      ...(row.outcome === "succeeded" && row.role === "writer" && "corrected" in payload
+        ? ["corrected"]
+        : []),
     ]) ||
     payload.id !== row.run_id ||
     payload.storyId !== row.story_id ||

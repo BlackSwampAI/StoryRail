@@ -17,7 +17,7 @@ function harness(
   maximumCalls = 3,
 ) {
   const seen: unknown[] = [];
-  const generateWithTools = vi.fn(async (request: { transcript: unknown }) => {
+  const generateWithTools = vi.fn(async (request: { transcript: unknown; tools: unknown }) => {
     seen.push(request.transcript);
     const next = turns[seen.length - 1];
     return next === undefined
@@ -193,6 +193,51 @@ describe("driving a model that has been offered tools", () => {
       outcome: "failed",
       failure: { code: "TOOL_EXECUTION_FAILED" },
     });
+  });
+
+  it("stops offering tools once the budget is spent, so a turn is left to answer with", async () => {
+    // Observed live: a Researcher spent all four calls and then had no turn left, and was
+    // reported as returning bad output for a budget the loop set.
+    const call = (id: string) => ({ callId: id, name: "fetch_url", arguments: { url: "x" } });
+    const test = harness(
+      [
+        { kind: "tools", calls: [call("a"), call("b")] },
+        { kind: "output", output: { answer: "done" } },
+      ],
+      [fetcher()],
+      2,
+    );
+
+    const { result } = await test.run();
+
+    expect(result).toEqual({ ok: true, output: { answer: "done" } });
+    const offered = test.generateWithTools.mock.calls.map(
+      (invocation) => (invocation[0] as unknown as { tools: readonly unknown[] }).tools.length,
+    );
+    expect(offered).toEqual([1, 0]);
+  });
+
+  it("offers no tools on the final turn, whatever the call budget", async () => {
+    const call = { callId: "a", name: "fetch_url", arguments: {} };
+    const test = harness(
+      [
+        { kind: "tools", calls: [call] },
+        { kind: "tools", calls: [call] },
+        { kind: "tools", calls: [call] },
+        { kind: "output", output: { answer: "done" } },
+      ],
+      [fetcher()],
+      10,
+    );
+
+    // maximumTurns is 4 in the harness, so the fourth turn arrives without tools and the model
+    // has to answer with what it already gathered.
+    await expect(test.run()).resolves.toMatchObject({ result: { ok: true } });
+    expect(
+      test.generateWithTools.mock.calls.map(
+        (invocation) => (invocation[0] as unknown as { tools: readonly unknown[] }).tools.length,
+      ),
+    ).toEqual([1, 1, 1, 0]);
   });
 
   it("gives up when the model keeps reaching for tools instead of answering", async () => {
