@@ -3598,6 +3598,120 @@
   color: var(--tone-96);
 }
 
+/* A connector backed by the credential store needs a row of its own: a form, a confirmation and
+   a result all have to fit under the name without pushing the inert rows around. */
+.storedConnectorRow {
+  grid-template-columns: 1fr auto;
+}
+
+.credentialState {
+  color: var(--tone-96);
+}
+
+.credentialForm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  grid-column: 1 / -1;
+}
+
+.credentialForm label {
+  flex: none;
+  color: var(--tone-79);
+  font-size: 0.72rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.credentialForm input {
+  min-width: 12rem;
+  flex: 1 1 16rem;
+  border: 1px solid var(--tone-33);
+  border-radius: 0.55rem;
+  background: var(--tone-05);
+  padding: 0.55rem 0.7rem;
+  color: var(--tone-140);
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.credentialConfirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  border: 1px solid var(--signal-06);
+  border-radius: 0.65rem;
+  background: var(--signal-02);
+  padding: 0.7rem 0.8rem;
+  grid-column: 1 / -1;
+}
+
+.credentialConfirm p {
+  flex: 1 1 18rem;
+  margin: 0;
+  color: var(--tone-135);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.credentialMessage {
+  margin: 0;
+  color: var(--tone-104);
+  font-size: 0.8rem;
+  grid-column: 1 / -1;
+}
+
+/* The one settings form whose values are stored. Laid out beside the connector rules because it
+   shares the same section furniture. */
+.agentModelsForm {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.8rem 1.2rem;
+}
+
+.agentModelsForm div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.agentModelsForm label {
+  color: var(--tone-79);
+  font-size: 0.72rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.agentModelsForm input {
+  border: 1px solid var(--tone-33);
+  border-radius: 0.55rem;
+  background: var(--tone-05);
+  padding: 0.55rem 0.7rem;
+  color: var(--tone-140);
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.agentModelsForm button {
+  justify-self: start;
+  grid-column: 1 / -1;
+}
+
+.agentModelsForm p {
+  margin: 0;
+  color: var(--tone-104);
+  font-size: 0.8rem;
+  grid-column: 1 / -1;
+}
+
+.agentModelsForm[aria-busy="true"] button:disabled,
+.storedConnectorRow[aria-busy="true"] button:disabled {
+  /* Genuinely working, unlike the inert connectors above, which keep the not-allowed cursor. */
+  cursor: wait;
+}
+
 @media (max-width: 40rem) {
   .connectorRow {
     grid-template-columns: 1fr;

@@ -1,13 +1,25 @@
 "use client";
 
+import { useEffect, useState, type ReactNode } from "react";
+
+import type { CredentialSlot, SiteModelIds } from "@/domain/editorial";
+
 import styles from "./newsroom-shell.module.css";
 import { NEWSROOM_THEMES, type NewsroomThemeId } from "./theme";
 import {
+  AGENT_MODELS_SECTION_ID,
   SCAFFOLD_OPERATOR,
   SCAFFOLD_SETTINGS,
   type ConnectionStatus,
   type ScaffoldSection,
 } from "./account-scaffold";
+import { siteSettingsClient, type SiteSettingsClient } from "./site-settings-client";
+import {
+  AgentModelsForm,
+  StoredConnectorRow,
+  credentialFailureMessage,
+  type CredentialState,
+} from "./site-settings-sections";
 
 const STATUS_LABEL: Readonly<Record<ConnectionStatus, string>> = {
   connected: "Connected",
@@ -24,13 +36,23 @@ function ScaffoldNotice({ children }: Readonly<{ children: string }>) {
   );
 }
 
-function Section({ section }: Readonly<{ section: ScaffoldSection }>) {
+function Section({
+  section,
+  storedRows,
+  children,
+}: Readonly<{
+  readonly section: ScaffoldSection;
+  readonly storedRows?: ReactNode;
+  readonly children?: ReactNode;
+}>) {
   return (
     <section className={styles.settingsSection} aria-labelledby={`settings-${section.id}`}>
       <header>
         <h3 id={`settings-${section.id}`}>{section.title}</h3>
         <p>{section.summary}</p>
       </header>
+
+      {children}
 
       {section.fields ? (
         <dl className={styles.settingsFields}>
@@ -46,9 +68,10 @@ function Section({ section }: Readonly<{ section: ScaffoldSection }>) {
         </dl>
       ) : null}
 
-      {section.connectors ? (
+      {section.connectors || storedRows ? (
         <ul className={styles.connectorList}>
-          {section.connectors.map((connector) => (
+          {storedRows}
+          {(section.connectors ?? []).map((connector) => (
             <li key={connector.name} className={styles.connectorRow} data-status={connector.status}>
               <span>
                 <strong>{connector.name}</strong>
@@ -118,9 +141,74 @@ export function ProfileWorkspace() {
 export interface SettingsWorkspaceProps {
   readonly theme: NewsroomThemeId;
   readonly onThemeChange: (theme: NewsroomThemeId) => void;
+  readonly requests?: SiteSettingsClient;
 }
 
-export function SettingsWorkspace({ theme, onThemeChange }: SettingsWorkspaceProps) {
+type StoredSettingsState =
+  | { readonly kind: "loading" }
+  | {
+      readonly kind: "loaded";
+      readonly models: SiteModelIds;
+      readonly credentials: ReadonlyMap<CredentialSlot, CredentialState>;
+    }
+  | { readonly kind: "unavailable"; readonly message: string };
+
+export function SettingsWorkspace({
+  theme,
+  onThemeChange,
+  requests = siteSettingsClient,
+}: SettingsWorkspaceProps) {
+  const [stored, setStored] = useState<StoredSettingsState>({ kind: "loading" });
+
+  useEffect(() => {
+    let active = true;
+    void requests.readSettings().then(
+      (result) => {
+        if (!active) return;
+        setStored(
+          result.kind === "completed"
+            ? {
+                kind: "loaded",
+                models: result.value.settings.models,
+                credentials: new Map(
+                  result.value.credentials.map((credential) => [
+                    credential.slot,
+                    { hint: credential.hint, updatedAt: credential.updatedAt },
+                  ]),
+                ),
+              }
+            : {
+                kind: "unavailable",
+                message:
+                  result.kind === "credential-unavailable"
+                    ? credentialFailureMessage(result.error)
+                    : result.kind === "application-failure"
+                      ? result.error.message
+                      : result.message,
+              },
+        );
+      },
+      () => {
+        if (active) setStored({ kind: "unavailable", message: "Stored settings are unavailable." });
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [requests]);
+
+  function replaceCredential(slot: CredentialSlot, credential: CredentialState | null) {
+    setStored((current) => {
+      if (current.kind !== "loaded") return current;
+      const credentials = new Map(current.credentials);
+      if (credential === null) credentials.delete(slot);
+      else credentials.set(slot, credential);
+      return { ...current, credentials };
+    });
+  }
+
+  const loading = stored.kind === "loading";
+
   return (
     <section className={styles.accountWorkspace} aria-labelledby="settings-title">
       <header className={styles.sourceWorkspaceHeader}>
@@ -130,9 +218,14 @@ export function SettingsWorkspace({ theme, onThemeChange }: SettingsWorkspacePro
       </header>
 
       <ScaffoldNotice>
-        None of these controls do anything yet. They lay out the milestones on the roadmap so the
-        shape can be judged before any of it is built.
+        Three things here are real and stored: the OpenRouter key, the Firecrawl key, and the model
+        each agent role runs on. Every other row is layout for a milestone on the roadmap and does
+        nothing.
       </ScaffoldNotice>
+
+      {stored.kind === "unavailable" ? (
+        <p role="alert">The stored settings could not be read. {stored.message}</p>
+      ) : null}
 
       <nav className={styles.settingsIndex} aria-label="Settings sections">
         <a href="#settings-appearance">Appearance</a>
@@ -176,7 +269,36 @@ export function SettingsWorkspace({ theme, onThemeChange }: SettingsWorkspacePro
       </section>
 
       {SCAFFOLD_SETTINGS.map((section) => (
-        <Section key={section.id} section={section} />
+        <Section
+          key={section.id}
+          section={section}
+          storedRows={(section.storedConnectors ?? []).map((connector) => (
+            <StoredConnectorRow
+              key={connector.slot}
+              connector={connector}
+              credential={
+                stored.kind === "loaded" ? stored.credentials.get(connector.slot) : undefined
+              }
+              loading={loading}
+              requests={requests}
+              onCredentialSet={(slot, hint) => replaceCredential(slot, { hint, updatedAt: null })}
+              onCredentialRemoved={(slot) => replaceCredential(slot, null)}
+            />
+          ))}
+        >
+          {section.id === AGENT_MODELS_SECTION_ID ? (
+            <AgentModelsForm
+              models={stored.kind === "loaded" ? stored.models : null}
+              loading={loading}
+              requests={requests}
+              onModelsSaved={(models) =>
+                setStored((current) =>
+                  current.kind === "loaded" ? { ...current, models } : current,
+                )
+              }
+            />
+          ) : null}
+        </Section>
       ))}
     </section>
   );
