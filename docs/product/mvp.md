@@ -4,7 +4,9 @@ The first vertical slice uses Marvel Cinematic Universe (MCU) coverage to exerci
 
 ## Target workflow
 
-The bounded flow through supervised Writer revision is implemented today: Assignment Editor proposal, operator-approved durable Assignment, immutable Article revisions, explicit review submission, advisory Director recommendation, operator-owned approval or request-changes decisions, and explicit operator rejection. A request changes decision can return the same assigned Writer through Revision 2 and Revision 3; publishing remains planned.
+The complete flow is implemented today, from Source intake through to publication: optional Researcher retrieval that attaches further Sources, Assignment Editor proposal, operator-approved durable Assignment, immutable and cited Article revisions, explicit review submission, Director review, an approval or request-changes decision, explicit operator rejection, and operator publication as a terminal transition. A request-changes decision can return the same assigned Writer through Revision 2 and Revision 3.
+
+Two properties matter more than the sequence. Every factual claim in an Article carries the Source, evidence record, and verbatim passage it rests on, and that passage is checked against the evidence before anything is written — so an unsupported claim cannot be persisted. And the whole sequence can be run unattended by autopilot, an operator-authorised policy that invokes the same workflows in order with the operator as the actor, rather than a separate automated path around them.
 
 Durable Agent Profiles configure the Assignment Editor, Writer, and Director roles. PostgreSQL seeds three immutable built-in profiles, and operators may create additional immutable Writer profiles with an optional provider-neutral model descriptor. The built-in Assignment Editor can execute in supervised proposal mode. It reads one authoritative unassigned Intake Story, selects durable successful evidence and available Writer Profiles, and records a structured suggestion or model failure as an append-only AgentRun. The operator remains responsible for reviewing, editing, and submitting the existing durable Assignment form.
 
@@ -53,7 +55,9 @@ A provider-neutral durable Story inspection read model now returns one authorita
 
 A separate server-only Story runtime handles normal editorial operations without requiring model configuration. Focused editorial endpoints accept exact request bodies: rejection `{ reason }`, review submission `{}`, Director review `{}`, and operator decision `{ directorRunId, decision, reason }`. The Director resolves `ArticleRevision.agentRunId` to the successful Writer run, then resolves every recorded `EvidenceReference` by its exact preparation or extraction ID. Missing historical evidence fails safely; newer evidence is never substituted.
 
-Fixed operator provenance is not authentication, and the routes still must not be exposed publicly. Source intake may invoke only the existing evidence-preparation model after a successful extraction; it never creates or attaches a Story, resolves triage, or invokes later editorial agents. Story listing has no searching, filtering, pagination, polling, or browser persistence. Migrations remain external. Automatic agent decisions, Writer revision cycles, profile editing/version management, reassignment, authentication, graceful shutdown, and development hot-reload lifecycle policy remain deferred. StoryRail is not yet a deployed or production-ready system.
+Fixed operator provenance is not authentication, and the routes still must not be exposed publicly. Source intake may invoke only the existing evidence-preparation model after a successful extraction; it never creates or attaches a Story, resolves triage, or invokes later editorial agents. Story listing has no searching, filtering, pagination, polling, or browser persistence. Migrations remain external. Profile editing and version management, reassignment, authentication, graceful shutdown, and development hot-reload lifecycle policy remain deferred.
+
+The automation is not yet durable, which is the main reason StoryRail is not production-ready. Autopilot holds its sequence in memory: nothing records that a Story is under a policy run, so a process that dies between steps leaves an AgentRun marked `running` with nothing to resume or abandon it. Tool calls are written after the external call rather than before. Both need the durability treatment AgentRuns already received, together with a reconciliation pass.
 
 ## Full-slice acceptance criteria
 
@@ -72,6 +76,9 @@ These criteria describe the complete target slice and are only partially impleme
 
 ## Deferred
 
+- durable automation records and reconciliation for interrupted policy runs
+- a knowledge corpus separating house style from citable reference knowledge
+- publishing destinations beyond the durable publication transition
 - RSS automation
 - automatic clustering
 - semantic duplicate detection across Sources or Stories
