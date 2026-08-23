@@ -22,6 +22,7 @@ function researchConfigured(): boolean {
 export const POST = createRunAutopilotHttpHandler({
   getRuntimes: () => ({
     story: storyRuntimeProvider.get(),
+    policyRuns: storyRuntimeProvider.get().policyRuns,
     assignmentEditor: assignmentEditorRuntimeProvider.get(),
     writer: writerRuntimeProvider.get(),
     director: directorRuntimeProvider.get(),

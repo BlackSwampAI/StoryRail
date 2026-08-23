@@ -61,6 +61,8 @@ const environment: NodeJS.ProcessEnv = {
 
 function runtimeWith(assignStory: StoryRuntime["assignStory"]): StoryRuntime {
   return {
+    policyRuns: vi.fn() as never,
+    reconcileAbandonedWork: vi.fn() as never,
     createStory: vi.fn<StoryRuntime["createStory"]>(),
     attachSourceToStory: vi.fn<StoryRuntime["attachSourceToStory"]>(),
     inspectStory: vi.fn<StoryRuntime["inspectStory"]>(),

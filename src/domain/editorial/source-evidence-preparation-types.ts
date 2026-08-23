@@ -17,6 +17,9 @@ export const MODEL_FAILURE_CODES = [
   // The response was well formed but cited evidence that does not support it. Distinct from an
   // invalid shape: the model answered correctly and the answer was not grounded.
   "MODEL_OUTPUT_UNGROUNDED",
+  // The process driving the run disappeared before the model answered. Not a provider problem,
+  // and naming it as one would send the operator looking in the wrong place.
+  "MODEL_RUN_ABANDONED",
 ] as const;
 
 export type ModelFailureCode = (typeof MODEL_FAILURE_CODES)[number];

@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
+
 import { after as scheduleAfterResponse } from "next/server";
 
-import { operatorId, storyId, type OperatorActor } from "@/domain/editorial";
+import { operatorId, policyRunId, storyId, type OperatorActor } from "@/domain/editorial";
 import {
   AssignmentEditorRuntimeConfigurationError,
   DirectorRuntimeConfigurationError,
@@ -97,6 +99,7 @@ export function createRunAutopilotHttpHandler(dependencies: {
         storyId: storyId(parameters.storyId),
         requestedBy,
         research,
+        createPolicyRunId: () => policyRunId(randomUUID()),
       });
       if (!started.ok) return respond(started, status(started));
 

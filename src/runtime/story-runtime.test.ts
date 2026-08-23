@@ -204,6 +204,8 @@ describe("createStoryRuntime", () => {
     expect(now).not.toHaveBeenCalled();
     expect(controlledPool.end).not.toHaveBeenCalled();
     expect(Object.keys(runtime)).toEqual([
+      "policyRuns",
+      "reconcileAbandonedWork",
       "createStory",
       "attachSourceToStory",
       "inspectStory",
