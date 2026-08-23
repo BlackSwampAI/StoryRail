@@ -103,6 +103,7 @@ Durable Profiles configure the Assignment Editor, Writer, and Director/editor-in
 - **A working record.** Runs, transitions, and review decisions interleaved in the order they happened, with the model, duration, and — for a refusal — the exact passages that could not be supported.
 - **Bounded tool access.** Tools declare themselves through an open registry with JSON Schema, so an operator's own tools can be added. Two ceilings bound an exchange, calls are recorded durably, and tool output is handed to models as untrusted data.
 - **A Researcher.** Reads the evidence already attached, follows what it points at, retrieves those pages, and attaches what is worth citing. Only a page it actually retrieved can be attached, and retrieved material becomes a Source with its own immutable extraction.
+- **A newsroom that remembers.** The Researcher can search what StoryRail has already published, by subject, and is shown the earlier reporting with the Sources behind it. Prior reporting is deliberately not evidence: it carries no evidence record, so a citation naming it is refused by the same grounding check as any other unsupported citation.
 - **Autopilot.** An operator-authorised policy that runs an Intake Story to publication unattended, optionally researching first. Every durable record is still written by the same workflows with the operator as the actor, and every reason says the decision was made under autopilot.
 
 ## Where StoryRail is going
@@ -210,7 +211,7 @@ pnpm build
 
 StoryRail is a development-oriented pre-alpha. It has no authentication, migrations are external and manual, and some anti-bot publishers remain inaccessible through Firecrawl.
 
-The editorial path is implemented from Source intake through research, assignment, cited drafting, review, and publication, and can run unattended. What is not yet safe for production is the durability of that automation: autopilot sequencing is held in memory, so a process that dies mid-sequence leaves a run marked `running` with nothing to resume or abandon it, and tool calls are recorded after the external call rather than before. Free and low-cost models also fail a meaningful share of the time; StoryRail records those failures rather than retrying silently, so an unattended run may stop partway with a durable reason.
+The editorial path is implemented from Source intake through research, assignment, cited drafting, review, and publication, and can run unattended. Autopilot is now a durable record with a reconciliation pass that closes out work whose process disappeared, and a tool call is recorded before it reaches outside rather than after. What remains is delivery: StoryRail has no publishing destination and no way to read an archive other than its own. Free and low-cost models also fail a meaningful share of the time; StoryRail records those failures rather than retrying silently, so an unattended run may stop partway with a durable reason.
 
 ## Technical documentation
 

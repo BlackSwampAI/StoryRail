@@ -56,6 +56,7 @@ import { createPostgresSourceEvidencePreparationRepository } from "../source-evi
 import { createPostgresAgentProfileRepository } from "../agent-profile-persistence/postgres-agent-profile-repository";
 import { createPostgresAssignmentPersistence } from "../assignment-persistence/postgres-assignment-persistence";
 import { createPostgresAgentToolCallRepository } from "@/adapters/agent-tool-call-persistence";
+import { createPostgresArchiveRepository } from "@/adapters/archive";
 import { createPostgresNewsroomStandardsRepository } from "@/adapters/newsroom-standards-persistence";
 import { createPostgresPolicyRunRepository } from "@/adapters/policy-run-persistence";
 import { createPostgresAgentRunRepository } from "../agent-run-persistence/postgres-agent-run-repository";
@@ -152,6 +153,10 @@ const toolDurabilityMigrationPath = resolve(
 const standardsMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0063-newsroom-standards.sql",
+);
+const archiveSearchMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0064-archive-search.sql",
 );
 
 const OPERATOR: OperatorActor = {
@@ -376,6 +381,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let policyRunMigrationSql: string;
   let toolDurabilityMigrationSql: string;
   let standardsMigrationSql: string;
+  let archiveSearchMigrationSql: string;
 
   /** Every migration, in order. One list so a rebuild can never drift from the first build. */
   const orderedMigrations = (): readonly string[] => [
@@ -402,6 +408,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     policyRunMigrationSql,
     toolDurabilityMigrationSql,
     standardsMigrationSql,
+    archiveSearchMigrationSql,
   ];
   let destructiveSetupAllowed = false;
 
@@ -429,6 +436,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     policyRunMigrationSql = await readFile(policyRunMigrationPath, "utf8");
     toolDurabilityMigrationSql = await readFile(toolDurabilityMigrationPath, "utf8");
     standardsMigrationSql = await readFile(standardsMigrationPath, "utf8");
+    archiveSearchMigrationSql = await readFile(archiveSearchMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -1432,6 +1440,253 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
   });
 
+  describe("the newsroom's own archive", () => {
+    /**
+     * A published Story with one Article Revision behind it. The read side is what is under
+     * test, so the approval chain that a Story really walks is stood in for by the two durable
+     * facts an archive lookup actually depends on: the Story is published, and a receipt says
+     * when. Both are covered against the real transitions elsewhere in this suite.
+     */
+    async function publishReport(
+      suffix: string,
+      report: { readonly headline: string; readonly body: string; readonly publishedAt: string },
+    ) {
+      const intake = makeStory(suffix);
+      const source = makeSource(suffix, OPERATOR, `https://example.com/archive/${suffix}`);
+      await createPostgresStoryRepository({ pool }).persist({ story: intake });
+      await createPostgresSourceRepositories({ pool }).sources.persist({ source });
+      await createPostgresStorySourceAttachmentRepository({ pool }).attach({
+        attachment: makeAttachment(suffix, { storyId: intake.id, sourceId: source.id }),
+      });
+      const assignment = {
+        id: assignmentId(`assignment-${suffix}`),
+        storyId: intake.id,
+        writerProfileId: agentProfileId("storyrail-general-writer-v1"),
+        sourceIds: [source.id],
+        angle: "Angle",
+        brief: "Brief",
+        constraints: null,
+        assignedBy: OPERATOR,
+        assignedAt: `assigned-${suffix}`,
+      };
+      const assigned = await createPostgresAssignmentPersistence({ pool }).persist({
+        expectedStory: intake,
+        assignment,
+        story: { ...intake, state: "assigned" as const, updatedAt: `assigned-${suffix}` },
+        transitionReceipt: {
+          transitionId: transitionId(`transition-assigned-${suffix}`),
+          storyId: intake.id,
+          previousState: "intake" as const,
+          nextState: "assigned" as const,
+          actor: OPERATOR,
+          reason: "Assign.",
+          occurredAt: `assigned-${suffix}`,
+          revisionCycle: 0,
+        },
+      });
+      if (!assigned.ok) throw new Error("The archive fixture Assignment must persist.");
+
+      const runIdentity = agentRunId(`run-${suffix}`);
+      const actor = { type: "agent" as const, role: "writer" as const, runId: runIdentity };
+      const identity = {
+        id: runIdentity,
+        storyId: intake.id,
+        profileId: assignment.writerProfileId,
+        role: "writer" as const,
+        operation: "article_draft" as const,
+        model: { provider: "openrouter", model: "writer-model" },
+        prompt: { key: "storyrail_writer_draft", version: "1" },
+        requestedBy: OPERATOR,
+        startedAt: `started-${suffix}`,
+        input: {
+          story: {
+            id: intake.id,
+            title: intake.title,
+            state: "assigned" as const,
+            revisionCycle: 0,
+          },
+          assignment: {
+            id: assignment.id,
+            storyId: intake.id,
+            writerProfileId: assignment.writerProfileId,
+            sourceIds: [source.id],
+            angle: "Angle",
+            brief: "Brief",
+            constraints: null,
+          },
+          evidence: [
+            {
+              sourceId: source.id,
+              relevance: `Relevant evidence ${suffix}`,
+              evidenceKind: "raw" as const,
+              evidenceId: sourceExtractionId(`evidence-${suffix}`),
+            },
+          ],
+          unavailableSourceIds: [],
+        },
+      };
+      await createPostgresAgentRunRepository({ pool }).append({
+        ...identity,
+        completedAt: null,
+        outcome: "running",
+      } as unknown as AgentRun);
+      const article = {
+        id: articleId(`article-${suffix}`),
+        storyId: intake.id,
+        assignmentId: assignment.id,
+        createdAt: `completed-${suffix}`,
+      };
+      const revision = {
+        id: articleRevisionId(`revision-${suffix}`),
+        articleId: article.id,
+        revisionNumber: 1 as const,
+        writerProfileId: assignment.writerProfileId,
+        agentRunId: runIdentity,
+        headline: report.headline,
+        dek: null,
+        blocks: [{ kind: "context" as const, markdown: report.body, citations: [] }],
+        createdBy: actor,
+        createdAt: `completed-${suffix}`,
+      };
+      const drafted = await createPostgresWriterDraftPersistence({ pool }).persist({
+        expectedStory: assigned.story,
+        run: {
+          ...identity,
+          completedAt: `completed-${suffix}`,
+          outcome: "succeeded",
+          articleId: article.id,
+          revisionId: revision.id,
+        } as never,
+        article,
+        revision,
+        story: { ...assigned.story, state: "in_progress" as const, updatedAt: `drafted-${suffix}` },
+        transitionReceipt: {
+          transitionId: transitionId(`transition-drafted-${suffix}`),
+          storyId: intake.id,
+          previousState: "assigned" as const,
+          nextState: "in_progress" as const,
+          actor,
+          reason: "Writer created the initial Article draft.",
+          occurredAt: `drafted-${suffix}`,
+          revisionCycle: 0,
+        },
+      });
+      if (!drafted.ok) throw new Error("The archive fixture draft must persist.");
+
+      await pool.query(
+        `UPDATE storyrail.stories
+         SET state='published', payload=jsonb_set(payload,'{state}','"published"')
+         WHERE story_id=$1`,
+        [intake.id],
+      );
+      await pool.query(
+        `INSERT INTO storyrail.story_transition_receipts
+           (transition_id, story_id, previous_state, next_state, revision_cycle, payload)
+         VALUES ($1,$2,'approved','published',0,$3::jsonb)`,
+        [
+          `transition-published-${suffix}`,
+          intake.id,
+          JSON.stringify({
+            transitionId: `transition-published-${suffix}`,
+            storyId: intake.id,
+            previousState: "approved",
+            nextState: "published",
+            actor: OPERATOR,
+            reason: "Cleared for release.",
+            occurredAt: report.publishedAt,
+            revisionCycle: 0,
+          }),
+        ],
+      );
+      return { storyId: intake.id, source };
+    }
+
+    it("finds published reporting by its words, with the Sources behind it", async () => {
+      const published = await publishReport("archive-hit", {
+        headline: "Inline const expressions reached stable",
+        body: "The compiler team shipped inline const expressions this week.",
+        publishedAt: "2026-03-04T10:00:00.000Z",
+      });
+
+      await expect(
+        createPostgresArchiveRepository({ pool }).search({
+          terms: "inline const expressions",
+          limit: 5,
+          excludeStoryId: null,
+        }),
+      ).resolves.toMatchObject([
+        {
+          storyId: published.storyId,
+          headline: "Inline const expressions reached stable",
+          publishedAt: "2026-03-04T10:00:00.000Z",
+          blocks: [{ kind: "context", markdown: expect.stringContaining("inline const") }],
+          sources: [{ sourceId: published.source.id, url: published.source.canonicalUrl }],
+        },
+      ]);
+    });
+
+    it("matches the body of a report, not only its headline", async () => {
+      await publishReport("archive-body", {
+        headline: "A headline about nothing in particular",
+        body: "Deep within, the piece explained trait solver regressions at length.",
+        publishedAt: "2026-03-05T10:00:00.000Z",
+      });
+
+      await expect(
+        createPostgresArchiveRepository({ pool }).search({
+          terms: "trait solver regressions",
+          limit: 5,
+          excludeStoryId: null,
+        }),
+      ).resolves.toMatchObject([{ headline: "A headline about nothing in particular" }]);
+    });
+
+    it("leaves out work the newsroom has not published", async () => {
+      const intake = makeStory("archive-unpublished");
+      await createPostgresStoryRepository({ pool }).persist({ story: intake });
+
+      await expect(
+        createPostgresArchiveRepository({ pool }).search({
+          terms: "Durable Story",
+          limit: 5,
+          excludeStoryId: null,
+        }),
+      ).resolves.toEqual([]);
+    });
+
+    it("never returns the Story the run is working on", async () => {
+      const published = await publishReport("archive-self", {
+        headline: "Inline const expressions reached stable",
+        body: "The compiler team shipped inline const expressions this week.",
+        publishedAt: "2026-03-06T10:00:00.000Z",
+      });
+
+      await expect(
+        createPostgresArchiveRepository({ pool }).search({
+          terms: "inline const expressions",
+          limit: 5,
+          excludeStoryId: published.storyId,
+        }),
+      ).resolves.toEqual([]);
+    });
+
+    it("treats an agent's words as a phrase rather than as query syntax", async () => {
+      await publishReport("archive-syntax", {
+        headline: "Inline const expressions reached stable",
+        body: "The compiler team shipped inline const expressions this week.",
+        publishedAt: "2026-03-07T10:00:00.000Z",
+      });
+      const archive = createPostgresArchiveRepository({ pool });
+
+      // Text that would be operators in a tsquery, and a quoted phrase that is not in any report.
+      await expect(
+        archive.search({ terms: "inline & const | ! stable", limit: 5, excludeStoryId: null }),
+      ).resolves.toHaveLength(1);
+      await expect(
+        archive.search({ terms: '"never published this phrase"', limit: 5, excludeStoryId: null }),
+      ).resolves.toEqual([]);
+    });
+  });
   describe("Article block grounding constraints", () => {
     // The rule that a claim must say where it came from is enforced by the database, not only
     // by the domain, so no write path can record an unverifiable assertion.
@@ -2258,6 +2513,13 @@ describePostgres("PostgreSQL persistence repositories", () => {
             is_identity: "YES",
           },
           {
+            table_name: "article_revisions",
+            column_name: "search_text",
+            data_type: "tsvector",
+            is_nullable: "YES",
+            is_identity: "NO",
+          },
+          {
             table_name: "agent_profiles",
             column_name: "profile_id",
             data_type: "text",
@@ -2546,7 +2808,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           },
         ]),
       );
-      expect(columns.rows).toHaveLength(100);
+      expect(columns.rows).toHaveLength(101);
     });
 
     it("creates the required primary, unique, foreign-key, and check constraints", async () => {
