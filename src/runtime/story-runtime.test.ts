@@ -204,6 +204,8 @@ describe("createStoryRuntime", () => {
     expect(now).not.toHaveBeenCalled();
     expect(controlledPool.end).not.toHaveBeenCalled();
     expect(Object.keys(runtime)).toEqual([
+      "listNewsroomStandards",
+      "setNewsroomStandards",
       "policyRuns",
       "reconcileAbandonedWork",
       "createStory",

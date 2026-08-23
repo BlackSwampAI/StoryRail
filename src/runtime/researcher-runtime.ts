@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { ChatOpenRouter } from "@langchain/openrouter";
 import { Pool, type PoolConfig } from "pg";
 
+import { createPostgresNewsroomStandardsRepository } from "@/adapters/newsroom-standards-persistence";
+
 import { createPostgresAgentProfileRepository } from "@/adapters/agent-profile-persistence";
 import { createPostgresAgentRunRepository } from "@/adapters/agent-run-persistence";
 import { createPostgresAgentToolCallRepository } from "@/adapters/agent-tool-call-persistence";
@@ -46,6 +48,12 @@ export function createResearcherRuntime(options: {
   const pool = (options.createPool ?? ((configuration) => new Pool(configuration)))({
     connectionString: options.configuration.databaseUrl,
   });
+  // The standards in force when a run starts. Read per run rather than cached, so an edit
+  // reaches the next piece of work rather than the next restart.
+  const readNewsroomStandards = async (): Promise<string | null> => {
+    const history = await createPostgresNewsroomStandardsRepository({ pool }).list();
+    return history.at(-1)?.text ?? null;
+  };
   const uuid = options.createUuid ?? randomUUID;
   const resolveModel = (descriptor: ModelDescriptor | null): ResearcherModelResolution => {
     const slug = descriptor?.model ?? options.configuration.defaultModel;
@@ -82,6 +90,7 @@ export function createResearcherRuntime(options: {
   };
 
   const workflow = createResearchStorySources({
+    readNewsroomStandards,
     inspections: createPostgresStoryInspectionRepository({ pool }),
     profiles: createPostgresAgentProfileRepository({ pool }),
     runs: createPostgresAgentRunRepository({ pool }),

@@ -76,6 +76,8 @@ const FAILED_EXTRACTION = Object.freeze({
 
 function makeRuntime(overrides: Partial<StoryRuntime> = {}): StoryRuntime {
   return {
+    listNewsroomStandards: vi.fn() as never,
+    setNewsroomStandards: vi.fn() as never,
     policyRuns: vi.fn() as never,
     reconcileAbandonedWork: vi.fn() as never,
     createStory: vi.fn<StoryRuntime["createStory"]>(),

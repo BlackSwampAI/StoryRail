@@ -19,6 +19,8 @@ export * from "./assignment";
 export * from "./assignment-types";
 export * from "./assignment-proposal";
 export * from "./assignment-proposal-types";
+export * from "./newsroom-standards";
+export * from "./newsroom-standards-types";
 export * from "./policy-run";
 export * from "./policy-run-types";
 export * from "./agent-tool-call";

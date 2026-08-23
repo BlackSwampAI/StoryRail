@@ -9,6 +9,7 @@ import {
   type WriterModelResolution,
 } from "@/application/writer-drafts";
 import {
+  withNewsroomStandards,
   createArticleRevision,
   articleBodyMarkdown,
   recordAgentRun,
@@ -110,6 +111,8 @@ export function createWriterRevision(dependencies: {
   readonly createAgentRunId: () => AgentRunId;
   readonly createRevisionId: () => ArticleRevisionId;
   readonly createTransitionId: () => TransitionId;
+  /** The newsroom's standards, in force when the run starts. Absent is normal. */
+  readonly readNewsroomStandards?: () => Promise<string | null>;
   readonly now: () => string;
 }) {
   return async (command: {
@@ -328,6 +331,7 @@ export function createWriterRevision(dependencies: {
     // The run is durable now, so the caller can stop waiting. Only the model call and the
     // completion it produces continue past this point.
     const completion = (async (): Promise<CreateWriterRevisionResult> => {
+      const standards = (await dependencies.readNewsroomStandards?.()) ?? null;
       const modelInput = {
         ...input,
         evidence: selected.map(({ reference, document }) => ({ ...reference, document })),
@@ -339,7 +343,10 @@ export function createWriterRevision(dependencies: {
       }));
       const generated = await resolved.model
         .generateStructured({
-          systemPrompt: writerRevisionSystemPrompt(writerProfile.instructions),
+          systemPrompt: withNewsroomStandards(
+            writerRevisionSystemPrompt(writerProfile.instructions),
+            standards,
+          ),
           input: modelInput,
           schema: writerRevisionOutputSchema,
         })
@@ -356,7 +363,10 @@ export function createWriterRevision(dependencies: {
       const settled = parsed?.success
         ? await correctedCitedBlocks({
             model: resolved.model,
-            systemPrompt: writerRevisionSystemPrompt(writerProfile.instructions),
+            systemPrompt: withNewsroomStandards(
+              writerRevisionSystemPrompt(writerProfile.instructions),
+              standards,
+            ),
             input: modelInput,
             schema: writerRevisionOutputSchema,
             evidence: groundingEvidence,

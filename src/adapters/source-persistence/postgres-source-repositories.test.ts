@@ -13,6 +13,7 @@ import {
   articleId,
   articleRevisionId,
   intakeUrlSource,
+  newsroomStandardsId,
   operatorId,
   policyRunId,
   reviewDecisionId,
@@ -55,6 +56,7 @@ import { createPostgresSourceEvidencePreparationRepository } from "../source-evi
 import { createPostgresAgentProfileRepository } from "../agent-profile-persistence/postgres-agent-profile-repository";
 import { createPostgresAssignmentPersistence } from "../assignment-persistence/postgres-assignment-persistence";
 import { createPostgresAgentToolCallRepository } from "@/adapters/agent-tool-call-persistence";
+import { createPostgresNewsroomStandardsRepository } from "@/adapters/newsroom-standards-persistence";
 import { createPostgresPolicyRunRepository } from "@/adapters/policy-run-persistence";
 import { createPostgresAgentRunRepository } from "../agent-run-persistence/postgres-agent-run-repository";
 import { createPostgresWriterDraftPersistence } from "../article-persistence/postgres-writer-draft-persistence";
@@ -146,6 +148,10 @@ const policyRunMigrationPath = resolve(
 const toolDurabilityMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0062-tool-call-durability.sql",
+);
+const standardsMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0063-newsroom-standards.sql",
 );
 
 const OPERATOR: OperatorActor = {
@@ -369,6 +375,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let citationCorrectionMigrationSql: string;
   let policyRunMigrationSql: string;
   let toolDurabilityMigrationSql: string;
+  let standardsMigrationSql: string;
 
   /** Every migration, in order. One list so a rebuild can never drift from the first build. */
   const orderedMigrations = (): readonly string[] => [
@@ -394,6 +401,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     citationCorrectionMigrationSql,
     policyRunMigrationSql,
     toolDurabilityMigrationSql,
+    standardsMigrationSql,
   ];
   let destructiveSetupAllowed = false;
 
@@ -420,6 +428,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     citationCorrectionMigrationSql = await readFile(citationCorrectionMigrationPath, "utf8");
     policyRunMigrationSql = await readFile(policyRunMigrationPath, "utf8");
     toolDurabilityMigrationSql = await readFile(toolDurabilityMigrationPath, "utf8");
+    standardsMigrationSql = await readFile(standardsMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -448,7 +457,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     }
 
     await pool.query(
-      "TRUNCATE storyrail.policy_runs, storyrail.agent_tool_calls, storyrail.review_decisions, storyrail.article_revisions, storyrail.articles, storyrail.agent_runs, storyrail.story_transition_receipts, storyrail.story_assignments, storyrail.source_evidence_preparations, storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.stories RESTART IDENTITY",
+      "TRUNCATE storyrail.newsroom_standards, storyrail.policy_runs, storyrail.agent_tool_calls, storyrail.review_decisions, storyrail.article_revisions, storyrail.articles, storyrail.agent_runs, storyrail.story_transition_receipts, storyrail.story_assignments, storyrail.source_evidence_preparations, storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.stories RESTART IDENTITY",
     );
     await pool.query("DELETE FROM storyrail.agent_profiles WHERE built_in = false");
   });
@@ -581,6 +590,42 @@ describePostgres("PostgreSQL persistence repositories", () => {
       });
     });
     describeAgentRunRepositoryContract(() => createPostgresAgentRunRepository({ pool }));
+  });
+
+  describe("newsroom standards", () => {
+    it("is history, not state: a written revision can never be edited or removed", async () => {
+      // A piece written last month has to stay explainable by the standards of last month.
+      const repository = createPostgresNewsroomStandardsRepository({ pool });
+      const revision = {
+        id: newsroomStandardsId("standards-postgres-1"),
+        revisionNumber: 1,
+        text: "Headlines are sentence case.",
+        updatedBy: OPERATOR,
+        updatedAt: "2026-08-23T10:00:00.000Z",
+      } as never;
+      await expect(repository.append(revision)).resolves.toMatchObject({ ok: true });
+      await expect(repository.append(revision)).resolves.toMatchObject({
+        ok: false,
+        error: { code: "NEWSROOM_STANDARDS_REVISION_CONFLICT" },
+      });
+
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await expect(
+          client.query(
+            'UPDATE storyrail.newsroom_standards SET payload = payload || \'{"text":"rewritten"}\'::jsonb',
+          ),
+        ).rejects.toMatchObject({ message: expect.stringContaining("cannot be changed") });
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+
+      await expect(repository.list()).resolves.toMatchObject([
+        { revisionNumber: 1, text: "Headlines are sentence case." },
+      ]);
+    });
   });
 
   describe("durable policy runs", () => {
@@ -1993,6 +2038,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         "agent_tool_calls",
         "article_revisions",
         "articles",
+        "newsroom_standards",
         "policy_runs",
         "review_decisions",
         "source_evidence_preparations",
@@ -2500,7 +2546,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           },
         ]),
       );
-      expect(columns.rows).toHaveLength(96);
+      expect(columns.rows).toHaveLength(100);
     });
 
     it("creates the required primary, unique, foreign-key, and check constraints", async () => {

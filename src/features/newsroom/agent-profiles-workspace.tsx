@@ -5,6 +5,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import type { AgentProfile } from "@/domain/editorial";
 
 import { agentProfileClient, type AgentProfileClient } from "./agent-profile-client";
+import { NewsroomStandardsEditor } from "./newsroom-standards-editor";
 import styles from "./newsroom-shell.module.css";
 
 type ProfileState =
@@ -177,6 +178,8 @@ export function AgentProfilesWorkspace({
           ))}
         </div>
       )}
+
+      <NewsroomStandardsEditor />
 
       <form className={styles.profileForm} onSubmit={(event) => void submit(event)}>
         <h3>Create Writer profile</h3>

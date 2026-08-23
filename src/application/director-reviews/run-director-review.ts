@@ -5,6 +5,7 @@ import type { AgentRunRepository, StartAgentRun } from "@/application/agent-runs
 import type { StructuredModel } from "@/application/model";
 import type { StoryInspectionRepository } from "@/application/story-inspection";
 import {
+  withNewsroomStandards,
   agentProfileId,
   articleBodyMarkdown,
   measureArticleGrounding,
@@ -115,6 +116,8 @@ export function createRunDirectorReview(dependencies: {
   readonly runs: AgentRunRepository;
   readonly resolveModel: (descriptor: ModelDescriptor | null) => DirectorModelResolution;
   readonly createAgentRunId: () => AgentRunId;
+  /** The newsroom's standards, in force when the run starts. Absent is normal. */
+  readonly readNewsroomStandards?: () => Promise<string | null>;
   readonly now: () => string;
 }) {
   return async (command: {
@@ -307,9 +310,13 @@ export function createRunDirectorReview(dependencies: {
     // The run is durable now, so the caller can stop waiting. Only the model call and the
     // completion it produces continue past this point.
     const completion = (async (): Promise<RunDirectorReviewResult> => {
+      const standards = (await dependencies.readNewsroomStandards?.()) ?? null;
       const generated = await resolved.model
         .generateStructured({
-          systemPrompt: directorSystemPrompt(profile.instructions),
+          systemPrompt: withNewsroomStandards(
+            directorSystemPrompt(profile.instructions),
+            standards,
+          ),
           input: {
             ...input,
             claims: revision.blocks.flatMap((block) =>

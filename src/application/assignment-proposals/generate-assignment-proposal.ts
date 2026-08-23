@@ -5,6 +5,7 @@ import type { AgentRunRepository, StartAgentRun } from "@/application/agent-runs
 import type { StructuredModel } from "@/application/model";
 import type { StoryInspectionRepository } from "@/application/story-inspection";
 import {
+  withNewsroomStandards,
   agentProfileId,
   createAssignmentProposal,
   recordAgentRun,
@@ -112,6 +113,8 @@ export function createGenerateAssignmentProposal(dependencies: {
   readonly runs: AgentRunRepository;
   readonly model: StructuredModel;
   readonly createAgentRunId: () => AgentRunId;
+  /** The newsroom's standards, in force when the run starts. Absent is normal. */
+  readonly readNewsroomStandards?: () => Promise<string | null>;
   readonly now: () => string;
 }) {
   return async (
@@ -254,9 +257,13 @@ export function createGenerateAssignmentProposal(dependencies: {
     // The run is durable now, so the caller can stop waiting. Only the model call and the
     // completion it produces continue past this point.
     const completion = (async (): Promise<GenerateAssignmentProposalResult> => {
+      const standards = (await dependencies.readNewsroomStandards?.()) ?? null;
       const generated = await dependencies.model
         .generateStructured({
-          systemPrompt: assignmentEditorSystemPrompt(editor.instructions),
+          systemPrompt: withNewsroomStandards(
+            assignmentEditorSystemPrompt(editor.instructions),
+            standards,
+          ),
           input: {
             story: {
               id: story.id,
