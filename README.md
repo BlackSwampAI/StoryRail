@@ -172,7 +172,7 @@ STORYRAIL_DATABASE_URL=postgresql://user:password@127.0.0.1:5432/storyrail \
   node --input-type=module --eval "import { readdir, readFile } from 'node:fs/promises'; import pg from 'pg'; const files = (await readdir('database/migrations')).filter((name) => name.endsWith('.sql')).sort(); const client = new pg.Client({ connectionString: process.env.STORYRAIL_DATABASE_URL }); await client.connect(); try { for (const file of files) { await client.query(await readFile(\`database/migrations/\${file}\`, 'utf8')); console.log('applied', file); } } finally { await client.end(); }"
 ```
 
-Open [http://localhost:3000](http://localhost:3000) to use the development newsroom.
+Open [http://localhost:3133](http://localhost:3133) to use the development newsroom. StoryRail runs on port 3133 so it does not collide with other local services on the usual Next.js default.
 
 ## Environment variables
 

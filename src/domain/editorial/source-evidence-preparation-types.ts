@@ -20,6 +20,9 @@ export const MODEL_FAILURE_CODES = [
   // The process driving the run disappeared before the model answered. Not a provider problem,
   // and naming it as one would send the operator looking in the wrong place.
   "MODEL_RUN_ABANDONED",
+  // A correction turn rewrote work nobody objected to. The draft is refused for its original
+  // citations; naming this separately says the correction was the reason it could not be taken.
+  "MODEL_CORRECTION_OUT_OF_SCOPE",
 ] as const;
 
 export type ModelFailureCode = (typeof MODEL_FAILURE_CODES)[number];

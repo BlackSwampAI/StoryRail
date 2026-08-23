@@ -4,6 +4,8 @@ export type JsonValue =
   string | number | boolean | null | readonly JsonValue[] | { readonly [key: string]: JsonValue };
 
 export const TOOL_FAILURE_CODES = [
+  /** The process driving the run disappeared while the tool was working. */
+  "TOOL_RUN_ABANDONED",
   /** The tool is not one this run was given. */
   "TOOL_NOT_AVAILABLE",
   /** The requested arguments did not satisfy the tool's declared schema. */
@@ -37,14 +39,20 @@ interface AgentToolCallCommon {
   readonly tool: string;
   readonly request: { readonly [key: string]: JsonValue };
   readonly requestedAt: string;
-  readonly completedAt: string;
 }
 
 export type AgentToolCall = AgentToolCallCommon &
+  /**
+   * Recorded before the external call is made. Reaching outside the system is exactly the act
+   * that must not be able to happen unrecorded: a process that dies during a retrieval has
+   * still retrieved something, and the record has to say so.
+   */
   (
-    | { readonly outcome: "succeeded"; readonly result: JsonValue }
+    | { readonly outcome: "running"; readonly completedAt: null }
+    | { readonly outcome: "succeeded"; readonly completedAt: string; readonly result: JsonValue }
     | {
         readonly outcome: "failed";
+        readonly completedAt: string;
         readonly failure: {
           readonly code: ToolFailureCode;
           readonly retryable: boolean;

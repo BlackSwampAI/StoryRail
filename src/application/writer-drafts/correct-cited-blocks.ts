@@ -2,6 +2,7 @@ import type { ZodType } from "zod";
 
 import type { StructuredModel, StructuredModelResult } from "@/application/model";
 import {
+  correctionStayedInScope,
   verifyArticleGrounding,
   type ArticleBlock,
   type GroundingEvidence,
@@ -31,7 +32,7 @@ export function citationCorrectionRequest(
 } {
   return {
     instruction:
-      "Your draft was refused because some claims cite evidence that does not support them. Return the whole draft again with those citations corrected. You may re-quote the passage exactly as it appears, cite the evidence record that actually contains it, or remove the claim. Do not add new claims, and do not change claims that were not listed.",
+      'Your draft was refused because some claims cite evidence that does not support them. Return the whole draft again with those citations corrected. For each listed claim you may re-quote the passage exactly as it appears, cite the evidence record that actually contains it, or restate the sentence as your own framing with kind "context" and no citations. Return exactly the same number of blocks in the same order: every block not listed below must come back byte for byte unchanged, and this is checked.',
     unsupported: findings.map((finding) => ({
       claim: blocks[finding.blockIndex]?.markdown ?? "",
       quoted: finding.quote,
@@ -48,7 +49,12 @@ export type CorrectedBlocksResult =
       readonly corrected: readonly GroundingFinding[] | null;
     }
   | { readonly ok: false; readonly result: StructuredModelResult<never> }
-  | { readonly ok: false; readonly findings: readonly GroundingFinding[] };
+  | {
+      readonly ok: false;
+      readonly findings: readonly GroundingFinding[];
+      /** Set where the correction rewrote blocks nobody objected to. */
+      readonly outOfScope?: true;
+    };
 
 /**
  * Produces a draft whose citations hold up, allowing the Writer exactly one attempt to correct
@@ -96,6 +102,10 @@ export async function correctedCitedBlocks<Output extends { readonly blocks: unk
   if (!second.ok) return { ok: false, findings: verified.findings };
 
   const corrected = options.toBlocks(second.output);
+  // Checked before grounding: a correction that rewrote unrelated work is refused whatever its
+  // citations look like, because the draft under review is no longer the one that was reviewed.
+  if (!correctionStayedInScope(blocks, corrected, verified.findings))
+    return { ok: false, findings: verified.findings, outOfScope: true };
   const recheck = verifyArticleGrounding(corrected, options.evidence);
   return recheck.ok
     ? { ok: true, blocks: corrected, corrected: verified.findings }

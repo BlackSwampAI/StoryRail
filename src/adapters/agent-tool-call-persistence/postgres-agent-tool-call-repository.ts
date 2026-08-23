@@ -1,7 +1,11 @@
 import type { Pool } from "pg";
 import { z } from "zod";
 
-import type { AgentToolCallRepository, AppendAgentToolCallResult } from "@/application/agent-tools";
+import type {
+  AgentToolCallRepository,
+  AppendAgentToolCallResult,
+  CompleteAgentToolCallResult,
+} from "@/application/agent-tools";
 import {
   TOOL_FAILURE_CODES,
   recordAgentToolCall,
@@ -26,13 +30,14 @@ const callSchema = z
     tool: nonEmpty,
     request: z.record(z.string(), z.unknown()),
     requestedAt: nonEmpty,
-    completedAt: nonEmpty,
   })
   .and(
     z.union([
-      z.object({ outcome: z.literal("succeeded"), result: z.unknown() }),
+      z.object({ outcome: z.literal("running"), completedAt: z.null() }),
+      z.object({ outcome: z.literal("succeeded"), completedAt: nonEmpty, result: z.unknown() }),
       z.object({
         outcome: z.literal("failed"),
+        completedAt: nonEmpty,
         failure: z
           .object({
             code: z.enum(TOOL_FAILURE_CODES),
@@ -94,6 +99,24 @@ export function createPostgresAgentToolCallRepository(dependencies: {
         throw caught;
       }
     },
+    async complete(call: AgentToolCall): Promise<CompleteAgentToolCallResult> {
+      const { rowCount } = await dependencies.pool.query(
+        `UPDATE storyrail.agent_tool_calls
+         SET outcome = $2, payload = $3::jsonb
+         WHERE tool_call_id = $1 AND outcome = 'running'`,
+        [call.id, call.outcome, JSON.stringify(call)],
+      );
+      return rowCount === 0
+        ? {
+            ok: false,
+            error: {
+              code: "AGENT_TOOL_CALL_NOT_RUNNING",
+              message: "The tool call is not in flight.",
+            },
+          }
+        : { ok: true, call };
+    },
+
     async listByRunId(runId: AgentRunId): Promise<readonly AgentToolCall[]> {
       const { rows } = await dependencies.pool.query<{ payload: unknown }>(
         `SELECT payload FROM storyrail.agent_tool_calls

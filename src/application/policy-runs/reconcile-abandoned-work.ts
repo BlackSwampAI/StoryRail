@@ -1,5 +1,12 @@
 import type { AgentRunRepository } from "@/application/agent-runs";
-import { recordAgentRun, type AgentRun, type PolicyRun } from "@/domain/editorial";
+import type { AgentToolCallRepository } from "@/application/agent-tools";
+import {
+  recordAgentRun,
+  recordAgentToolCall,
+  type AgentRun,
+  type AgentToolCall,
+  type PolicyRun,
+} from "@/domain/editorial";
 
 import type { PolicyRunRepository } from "./policy-run-repository";
 
@@ -15,6 +22,7 @@ export const ABANDONED_AFTER_MS = 15 * 60_000;
 export interface ReconciliationReport {
   readonly abandonedPolicyRuns: readonly PolicyRun[];
   readonly abandonedAgentRuns: readonly AgentRun[];
+  readonly abandonedToolCalls: readonly AgentToolCall[];
 }
 
 /**
@@ -31,6 +39,7 @@ export interface ReconciliationReport {
 export function createReconcileAbandonedWork(dependencies: {
   readonly policyRuns: PolicyRunRepository;
   readonly agentRuns: AgentRunRepository;
+  readonly toolCalls: AgentToolCallRepository;
   readonly now: () => string;
   readonly abandonedAfterMs?: number;
 }) {
@@ -45,6 +54,7 @@ export function createReconcileAbandonedWork(dependencies: {
     const stale = await dependencies.policyRuns.listStaleRunning(threshold);
     const abandonedPolicyRuns: PolicyRun[] = [];
     const abandonedAgentRuns: AgentRun[] = [];
+    const abandonedToolCalls: AgentToolCall[] = [];
 
     for (const run of stale) {
       // The runs the policy left behind are closed first, so a settled policy never points at
@@ -62,6 +72,26 @@ export function createReconcileAbandonedWork(dependencies: {
         if (completed.ok) abandonedAgentRuns.push(completed.run);
       }
 
+      // Tool calls left open by the same dead process are closed with the same reasoning.
+      for (const agentRun of abandonedAgentRuns) {
+        for (const call of await dependencies.toolCalls.listByRunId(agentRun.id)) {
+          if (call.outcome !== "running") continue;
+          const closed = recordAgentToolCall({
+            ...call,
+            completedAt: now,
+            outcome: "failed",
+            failure: {
+              code: "TOOL_RUN_ABANDONED",
+              retryable: true,
+              message: "The process running this stopped while the tool was working.",
+            },
+          } as AgentToolCall);
+          if (!closed.ok) continue;
+          const completed = await dependencies.toolCalls.complete(closed.call);
+          if (completed.ok) abandonedToolCalls.push(completed.call);
+        }
+      }
+
       const settled = await dependencies.policyRuns.settle({
         id: run.id,
         conclusion: "abandoned",
@@ -71,6 +101,6 @@ export function createReconcileAbandonedWork(dependencies: {
       if (settled.ok) abandonedPolicyRuns.push(settled.run);
     }
 
-    return { abandonedPolicyRuns, abandonedAgentRuns };
+    return { abandonedPolicyRuns, abandonedAgentRuns, abandonedToolCalls };
   };
 }

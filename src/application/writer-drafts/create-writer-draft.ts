@@ -358,7 +358,13 @@ export function createWriterDraft(dependencies: {
             ? generated.failure
             : parsed?.success
               ? {
-                  code: "MODEL_OUTPUT_UNGROUNDED",
+                  code:
+                    settled !== null &&
+                    settled.ok === false &&
+                    "outOfScope" in settled &&
+                    settled.outOfScope === true
+                      ? "MODEL_CORRECTION_OUT_OF_SCOPE"
+                      : "MODEL_OUTPUT_UNGROUNDED",
                   retryable: true,
                   findings:
                     settled !== null && settled.ok === false && "findings" in settled
