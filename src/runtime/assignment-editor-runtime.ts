@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import { Pool, type PoolConfig } from "pg";
 
+import { createPostgresNewsroomStandardsRepository } from "@/adapters/newsroom-standards-persistence";
+
 import { createPostgresAgentProfileRepository } from "@/adapters/agent-profile-persistence";
 import { createPostgresAgentRunRepository } from "@/adapters/agent-run-persistence";
 import { createOpenRouterStructuredModel } from "@/adapters/model";
@@ -38,8 +40,15 @@ export function createAssignmentEditorRuntime(
   const pool = (options.createPool ?? ((configuration) => new Pool(configuration)))({
     connectionString: options.configuration.databaseUrl,
   });
+  // The standards in force when a run starts. Read per run rather than cached, so an edit
+  // reaches the next piece of work rather than the next restart.
+  const readNewsroomStandards = async (): Promise<string | null> => {
+    const history = await createPostgresNewsroomStandardsRepository({ pool }).list();
+    return history.at(-1)?.text ?? null;
+  };
   const createUuid = options.createUuid ?? randomUUID;
   const generateAssignmentProposal = createGenerateAssignmentProposal({
+    readNewsroomStandards,
     inspections: createPostgresStoryInspectionRepository({ pool }),
     profiles: createPostgresAgentProfileRepository({ pool }),
     runs: createPostgresAgentRunRepository({ pool }),

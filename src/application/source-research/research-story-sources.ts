@@ -12,6 +12,7 @@ import type { ToolAssistedModel } from "@/application/model";
 import type { StoryInspectionRepository } from "@/application/story-inspection";
 import type { SourceExtractor } from "@/adapters/source-extraction";
 import {
+  withNewsroomStandards,
   agentProfileId,
   canonicalizeSourceUrl,
   recordAgentRun,
@@ -126,6 +127,8 @@ export function createResearchStorySources(dependencies: {
   readonly createToolCallId: () => AgentToolCallId;
   readonly createSourceId: () => SourceId;
   readonly createExtractionId: () => SourceExtractionId;
+  /** The newsroom's standards, in force when the run starts. Absent is normal. */
+  readonly readNewsroomStandards?: () => Promise<string | null>;
   readonly now: () => string;
   readonly maximumCalls?: number;
   readonly maximumTurns?: number;
@@ -265,11 +268,15 @@ export function createResearchStorySources(dependencies: {
         }),
       ]);
 
+      const standards = (await dependencies.readNewsroomStandards?.()) ?? null;
       const { result } = await runToolAssisted({
         model: resolved.model,
         registry,
         calls: dependencies.toolCalls,
-        systemPrompt: researcherSystemPrompt(profile.instructions),
+        systemPrompt: withNewsroomStandards(
+          researcherSystemPrompt(profile.instructions),
+          standards,
+        ),
         input: { story: input.story, evidence: known },
         schema: sourceResearchOutputSchema,
         runId: id,

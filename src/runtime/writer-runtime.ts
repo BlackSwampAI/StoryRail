@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Pool, type PoolConfig } from "pg";
+
+import { createPostgresNewsroomStandardsRepository } from "@/adapters/newsroom-standards-persistence";
 import { createPostgresAgentRunRepository } from "@/adapters/agent-run-persistence";
 import {
   createPostgresWriterDraftPersistence,
@@ -76,8 +78,15 @@ export function createWriterRuntime(options: {
   const pool = (options.createPool ?? ((configuration) => new Pool(configuration)))({
     connectionString: options.configuration.databaseUrl,
   });
+  // The standards in force when a run starts. Read per run rather than cached, so an edit
+  // reaches the next piece of work rather than the next restart.
+  const readNewsroomStandards = async (): Promise<string | null> => {
+    const history = await createPostgresNewsroomStandardsRepository({ pool }).list();
+    return history.at(-1)?.text ?? null;
+  };
   const uuid = options.createUuid ?? randomUUID;
   const workflow = createWriterDraft({
+    readNewsroomStandards,
     inspections: createPostgresStoryInspectionRepository({ pool }),
     runs: createPostgresAgentRunRepository({ pool }),
     persistence: createPostgresWriterDraftPersistence({ pool }),
@@ -92,6 +101,7 @@ export function createWriterRuntime(options: {
     now: options.now ?? (() => new Date().toISOString()),
   });
   const revisionWorkflow = createWriterRevision({
+    readNewsroomStandards,
     inspections: createPostgresStoryInspectionRepository({ pool }),
     runs: createPostgresAgentRunRepository({ pool }),
     persistence: createPostgresWriterRevisionPersistence({ pool }),

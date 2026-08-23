@@ -4,7 +4,9 @@ import { Pool, type PoolConfig } from "pg";
 
 import { createPostgresAgentRunRepository } from "@/adapters/agent-run-persistence";
 import { createPostgresAgentToolCallRepository } from "@/adapters/agent-tool-call-persistence";
+import { createPostgresNewsroomStandardsRepository } from "@/adapters/newsroom-standards-persistence";
 import { createPostgresPolicyRunRepository } from "@/adapters/policy-run-persistence";
+import { createSetNewsroomStandards } from "@/application/newsroom-standards";
 import { createReconcileAbandonedWork } from "@/application/policy-runs";
 import { createPostgresStoryInspectionRepository } from "@/adapters/story-inspection";
 import { createPostgresAgentProfileRepository } from "@/adapters/agent-profile-persistence";
@@ -60,6 +62,10 @@ import {
 } from "@/domain/editorial";
 
 export interface StoryRuntime {
+  readonly listNewsroomStandards: import("@/application/newsroom-standards").NewsroomStandardsRepository["list"];
+  readonly setNewsroomStandards: ReturnType<
+    typeof import("@/application/newsroom-standards").createSetNewsroomStandards
+  >;
   readonly policyRuns: import("@/application/policy-runs").PolicyRunRepository;
   readonly reconcileAbandonedWork: () => Promise<
     import("@/application/policy-runs").ReconciliationReport
@@ -129,6 +135,12 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
   const reviewDecisionPersistence = createPostgresReviewDecisionPersistence({ pool });
   const storyRejectionPersistence = createPostgresStoryRejectionPersistence({ pool });
   const storyPublicationPersistence = createPostgresStoryPublicationPersistence({ pool });
+  const newsroomStandards = createPostgresNewsroomStandardsRepository({ pool });
+  const setNewsroomStandards = createSetNewsroomStandards({
+    repository: newsroomStandards,
+    createUuid,
+    now,
+  });
   const policyRuns = createPostgresPolicyRunRepository({ pool });
   const reconcileAbandonedWork = createReconcileAbandonedWork({
     policyRuns,
@@ -193,6 +205,8 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
   let closePromise: Promise<void> | undefined;
 
   return Object.freeze({
+    listNewsroomStandards: () => newsroomStandards.list(),
+    setNewsroomStandards,
     policyRuns,
     reconcileAbandonedWork,
     createStory,

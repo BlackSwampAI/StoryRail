@@ -2217,6 +2217,68 @@
   font-size: 0.75rem;
 }
 
+/* One document every agent works under, edited where the agents are configured. */
+.standardsEditor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  margin: 2rem 0;
+  border: 1px solid var(--tone-48);
+  border-radius: 1rem;
+  background: rgb(var(--veil-08) / 60%);
+  padding: clamp(1.2rem, 3vw, 2rem);
+}
+
+.standardsEditor h3 {
+  margin: 0.4rem 0 0;
+  color: var(--tone-152);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.3rem, 2.5vw, 1.8rem);
+}
+
+.standardsEditor header p:last-child {
+  margin: 0.6rem 0 0;
+  color: var(--tone-97);
+  font-size: 0.85rem;
+  line-height: 1.55;
+  max-width: 62ch;
+}
+
+.standardsEditor label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  color: var(--tone-97);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.standardsEditor textarea {
+  border: 1px solid var(--tone-48);
+  border-radius: 0.5rem;
+  background: rgb(var(--veil-04) / 70%);
+  color: var(--tone-152);
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  padding: 0.8rem;
+  resize: vertical;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.standardsFooter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: var(--tone-97);
+  font-size: 0.75rem;
+}
+
 /* Two numbers that qualify the Article above them, so neither is read without the other. */
 .groundingSummary {
   margin: 0 0 1.75rem;

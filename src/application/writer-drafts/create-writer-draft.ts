@@ -4,6 +4,7 @@ import type { AgentRunRepository, StartAgentRun } from "@/application/agent-runs
 import type { StructuredModel } from "@/application/model";
 import type { StoryInspectionRepository } from "@/application/story-inspection";
 import {
+  withNewsroomStandards,
   ARTICLE_BLOCK_KINDS,
   createArticle,
   createFirstArticleRevision,
@@ -151,6 +152,8 @@ export function createWriterDraft(dependencies: {
   readonly createArticleId: () => ArticleId;
   readonly createRevisionId: () => ArticleRevisionId;
   readonly createTransitionId: () => TransitionId;
+  /** The newsroom's standards, in force when the run starts. Absent is normal. */
+  readonly readNewsroomStandards?: () => Promise<string | null>;
   readonly now: () => string;
 }) {
   return async (command: {
@@ -305,6 +308,7 @@ export function createWriterDraft(dependencies: {
     // The run is durable now, so the caller can stop waiting. Only the model call and the
     // completion it produces continue past this point.
     const completion = (async (): Promise<CreateWriterDraftResult> => {
+      const standards = (await dependencies.readNewsroomStandards?.()) ?? null;
       const modelInput = {
         story: {
           id: story.id,
@@ -323,7 +327,10 @@ export function createWriterDraft(dependencies: {
       }));
       const generated = await resolved.model
         .generateStructured({
-          systemPrompt: writerSystemPrompt(writerProfile.instructions),
+          systemPrompt: withNewsroomStandards(
+            writerSystemPrompt(writerProfile.instructions),
+            standards,
+          ),
           input: modelInput,
           schema: writerDraftOutputSchema,
         })
@@ -341,7 +348,10 @@ export function createWriterDraft(dependencies: {
       const settled = parsed?.success
         ? await correctedCitedBlocks({
             model: resolved.model,
-            systemPrompt: writerSystemPrompt(writerProfile.instructions),
+            systemPrompt: withNewsroomStandards(
+              writerSystemPrompt(writerProfile.instructions),
+              standards,
+            ),
             input: modelInput,
             schema: writerDraftOutputSchema,
             evidence: groundingEvidence,
