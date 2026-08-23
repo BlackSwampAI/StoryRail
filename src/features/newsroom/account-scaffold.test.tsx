@@ -5,6 +5,15 @@ import { AccountMenu } from "./account-menu";
 import { SCAFFOLD_SETTINGS } from "./account-scaffold";
 import { NEWSROOM_THEMES } from "./theme";
 import { ProfileWorkspace, SettingsWorkspace } from "./account-workspace";
+import type { SiteSettingsClient } from "./site-settings-client";
+
+// The scaffolding is what is on screen while nothing has been read, so these tests never resolve.
+const inertClient: SiteSettingsClient = {
+  readSettings: () => new Promise(() => {}),
+  saveModels: () => new Promise(() => {}),
+  setCredential: () => new Promise(() => {}),
+  removeCredential: () => new Promise(() => {}),
+};
 
 describe("account scaffolding", () => {
   it("opens account navigation apart from the editorial desk", () => {
@@ -42,7 +51,9 @@ describe("account scaffolding", () => {
 
   it("lets the operator choose a theme, the one setting that works", () => {
     const onThemeChange = vi.fn();
-    render(<SettingsWorkspace theme="newsroom" onThemeChange={onThemeChange} />);
+    render(
+      <SettingsWorkspace theme="newsroom" onThemeChange={onThemeChange} requests={inertClient} />,
+    );
 
     const group = screen.getByRole("radiogroup", { name: "Theme" });
     const options = within(group).getAllByRole("radio");
@@ -53,15 +64,25 @@ describe("account scaffolding", () => {
     expect(onThemeChange).toHaveBeenCalledWith("newsprint");
   });
 
-  it("lays out every roadmap section with no working control", () => {
-    render(<SettingsWorkspace theme="newsroom" onThemeChange={vi.fn()} />);
+  it("lays out every roadmap section and leaves each unbacked connector inert", () => {
+    render(<SettingsWorkspace theme="newsroom" onThemeChange={vi.fn()} requests={inertClient} />);
 
     for (const section of SCAFFOLD_SETTINGS) {
       expect(screen.getByRole("heading", { name: section.title })).toBeVisible();
     }
-    // Scaffolding must not look operable, with one exception: choosing a theme really works.
-    for (const control of screen.getAllByRole("button")) {
+    // A connector with no adapter behind it must not look operable. Only the stored connectors
+    // and the theme picker do anything, and neither offers a Connect button.
+    for (const control of screen.getAllByRole("button", { name: /^(Connect|Manage)$/ })) {
       expect(control).toBeDisabled();
     }
+  });
+
+  it("says in its notice which settings are stored and which are still layout", () => {
+    render(<SettingsWorkspace theme="newsroom" onThemeChange={vi.fn()} requests={inertClient} />);
+
+    const notice = screen.getAllByRole("note")[0];
+    expect(notice).toHaveTextContent(/OpenRouter key/);
+    expect(notice).toHaveTextContent(/Every other row is layout/);
+    expect(notice).not.toHaveTextContent(/None of these controls do anything yet/);
   });
 });

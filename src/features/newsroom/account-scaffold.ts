@@ -1,13 +1,20 @@
+import {
+  FIRECRAWL_API_KEY_SLOT,
+  OPENROUTER_API_KEY_SLOT,
+  type CredentialSlot,
+} from "@/domain/editorial";
+
 /**
- * Static scaffolding for the signed-in shell.
+ * Scaffolding for the signed-in shell, and the layout the parts that are real sit inside.
  *
- * None of this is wired to anything: there is no authentication, no account, and no settings
- * persistence in StoryRail yet. It exists so the signed-in layout can be judged as a layout —
- * where an account menu belongs, what Settings should hold — before any of it is built.
+ * There is still no authentication and no account here. What has changed is that some of the
+ * settings are now stored: the OpenRouter and Firecrawl credentials and the five agent model
+ * ids live in the per-site store, so those rows are declared here as slots to be filled from
+ * `GET /api/site-settings` rather than as values.
  *
- * The values are drawn from the milestones already on the roadmap (bring-your-own model keys,
- * fallback extraction, knowledge sources, publishing destinations) so the shape is realistic.
- * Anything shown as connected reflects what the pre-alpha actually runs on today.
+ * Nothing in this file may claim a connector is connected. It said so of OpenRouter and
+ * Firecrawl before the store existed, which was true only by coincidence and would have gone on
+ * reading "Connected" on an installation with no keys at all.
  */
 
 export type ConnectionStatus = "connected" | "available" | "planned";
@@ -40,13 +47,28 @@ export interface ScaffoldConnector {
   readonly status: ConnectionStatus;
 }
 
+/**
+ * A connector whose state is stored rather than declared. It carries no status, because the only
+ * honest answer to "is this connected" comes from the credential store.
+ */
+export interface ScaffoldStoredConnector {
+  readonly name: string;
+  readonly detail: string;
+  readonly slot: CredentialSlot;
+  readonly label: string;
+}
+
 export interface ScaffoldSection {
   readonly id: string;
   readonly title: string;
   readonly summary: string;
   readonly fields?: readonly ScaffoldField[];
   readonly connectors?: readonly ScaffoldConnector[];
+  readonly storedConnectors?: readonly ScaffoldStoredConnector[];
 }
+
+/** The section whose fields are the stored agent model ids rather than static text. */
+export const AGENT_MODELS_SECTION_ID = "agent-models";
 
 export const SCAFFOLD_SETTINGS: readonly ScaffoldSection[] = [
   {
@@ -64,12 +86,15 @@ export const SCAFFOLD_SETTINGS: readonly ScaffoldSection[] = [
     id: "model-providers",
     title: "Model providers",
     summary: "Bring your own keys. Every agent run records the provider and model it used.",
-    connectors: [
+    storedConnectors: [
       {
         name: "OpenRouter",
-        detail: "Key configured · routes to many providers",
-        status: "connected",
+        detail: "One key routes every agent role to many providers.",
+        slot: OPENROUTER_API_KEY_SLOT,
+        label: "OpenRouter API key",
       },
+    ],
+    connectors: [
       { name: "Anthropic", detail: "Claude models with a direct key", status: "available" },
       { name: "OpenAI", detail: "GPT models with a direct key", status: "available" },
       { name: "Google", detail: "Gemini models with a direct key", status: "available" },
@@ -81,14 +106,6 @@ export const SCAFFOLD_SETTINGS: readonly ScaffoldSection[] = [
     title: "Agent models",
     summary: "Which model each supervised role runs on. A role may override the newsroom default.",
     fields: [
-      { label: "Assignment Editor", value: "openrouter/free" },
-      { label: "Writer", value: "openrouter/free" },
-      {
-        label: "Director",
-        value: "google/gemini-3.7-flash",
-        hint: "Needs a model that can hold the full review schema.",
-      },
-      { label: "Evidence preparation", value: "openrouter/free" },
       { label: "Request timeout", value: "60 seconds" },
       { label: "Evidence sent per preparation", value: "60,000 characters" },
     ],
@@ -97,8 +114,15 @@ export const SCAFFOLD_SETTINGS: readonly ScaffoldSection[] = [
     id: "extraction",
     title: "Evidence extraction",
     summary: "How a submitted URL becomes preserved evidence, and what happens when it fails.",
+    storedConnectors: [
+      {
+        name: "Firecrawl",
+        detail: "v2 scrape · automatic proxy strategy",
+        slot: FIRECRAWL_API_KEY_SLOT,
+        label: "Firecrawl API key",
+      },
+    ],
     connectors: [
-      { name: "Firecrawl", detail: "v2 scrape · automatic proxy strategy", status: "connected" },
       { name: "Obscura", detail: "Planned optional extraction adapter", status: "planned" },
       {
         name: "Direct fetch",
