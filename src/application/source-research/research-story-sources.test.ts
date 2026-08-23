@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { settleAgentRun } from "@/test/settle-agent-run";
 import type { SourceExtractor } from "@/adapters/source-extraction";
+import type { ArchiveRepository } from "@/application/archive";
 import type { ToolAssistedModel } from "@/application/model";
 import {
   agentProfileId,
@@ -100,9 +101,11 @@ function workflow(options: {
   readonly extract?: SourceExtractor["extract"];
   readonly state?: "intake" | "assigned";
   readonly attachOk?: boolean;
+  readonly archive?: ArchiveRepository;
 }) {
   const attach = vi.fn(async () => ({ ok: options.attachOk !== false }) as never);
   const completed: AgentRun[] = [];
+  const offered: string[][] = [];
   let turn = 0;
   let ids = 0;
   const run = createResearchStorySources({
@@ -124,6 +127,7 @@ function workflow(options: {
       listByRunId: vi.fn(),
     },
     persistence: { attach },
+    archive: options.archive,
     extractor: {
       descriptor: { key: "test", version: "1" },
       extract:
@@ -138,7 +142,8 @@ function workflow(options: {
       model: {
         descriptor: { provider: "openrouter", model: "researcher" },
         supportsTools: true,
-        generateWithTools: vi.fn(async () => {
+        generateWithTools: vi.fn(async (request: { tools: readonly { name: string }[] }) => {
+          offered.push(request.tools.map(({ name }) => name));
           const next = options.turns[turn];
           turn += 1;
           return next === undefined
@@ -156,7 +161,7 @@ function workflow(options: {
     createExtractionId: () => sourceExtractionId(`extraction-${(ids += 1)}`),
     now: () => "now",
   });
-  return { run, attach, completed };
+  return { run, attach, completed, offered };
 }
 
 const fetched = {
@@ -263,6 +268,46 @@ describe("sending the Researcher out to widen a Story's evidence", () => {
       settleAgentRun(test.run({ storyId: STORY, requestedBy: OPERATOR }) as never),
     ).resolves.toMatchObject({ ok: true, run: { outcome: "failed" } });
     expect(test.attach).not.toHaveBeenCalled();
+  });
+
+  it("offers the archive alongside retrieval, and excludes the Story being worked on", async () => {
+    const search = vi.fn(async () => [
+      {
+        storyId: storyId("story-march"),
+        revisionId: "revision-march" as never,
+        revisionNumber: 1,
+        headline: "The newsroom covered this in March",
+        dek: null,
+        blocks: [{ kind: "context" as const, markdown: "Earlier reporting.", citations: [] }],
+        publishedAt: "2026-03-04T10:00:00.000Z",
+        sources: [],
+      },
+    ]);
+    const test = workflow({
+      archive: { search },
+      turns: [
+        {
+          kind: "tools",
+          calls: [{ callId: "a", name: "search_archive", arguments: { query: "x" } }],
+        },
+        { kind: "output", output: { attach: [], reasoning: "Already covered." } },
+      ],
+    });
+
+    await settleAgentRun(test.run({ storyId: STORY, requestedBy: OPERATOR }) as never);
+
+    expect(test.offered[0]).toEqual(["search_archive", "fetch_url"]);
+    expect(search).toHaveBeenCalledWith(expect.objectContaining({ excludeStoryId: STORY }));
+  });
+
+  it("runs without an archive rather than offering a tool it cannot answer", async () => {
+    const test = workflow({
+      turns: [{ kind: "output", output: { attach: [], reasoning: "Nothing to add." } }],
+    });
+
+    await settleAgentRun(test.run({ storyId: STORY, requestedBy: OPERATOR }) as never);
+
+    expect(test.offered[0]).toEqual(["fetch_url"]);
   });
 
   it("widens evidence before a Story is assigned, not after", async () => {

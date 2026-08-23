@@ -7,6 +7,7 @@ import { createPostgresNewsroomStandardsRepository } from "@/adapters/newsroom-s
 import { createPostgresAgentProfileRepository } from "@/adapters/agent-profile-persistence";
 import { createPostgresAgentRunRepository } from "@/adapters/agent-run-persistence";
 import { createPostgresAgentToolCallRepository } from "@/adapters/agent-tool-call-persistence";
+import { createPostgresArchiveRepository } from "@/adapters/archive";
 import { createOpenRouterStructuredModel, withOpenRouterTools } from "@/adapters/model";
 import { createFirecrawlSourceExtractor } from "@/adapters/source-extraction";
 import { createPostgresResearchPersistence } from "@/adapters/source-research-persistence";
@@ -97,6 +98,7 @@ export function createResearcherRuntime(options: {
     toolCalls: createPostgresAgentToolCallRepository({ pool }),
     persistence: createPostgresResearchPersistence({ pool }),
     extractor: createFirecrawlSourceExtractor({ apiKey: options.configuration.firecrawlApiKey }),
+    archive: createPostgresArchiveRepository({ pool }),
     resolveModel,
     createAgentRunId: () => agentRunId(uuid()),
     createToolCallId: () => agentToolCallId(uuid()),
