@@ -176,12 +176,23 @@ export function AgentProfilesWorkspace({
               </dl>
             </article>
           ))}
+          <a className={styles.newWriterTile} href="#create-writer-profile">
+            <span className={styles.newWriterTileMark} aria-hidden="true">
+              +
+            </span>
+            <span>New Writer profile</span>
+          </a>
         </div>
       )}
 
       <NewsroomStandardsEditor />
 
-      <form className={styles.profileForm} onSubmit={(event) => void submit(event)}>
+      <form
+        className={styles.profileForm}
+        id="create-writer-profile"
+        tabIndex={-1}
+        onSubmit={(event) => void submit(event)}
+      >
         <h3>Create Writer profile</h3>
         <p>Create another immutable Writer configuration. Profiles cannot be edited or deleted.</p>
         <label htmlFor="profile-name">Name</label>

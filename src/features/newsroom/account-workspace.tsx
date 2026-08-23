@@ -80,7 +80,7 @@ export function ProfileWorkspace() {
         configured for this environment.
       </ScaffoldNotice>
 
-      <div className={styles.profileCard}>
+      <div className={styles.accountProfileCard}>
         <span className={styles.profileAvatar} aria-hidden="true">
           {SCAFFOLD_OPERATOR.initials}
         </span>
