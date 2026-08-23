@@ -37,27 +37,48 @@ describePostgres("PostgreSQL migration runner", () => {
     url.pathname = `/${SCRATCH}`;
     scratchUrl = url.toString();
     maintenance = new Pool({ connectionString: databaseUrl });
+    ignoreAdministratorTermination(maintenance);
     files = await readMigrationDirectory(resolve(process.cwd(), "database/migrations"));
   }, 30_000);
 
   afterAll(async () => {
-    await maintenance.query(`DROP DATABASE IF EXISTS ${SCRATCH} WITH (FORCE)`);
+    await dropScratch();
     await maintenance.end();
   }, 30_000);
+
+  /**
+   * Dropping the scratch database terminates any backend still attached to it, and PostgreSQL
+   * reports that to the client as an error on a socket the client is already closing. It is an
+   * expected part of tearing a database down rather than a fault, and it arrives asynchronously,
+   * so it has to be handled where it lands or it surfaces as an unhandled exception.
+   */
+  function ignoreAdministratorTermination(pool: Pool): void {
+    pool.on("error", (error: Error & { readonly code?: string }) => {
+      if (error.code !== "57P01") throw error;
+    });
+  }
+
+  async function dropScratch(): Promise<void> {
+    await maintenance.query(`DROP DATABASE IF EXISTS ${SCRATCH} WITH (FORCE)`);
+  }
 
   /** A database with nothing in it, torn down however the test ends. */
   async function withFreshDatabase(
     work: (context: { readonly pool: Pool; readonly ledger: MigrationLedger }) => Promise<void>,
   ): Promise<void> {
-    await maintenance.query(`DROP DATABASE IF EXISTS ${SCRATCH} WITH (FORCE)`);
+    await dropScratch();
     await maintenance.query(`CREATE DATABASE ${SCRATCH}`);
     const pool = new Pool({ connectionString: scratchUrl });
+    ignoreAdministratorTermination(pool);
     const ledger = await createPostgresMigrationLedger(pool);
     try {
       await work({ pool, ledger });
     } finally {
       await ledger.release();
       await pool.end();
+      // Dropped here rather than only before the next test, so no connection outlives the test
+      // that opened it and nothing is left for a later FORCE to terminate.
+      await dropScratch();
     }
   }
 
