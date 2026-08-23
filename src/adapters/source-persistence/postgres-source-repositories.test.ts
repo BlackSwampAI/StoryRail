@@ -14,6 +14,7 @@ import {
   articleRevisionId,
   intakeUrlSource,
   operatorId,
+  policyRunId,
   reviewDecisionId,
   sourceEvidencePreparationId,
   sourceExtractionId,
@@ -54,6 +55,7 @@ import { createPostgresSourceEvidencePreparationRepository } from "../source-evi
 import { createPostgresAgentProfileRepository } from "../agent-profile-persistence/postgres-agent-profile-repository";
 import { createPostgresAssignmentPersistence } from "../assignment-persistence/postgres-assignment-persistence";
 import { createPostgresAgentToolCallRepository } from "@/adapters/agent-tool-call-persistence";
+import { createPostgresPolicyRunRepository } from "@/adapters/policy-run-persistence";
 import { createPostgresAgentRunRepository } from "../agent-run-persistence/postgres-agent-run-repository";
 import { createPostgresWriterDraftPersistence } from "../article-persistence/postgres-writer-draft-persistence";
 import {
@@ -136,6 +138,10 @@ const researcherMigrationPath = resolve(
 const citationCorrectionMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0060-writer-citation-correction.sql",
+);
+const policyRunMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0061-durable-policy-runs.sql",
 );
 
 const OPERATOR: OperatorActor = {
@@ -357,6 +363,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let toolCallsMigrationSql: string;
   let researcherMigrationSql: string;
   let citationCorrectionMigrationSql: string;
+  let policyRunMigrationSql: string;
 
   /** Every migration, in order. One list so a rebuild can never drift from the first build. */
   const orderedMigrations = (): readonly string[] => [
@@ -380,6 +387,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     toolCallsMigrationSql,
     researcherMigrationSql,
     citationCorrectionMigrationSql,
+    policyRunMigrationSql,
   ];
   let destructiveSetupAllowed = false;
 
@@ -404,6 +412,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     toolCallsMigrationSql = await readFile(toolCallsMigrationPath, "utf8");
     researcherMigrationSql = await readFile(researcherMigrationPath, "utf8");
     citationCorrectionMigrationSql = await readFile(citationCorrectionMigrationPath, "utf8");
+    policyRunMigrationSql = await readFile(policyRunMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -432,7 +441,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     }
 
     await pool.query(
-      "TRUNCATE storyrail.agent_tool_calls, storyrail.review_decisions, storyrail.article_revisions, storyrail.articles, storyrail.agent_runs, storyrail.story_transition_receipts, storyrail.story_assignments, storyrail.source_evidence_preparations, storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.stories RESTART IDENTITY",
+      "TRUNCATE storyrail.policy_runs, storyrail.agent_tool_calls, storyrail.review_decisions, storyrail.article_revisions, storyrail.articles, storyrail.agent_runs, storyrail.story_transition_receipts, storyrail.story_assignments, storyrail.source_evidence_preparations, storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.stories RESTART IDENTITY",
     );
     await pool.query("DELETE FROM storyrail.agent_profiles WHERE built_in = false");
   });
@@ -565,6 +574,94 @@ describePostgres("PostgreSQL persistence repositories", () => {
       });
     });
     describeAgentRunRepositoryContract(() => createPostgresAgentRunRepository({ pool }));
+  });
+
+  describe("durable policy runs", () => {
+    const policyRun = (id: string, story: { id: unknown }, overrides = {}) =>
+      ({
+        id: policyRunId(id),
+        storyId: story.id,
+        policy: "autopilot",
+        requestedBy: OPERATOR,
+        research: false,
+        startedAt: "2026-08-23T11:00:00.000Z",
+        step: "assignment_proposal",
+        observedAt: "2026-08-23T11:00:00.000Z",
+        status: "running",
+        ...overrides,
+      }) as never;
+
+    it("allows one policy in flight per Story, and lets a settled one be followed by another", async () => {
+      // Two automations driving the same Story would race each other through the same
+      // workflows, and neither would be answerable for the result.
+      const story = makeStory("policy-in-flight");
+      await createPostgresStoryRepository({ pool }).persist({ story });
+      const repository = createPostgresPolicyRunRepository({ pool });
+
+      await expect(repository.append(policyRun("policy-a", story))).resolves.toMatchObject({
+        ok: true,
+      });
+      await expect(repository.append(policyRun("policy-b", story))).resolves.toMatchObject({
+        ok: false,
+        error: { code: "POLICY_ALREADY_RUNNING" },
+      });
+
+      await expect(
+        repository.settle({
+          id: policyRunId("policy-a"),
+          conclusion: "stopped",
+          reason: "Stopped for the test.",
+          completedAt: "2026-08-23T11:30:00.000Z",
+        }),
+      ).resolves.toMatchObject({ ok: true, run: { status: "settled", conclusion: "stopped" } });
+      await expect(repository.append(policyRun("policy-b", story))).resolves.toMatchObject({
+        ok: true,
+      });
+    });
+
+    it("moves the progress pointer and refuses to reopen a settled run", async () => {
+      const story = makeStory("policy-progress");
+      await createPostgresStoryRepository({ pool }).persist({ story });
+      const repository = createPostgresPolicyRunRepository({ pool });
+      await repository.append(policyRun("policy-progress", story));
+
+      await expect(
+        repository.observe({
+          id: policyRunId("policy-progress"),
+          step: "writer_draft",
+          observedAt: "2026-08-23T11:10:00.000Z",
+        }),
+      ).resolves.toMatchObject({ ok: true, run: { step: "writer_draft" } });
+
+      await repository.settle({
+        id: policyRunId("policy-progress"),
+        conclusion: "completed",
+        reason: "Ran to publication.",
+        completedAt: "2026-08-23T11:20:00.000Z",
+      });
+      // A settled policy is finished, exactly as a completed AgentRun is.
+      await expect(
+        repository.observe({
+          id: policyRunId("policy-progress"),
+          step: "publication",
+          observedAt: "2026-08-23T11:25:00.000Z",
+        }),
+      ).resolves.toMatchObject({ ok: false, error: { code: "POLICY_RUN_NOT_RUNNING" } });
+    });
+
+    it("finds only the runs that have gone quiet", async () => {
+      const story = makeStory("policy-stale");
+      await createPostgresStoryRepository({ pool }).persist({ story });
+      const repository = createPostgresPolicyRunRepository({ pool });
+      await repository.append(
+        policyRun("policy-stale", story, { observedAt: "2026-08-23T10:00:00.000Z" }),
+      );
+
+      await expect(repository.listStaleRunning("2026-08-23T11:00:00.000Z")).resolves.toMatchObject([
+        { id: "policy-stale" },
+      ]);
+      await expect(repository.listStaleRunning("2026-08-23T09:00:00.000Z")).resolves.toEqual([]);
+    });
   });
 
   describe("durable tool calls", () => {
@@ -1884,6 +1981,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         "agent_tool_calls",
         "article_revisions",
         "articles",
+        "policy_runs",
         "review_decisions",
         "source_evidence_preparations",
         "source_extractions",
@@ -2390,7 +2488,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           },
         ]),
       );
-      expect(columns.rows).toHaveLength(88);
+      expect(columns.rows).toHaveLength(96);
     });
 
     it("creates the required primary, unique, foreign-key, and check constraints", async () => {

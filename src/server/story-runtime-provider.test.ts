@@ -8,6 +8,8 @@ import { createStoryRuntimeProvider, type StoryRuntimeFactory } from "./story-ru
 
 function makeRuntime(): StoryRuntime {
   return Object.freeze({
+    policyRuns: vi.fn() as never,
+    reconcileAbandonedWork: vi.fn() as never,
     createStory: vi.fn<StoryRuntime["createStory"]>(),
     attachSourceToStory: vi.fn<StoryRuntime["attachSourceToStory"]>(),
     inspectStory: vi.fn<StoryRuntime["inspectStory"]>(),
