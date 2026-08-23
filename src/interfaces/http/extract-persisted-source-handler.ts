@@ -83,6 +83,14 @@ function statusForApplicationResult(result: ExtractPersistedSourceResult): numbe
   switch (result.error.code) {
     case "SOURCE_NOT_FOUND":
       return 404;
+    // Nothing was attempted, and the newsroom cannot attempt it until an operator acts. Named
+    // separately so the response says which credential and which of the two remedies applies.
+    case "OPENROUTER_API_KEY_REQUIRED":
+    case "FIRECRAWL_API_KEY_REQUIRED":
+    case "CREDENTIAL_NOT_CONFIGURED":
+    case "CREDENTIAL_KEY_UNAVAILABLE":
+    case "CREDENTIAL_UNREADABLE":
+      return 503;
     case "SOURCE_EXTRACTION_ID_CONFLICT":
       return 409;
     case "SOURCE_EXTRACTOR_KEY_REQUIRED":

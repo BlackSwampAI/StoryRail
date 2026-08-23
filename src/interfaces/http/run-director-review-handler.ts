@@ -27,6 +27,14 @@ function status(result: RunDirectorReviewFailure): number {
     case "DIRECTOR_PROFILE_UNAVAILABLE":
     case "DIRECTOR_MODEL_UNSUPPORTED":
       return 500;
+    // Nothing was attempted, and the newsroom cannot attempt it until an operator acts. Named
+    // separately so the response says which credential and which of the two remedies applies.
+    case "OPENROUTER_API_KEY_REQUIRED":
+    case "FIRECRAWL_API_KEY_REQUIRED":
+    case "CREDENTIAL_NOT_CONFIGURED":
+    case "CREDENTIAL_KEY_UNAVAILABLE":
+    case "CREDENTIAL_UNREADABLE":
+      return 503;
   }
 }
 

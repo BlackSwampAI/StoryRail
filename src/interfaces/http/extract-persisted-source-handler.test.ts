@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { operatorId, sourceExtractionId, sourceId } from "@/domain/editorial";
+import {
+  credentialUnavailable,
+  operatorId,
+  sourceExtractionId,
+  sourceId,
+  FIRECRAWL_API_KEY_SLOT,
+} from "@/domain/editorial";
 import type { SourceEvidenceRuntime } from "@/runtime";
 
 import { createExtractPersistedSourceHttpHandler } from "./extract-persisted-source-handler";
@@ -204,6 +210,60 @@ describe("extract persisted Source HTTP handler", () => {
         code: "INTERNAL_SERVER_ERROR",
         message: "The Source extraction request could not be completed.",
       },
+    });
+  });
+
+  it("tells an operator with no Firecrawl key which credential is missing", async () => {
+    const handler = createExtractPersistedSourceHttpHandler({
+      getRuntime: () =>
+        runtimeWith(
+          vi.fn(async () => ({
+            ok: false as const,
+            error: credentialUnavailable(
+              FIRECRAWL_API_KEY_SLOT,
+              "CREDENTIAL_NOT_CONFIGURED",
+              "No firecrawl_api_key has been configured for this newsroom.",
+            ),
+          })),
+        ),
+      environment,
+    });
+
+    const response = await handler(request(), context);
+
+    // 503, not 201: nothing was extracted, so there is no durable attempt to report.
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      ok: false,
+      error: {
+        code: "FIRECRAWL_API_KEY_REQUIRED",
+        reason: "CREDENTIAL_NOT_CONFIGURED",
+        slot: "firecrawl_api_key",
+      },
+    });
+  });
+
+  it("distinguishes a key that cannot be read from one that was never entered", async () => {
+    const handler = createExtractPersistedSourceHttpHandler({
+      getRuntime: () =>
+        runtimeWith(
+          vi.fn(async () => ({
+            ok: false as const,
+            error: credentialUnavailable(
+              FIRECRAWL_API_KEY_SLOT,
+              "CREDENTIAL_UNREADABLE",
+              "The stored firecrawl_api_key could not be read.",
+            ),
+          })),
+        ),
+      environment,
+    });
+
+    const response = await handler(request(), context);
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      error: { code: "CREDENTIAL_UNREADABLE", slot: "firecrawl_api_key" },
     });
   });
 });

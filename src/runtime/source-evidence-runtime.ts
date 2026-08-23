@@ -13,9 +13,15 @@ import {
   type PreserveAndExtractUrlSource,
   type PreserveUrlSource,
 } from "@/application/source-evidence";
-import { sourceExtractionId, sourceId, type SiteId } from "@/domain/editorial";
+import {
+  FIRECRAWL_API_KEY_SLOT,
+  sourceExtractionId,
+  sourceId,
+  type SiteId,
+} from "@/domain/editorial";
 
 import { resolveSiteId } from "./site-configuration";
+import { createSiteStore } from "./site-store";
 import {
   loadSourceEvidenceRuntimeConfiguration,
   type SourceEvidenceRuntimeConfiguration,
@@ -53,8 +59,13 @@ export function createSourceEvidenceRuntime(
   const now = options.now ?? (() => new Date().toISOString());
   const pool = createPool({ connectionString: options.configuration.databaseUrl });
   const repositories = createPostgresSourceRepositories({ pool, siteId: options.siteId });
+  const store = createSiteStore({
+    pool,
+    siteId: options.siteId,
+    credentialKey: options.configuration.credentialKey,
+  });
   const extractor = createFirecrawlSourceExtractor({
-    apiKey: options.configuration.firecrawlApiKey,
+    resolveApiKey: () => store.resolveApiKey(FIRECRAWL_API_KEY_SLOT),
     fetch: options.fetch ?? globalThis.fetch,
   });
   const runSourceExtraction = createRunSourceExtraction({

@@ -77,6 +77,10 @@ function runtimeWith(assignStory: StoryRuntime["assignStory"]): StoryRuntime {
     rejectStory: vi.fn<StoryRuntime["rejectStory"]>(),
     publishStory: vi.fn(),
     submitStoryReview: vi.fn<StoryRuntime["submitStoryReview"]>(),
+    readSiteSettings: vi.fn<StoryRuntime["readSiteSettings"]>(),
+    updateSiteSettings: vi.fn<StoryRuntime["updateSiteSettings"]>(),
+    setSiteCredential: vi.fn<StoryRuntime["setSiteCredential"]>(),
+    removeSiteCredential: vi.fn<StoryRuntime["removeSiteCredential"]>(),
     recordStoryReviewDecision: vi.fn<StoryRuntime["recordStoryReviewDecision"]>(),
     close: vi.fn<StoryRuntime["close"]>(async () => undefined),
   };

@@ -27,7 +27,9 @@ import {
   type AgentActor,
   type AgentRun,
   type AgentProfile,
+  credentialUnavailable,
   type CanonicalSourceUrl,
+  type CredentialSlot,
   type FailedSourceExtraction,
   type OperatorActor,
   type SiteId,
@@ -60,6 +62,12 @@ import { createPostgresAssignmentPersistence } from "../assignment-persistence/p
 import { createPostgresAgentToolCallRepository } from "@/adapters/agent-tool-call-persistence";
 import { createPostgresArchiveRepository } from "@/adapters/archive";
 import { createPostgresSiteRepository } from "@/adapters/site-persistence";
+import { createFirecrawlSourceExtractor } from "@/adapters/source-extraction";
+import { createRunSourceExtraction } from "@/application/source-extraction";
+import { createExtractPersistedSource } from "@/application/source-evidence";
+import { createAesGcmCredentialCipher } from "@/adapters/credential-cipher";
+import { createPostgresSiteCredentialRepository } from "@/adapters/site-credential-persistence";
+import { createPostgresSiteSettingsRepository } from "@/adapters/site-settings-persistence";
 import { createPostgresNewsroomStandardsRepository } from "@/adapters/newsroom-standards-persistence";
 import { createPostgresPolicyRunRepository } from "@/adapters/policy-run-persistence";
 import { createPostgresAgentRunRepository } from "../agent-run-persistence/postgres-agent-run-repository";
@@ -164,6 +172,10 @@ const archiveSearchMigrationPath = resolve(
 const siteTenancyMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0065-site-tenancy.sql",
+);
+const siteCredentialsMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0066-site-credentials.sql",
 );
 
 const DEFAULT_SITE = siteId("site-default");
@@ -393,6 +405,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let standardsMigrationSql: string;
   let archiveSearchMigrationSql: string;
   let siteTenancyMigrationSql: string;
+  let siteCredentialsMigrationSql: string;
 
   /** Every migration, in order. One list so a rebuild can never drift from the first build. */
   const orderedMigrations = (): readonly string[] => [
@@ -421,6 +434,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     standardsMigrationSql,
     archiveSearchMigrationSql,
     siteTenancyMigrationSql,
+    siteCredentialsMigrationSql,
   ];
   let destructiveSetupAllowed = false;
 
@@ -470,6 +484,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     standardsMigrationSql = await readFile(standardsMigrationPath, "utf8");
     archiveSearchMigrationSql = await readFile(archiveSearchMigrationPath, "utf8");
     siteTenancyMigrationSql = await readFile(siteTenancyMigrationPath, "utf8");
+    siteCredentialsMigrationSql = await readFile(siteCredentialsMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -499,7 +514,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     }
 
     await pool.query(
-      "TRUNCATE storyrail.newsroom_standards, storyrail.policy_runs, storyrail.agent_tool_calls, storyrail.review_decisions, storyrail.article_revisions, storyrail.articles, storyrail.agent_runs, storyrail.story_transition_receipts, storyrail.story_assignments, storyrail.source_evidence_preparations, storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.stories RESTART IDENTITY",
+      "TRUNCATE storyrail.newsroom_standards, storyrail.policy_runs, storyrail.agent_tool_calls, storyrail.review_decisions, storyrail.article_revisions, storyrail.articles, storyrail.agent_runs, storyrail.story_transition_receipts, storyrail.story_assignments, storyrail.source_evidence_preparations, storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.site_credentials, storyrail.stories RESTART IDENTITY",
     );
     await pool.query("DELETE FROM storyrail.agent_profiles WHERE built_in = false");
   });
@@ -2418,6 +2433,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
         "newsroom_standards",
         "policy_runs",
         "review_decisions",
+        "site_credentials",
+        "site_settings",
         "sites",
         "source_evidence_preparations",
         "source_extractions",
@@ -2931,7 +2948,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           },
         ]),
       );
-      expect(columns.rows).toHaveLength(109);
+      expect(columns.rows).toHaveLength(120);
     });
 
     it("creates the required primary, unique, foreign-key, and check constraints", async () => {
@@ -5194,6 +5211,245 @@ describePostgres("PostgreSQL persistence repositories", () => {
         },
       ]);
       await expect(sites.findById(siteId("site-never-created"))).resolves.toBeNull();
+    });
+  });
+
+  describe("per-Site credentials and settings", () => {
+    const CREDENTIAL_KEY = Buffer.alloc(32, 2).toString("base64");
+    const OPENROUTER_SLOT = "openrouter_api_key" as CredentialSlot;
+    const FIRECRAWL_SLOT = "firecrawl_api_key" as CredentialSlot;
+    const SECRET = "sk-or-v1-postgres-round-trip-7f3a";
+    const cipher = createAesGcmCredentialCipher({ key: CREDENTIAL_KEY });
+    const credentials = (site: SiteId) =>
+      createPostgresSiteCredentialRepository({ pool, siteId: site });
+    const settings = (site: SiteId) => createPostgresSiteSettingsRepository({ pool, siteId: site });
+    const store = async (site: SiteId, slot: CredentialSlot, secret: string) =>
+      credentials(site).upsert({
+        slot,
+        credential: cipher.encrypt(secret, { siteId: site, slot }),
+        updatedAt: "2026-08-23T00:00:00.000Z",
+      });
+
+    it("returns a stored credential to the Site that stored it", async () => {
+      await store(DEFAULT_SITE, OPENROUTER_SLOT, SECRET);
+
+      const stored = await credentials(DEFAULT_SITE).findBySlot(OPENROUTER_SLOT);
+
+      expect(
+        stored && cipher.decrypt(stored, { siteId: DEFAULT_SITE, slot: OPENROUTER_SLOT }),
+      ).toEqual({ ok: true, secret: SECRET });
+    });
+
+    it("does not offer one Site's credential to another", async () => {
+      await store(OTHER_SITE, OPENROUTER_SLOT, SECRET);
+
+      await expect(credentials(DEFAULT_SITE).findBySlot(OPENROUTER_SLOT)).resolves.toBeNull();
+      await expect(credentials(DEFAULT_SITE).listConfigured()).resolves.toEqual([]);
+    });
+
+    it("refuses a ciphertext copied from another Site's row rather than reading it", async () => {
+      await store(OTHER_SITE, OPENROUTER_SLOT, SECRET);
+      const theirs = await credentials(OTHER_SITE).findBySlot(OPENROUTER_SLOT);
+      if (!theirs) throw new Error("Expected the other Site's credential to be stored.");
+
+      // Written directly, as a mistaken query or a hand-edited row would write it.
+      await pool.query(
+        `INSERT INTO storyrail.site_credentials
+           (site_id, slot, ciphertext, nonce, auth_tag, key_version, hint)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          DEFAULT_SITE,
+          OPENROUTER_SLOT,
+          Buffer.from(theirs.ciphertext),
+          Buffer.from(theirs.nonce),
+          Buffer.from(theirs.authTag),
+          theirs.keyVersion,
+          theirs.hint,
+        ],
+      );
+
+      const lifted = await credentials(DEFAULT_SITE).findBySlot(OPENROUTER_SLOT);
+
+      expect(
+        lifted && cipher.decrypt(lifted, { siteId: DEFAULT_SITE, slot: OPENROUTER_SLOT }),
+      ).toEqual({ ok: false, error: { code: "CREDENTIAL_UNREADABLE" } });
+    });
+
+    it("lists which credentials exist by hint and never by ciphertext", async () => {
+      await store(DEFAULT_SITE, OPENROUTER_SLOT, SECRET);
+      await store(DEFAULT_SITE, FIRECRAWL_SLOT, "fc-postgres-round-trip-91bd");
+
+      const listed = await credentials(DEFAULT_SITE).listConfigured();
+
+      expect(listed.map(({ slot, hint }) => ({ slot, hint }))).toEqual([
+        { slot: FIRECRAWL_SLOT, hint: "91bd" },
+        { slot: OPENROUTER_SLOT, hint: "7f3a" },
+      ]);
+      expect(JSON.stringify(listed)).not.toContain(SECRET);
+      expect(listed.every((entry) => !("ciphertext" in entry))).toBe(true);
+    });
+
+    it("replaces a credential in place rather than accumulating generations of it", async () => {
+      await store(DEFAULT_SITE, OPENROUTER_SLOT, SECRET);
+      await store(DEFAULT_SITE, OPENROUTER_SLOT, "sk-or-v1-the-replacement-0a1b");
+
+      const stored = await credentials(DEFAULT_SITE).findBySlot(OPENROUTER_SLOT);
+
+      await expect(credentials(DEFAULT_SITE).listConfigured()).resolves.toHaveLength(1);
+      expect(
+        stored && cipher.decrypt(stored, { siteId: DEFAULT_SITE, slot: OPENROUTER_SLOT }),
+      ).toEqual({ ok: true, secret: "sk-or-v1-the-replacement-0a1b" });
+    });
+
+    it("reports removing a credential that was never there as removing nothing", async () => {
+      await store(DEFAULT_SITE, OPENROUTER_SLOT, SECRET);
+
+      await expect(credentials(DEFAULT_SITE).remove(OPENROUTER_SLOT)).resolves.toBe(true);
+      await expect(credentials(DEFAULT_SITE).remove(OPENROUTER_SLOT)).resolves.toBe(false);
+    });
+
+    it("refuses a nonce of the wrong length, which GCM would silently accept", async () => {
+      await expect(
+        pool.query(
+          `INSERT INTO storyrail.site_credentials
+             (site_id, slot, ciphertext, nonce, auth_tag, key_version, hint)
+           VALUES ($1, $2, $3, $4, $5, 1, 'aaaa')`,
+          [
+            DEFAULT_SITE,
+            OPENROUTER_SLOT,
+            Buffer.alloc(8, 1),
+            Buffer.alloc(8, 1),
+            Buffer.alloc(16, 1),
+          ],
+        ),
+      ).rejects.toMatchObject({ constraint: "site_credentials_nonce_length_check" });
+    });
+
+    it("refuses a hint long enough to be the secret", async () => {
+      await expect(
+        pool.query(
+          `INSERT INTO storyrail.site_credentials
+             (site_id, slot, ciphertext, nonce, auth_tag, key_version, hint)
+           VALUES ($1, $2, $3, $4, $5, 1, $6)`,
+          [
+            DEFAULT_SITE,
+            OPENROUTER_SLOT,
+            Buffer.alloc(8, 1),
+            Buffer.alloc(12, 1),
+            Buffer.alloc(16, 1),
+            SECRET,
+          ],
+        ),
+      ).rejects.toMatchObject({ constraint: "site_credentials_hint_length_check" });
+    });
+
+    it("refuses a slot name that is not lowercase snake_case", async () => {
+      await expect(
+        pool.query(
+          `INSERT INTO storyrail.site_credentials
+             (site_id, slot, ciphertext, nonce, auth_tag, key_version, hint)
+           VALUES ($1, 'OpenRouter Key', $2, $3, $4, 1, 'aaaa')`,
+          [DEFAULT_SITE, Buffer.alloc(8, 1), Buffer.alloc(12, 1), Buffer.alloc(16, 1)],
+        ),
+      ).rejects.toMatchObject({ constraint: "site_credentials_slot_format_check" });
+    });
+
+    it("refuses a credential for a Site this installation does not publish", async () => {
+      await expect(
+        pool.query(
+          `INSERT INTO storyrail.site_credentials
+             (site_id, slot, ciphertext, nonce, auth_tag, key_version, hint)
+           VALUES ('site-never-created', 'openrouter_api_key', $1, $2, $3, 1, 'aaaa')`,
+          [Buffer.alloc(8, 1), Buffer.alloc(12, 1), Buffer.alloc(16, 1)],
+        ),
+      ).rejects.toMatchObject({ code: "23503" });
+    });
+
+    it("writes no extraction at all when the newsroom has no Firecrawl key", async () => {
+      const repositories = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE });
+      const source = makeSource("credential-missing-extraction");
+      await repositories.sources.persist({ source });
+      const extractPersistedSource = createExtractPersistedSource({
+        sourceRepository: repositories.sources,
+        extractionRepository: repositories.extractions,
+        runSourceExtraction: createRunSourceExtraction({
+          extractor: createFirecrawlSourceExtractor({
+            resolveApiKey: async () => ({
+              ok: false,
+              error: credentialUnavailable(
+                FIRECRAWL_SLOT,
+                "CREDENTIAL_NOT_CONFIGURED",
+                "No firecrawl_api_key has been configured for this newsroom.",
+              ),
+            }),
+            fetch: async () => {
+              throw new Error("A newsroom with no key must not reach Firecrawl.");
+            },
+          }),
+          createExtractionId: () => sourceExtractionId("extraction-never-attempted"),
+          now: () => "2026-08-23T00:00:00.000Z",
+        }),
+      });
+
+      await expect(
+        extractPersistedSource({ sourceId: source.id, requestedBy: OPERATOR }),
+      ).resolves.toMatchObject({
+        ok: false,
+        error: { code: "FIRECRAWL_API_KEY_REQUIRED", slot: FIRECRAWL_SLOT },
+      });
+      // The Source's history stays empty. A `failed` extraction here would be a durable claim
+      // that a page was fetched and would not open, which is not what happened.
+      await expect(repositories.extractions.listBySourceId(source.id)).resolves.toEqual([]);
+    });
+
+    it("gives every existing Site the models the installation shipped with", async () => {
+      await expect(settings(DEFAULT_SITE).find()).resolves.toEqual({
+        models: {
+          evidencePreparation: "google/gemini-3.7-flash",
+          assignmentEditor: "google/gemini-3.7-flash",
+          writer: "google/gemini-3.7-flash",
+          director: "google/gemini-3.7-flash",
+          researcher: "google/gemini-3.7-flash",
+        },
+      });
+    });
+
+    it("keeps one Site's chosen models away from another's", async () => {
+      const before = await settings(DEFAULT_SITE).find();
+      const chosen = {
+        models: {
+          evidencePreparation: "chosen/one",
+          assignmentEditor: "chosen/two",
+          writer: "chosen/three",
+          director: "chosen/four",
+          researcher: "chosen/five",
+        },
+      };
+
+      try {
+        await settings(DEFAULT_SITE).update({
+          settings: chosen,
+          updatedAt: "2026-08-23T00:00:00.000Z",
+        });
+
+        await expect(settings(DEFAULT_SITE).find()).resolves.toEqual(chosen);
+        await expect(settings(OTHER_SITE).find()).resolves.not.toEqual(chosen);
+      } finally {
+        if (before)
+          await settings(DEFAULT_SITE).update({
+            settings: before,
+            updatedAt: "2026-08-23T00:00:00.000Z",
+          });
+      }
+    });
+
+    it("refuses settings that leave an agent role without a model", async () => {
+      await expect(
+        pool.query(
+          "INSERT INTO storyrail.site_settings (site_id, payload) VALUES ('site-never-settled', $1)",
+          [JSON.stringify({ models: { writer: "chosen/three" } })],
+        ),
+      ).rejects.toMatchObject({ code: expect.stringMatching(/^23/) });
     });
   });
 });

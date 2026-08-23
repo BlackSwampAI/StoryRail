@@ -77,6 +77,18 @@ export function createFetchUrlTool(dependencies: {
       };
 
       const extracted = await dependencies.extractor.extract(source);
+      // A tool that declined for want of a credential says so by name. The run itself is already
+      // in flight and did ask for the page, so this is a tool call that failed rather than work
+      // that was never attempted, and it becomes possible the moment a key is entered.
+      if (!extracted.ok && "unavailable" in extracted)
+        return {
+          ok: false,
+          failure: {
+            code: "TOOL_EXECUTION_FAILED",
+            retryable: true,
+            message: extracted.unavailable.code,
+          },
+        };
       if (!extracted.ok)
         return {
           ok: false,

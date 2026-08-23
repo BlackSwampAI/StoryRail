@@ -20,3 +20,5 @@ export * from "./review-submissions";
 export * from "./review-decisions";
 export * from "./director-reviews";
 export * from "./sites";
+export * from "./site-credentials";
+export * from "./site-settings";

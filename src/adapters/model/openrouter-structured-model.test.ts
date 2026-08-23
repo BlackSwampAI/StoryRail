@@ -15,7 +15,7 @@ describe("OpenRouter structured model adapter", () => {
     const withStructuredOutput = vi.fn(() => ({ invoke }));
     const createChatModel = vi.fn(() => ({ withStructuredOutput }));
     const model = createOpenRouterStructuredModel({
-      apiKey: "secret-key",
+      resolveApiKey: async () => "secret-key",
       model: "publisher/model-slug",
       createChatModel,
     });
@@ -53,7 +53,7 @@ describe("OpenRouter structured model adapter", () => {
       }),
     });
     const model = createOpenRouterStructuredModel({
-      apiKey: "key",
+      resolveApiKey: async () => "key",
       model: "model",
       createChatModel,
     });
@@ -74,7 +74,7 @@ describe("OpenRouter structured model adapter", () => {
     [new Error("secret provider body"), "MODEL_REQUEST_FAILED", true],
   ] as const)("maps provider failure safely", async (providerError, code, retryable) => {
     const model = createOpenRouterStructuredModel({
-      apiKey: "key",
+      resolveApiKey: async () => "key",
       model: "model",
       createChatModel: () => ({
         withStructuredOutput: () => ({
@@ -91,7 +91,7 @@ describe("OpenRouter structured model adapter", () => {
 
   it("declares a conservative input budget callers can read instead of assuming one", () => {
     const model = createOpenRouterStructuredModel({
-      apiKey: "secret-key",
+      resolveApiKey: async () => "secret-key",
       model: "publisher/model-slug",
       createChatModel: vi.fn(() => ({ withStructuredOutput: vi.fn(() => ({ invoke: vi.fn() })) })),
     });
@@ -102,12 +102,54 @@ describe("OpenRouter structured model adapter", () => {
 
   it("lets a caller that knows its model raise the declared budget", () => {
     const model = createOpenRouterStructuredModel({
-      apiKey: "secret-key",
+      resolveApiKey: async () => "secret-key",
       model: "publisher/wide-context-model",
       maximumInputCharacters: 400_000,
       createChatModel: vi.fn(() => ({ withStructuredOutput: vi.fn(() => ({ invoke: vi.fn() })) })),
     });
 
     expect(model.limits.maximumInputCharacters).toBe(400_000);
+  });
+
+  it("reads the API key for every request rather than the one it was built with", async () => {
+    const keys = ["first-key", "second-key"];
+    const usedKeys: string[] = [];
+    const createChatModel = (configuration: { readonly apiKey: string }) => {
+      usedKeys.push(configuration.apiKey);
+      return {
+        withStructuredOutput: () => ({
+          invoke: async () => ({ content: "Prepared", title: null }),
+        }),
+      };
+    };
+    const model = createOpenRouterStructuredModel({
+      resolveApiKey: async () => keys.shift() ?? "exhausted",
+      model: "publisher/model-slug",
+      createChatModel,
+    });
+
+    await model.generateStructured({ systemPrompt: "safe", input: {}, schema });
+    await model.generateStructured({ systemPrompt: "safe", input: {}, schema });
+
+    expect(usedKeys).toEqual(["first-key", "second-key"]);
+  });
+
+  it("records a run failure rather than throwing when the newsroom has no API key", async () => {
+    const model = createOpenRouterStructuredModel({
+      resolveApiKey: async () => {
+        throw new Error("No openrouter_api_key has been configured for this newsroom.");
+      },
+      model: "publisher/model-slug",
+      createChatModel: vi.fn(() => ({
+        withStructuredOutput: vi.fn(() => ({ invoke: vi.fn() })),
+      })),
+    });
+
+    const result = await model.generateStructured({ systemPrompt: "safe", input: {}, schema });
+
+    expect(result).toEqual({
+      ok: false,
+      failure: { code: "MODEL_AUTHENTICATION_FAILED", retryable: false },
+    });
   });
 });

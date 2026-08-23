@@ -3,9 +3,10 @@
 import type { Pool, PoolConfig } from "pg";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createAesGcmCredentialCipher } from "@/adapters/credential-cipher";
 import { createFirecrawlSourceExtractor } from "@/adapters/source-extraction";
 import { createPostgresSourceRepositories } from "@/adapters/source-persistence";
-import { siteId } from "@/domain/editorial";
+import { FIRECRAWL_API_KEY_SLOT, siteId } from "@/domain/editorial";
 import { createRunSourceExtraction } from "@/application/source-extraction";
 import {
   createExtractPersistedSource,
@@ -110,8 +111,39 @@ interface ControlledRepositories {
   getStoredSource(): UrlSource | null;
 }
 
+// The Firecrawl key this newsroom has stored, encrypted exactly as the settings screen would
+// have written it. Reading it back through the real cipher is the point: it proves a run picks
+// its credential up from the store rather than from anything the process was started with.
+const CREDENTIAL_KEY = Buffer.alloc(32, 7).toString("base64");
+const STORED_FIRECRAWL_CREDENTIAL = createAesGcmCredentialCipher({ key: CREDENTIAL_KEY }).encrypt(
+  FIRECRAWL_API_KEY,
+  { siteId: SITE, slot: FIRECRAWL_API_KEY_SLOT },
+);
+
+/** A newsroom that has never had a Firecrawl key entered, which is every fresh installation. */
+function makeEmptyPool(): ControlledPool {
+  const query = vi.fn(async () => ({ rows: [], rowCount: 0 }));
+  const endMock = vi.fn(async () => undefined);
+  return { pool: { query, end: endMock } as unknown as Pool, query, end: endMock };
+}
+
 function makePool(end: () => Promise<void> = async () => undefined): ControlledPool {
-  const query = vi.fn();
+  const query = vi.fn(async (text: string) =>
+    text.includes("storyrail.site_credentials")
+      ? {
+          rows: [
+            {
+              ciphertext: Buffer.from(STORED_FIRECRAWL_CREDENTIAL.ciphertext),
+              nonce: Buffer.from(STORED_FIRECRAWL_CREDENTIAL.nonce),
+              auth_tag: Buffer.from(STORED_FIRECRAWL_CREDENTIAL.authTag),
+              key_version: STORED_FIRECRAWL_CREDENTIAL.keyVersion,
+              hint: STORED_FIRECRAWL_CREDENTIAL.hint,
+            },
+          ],
+          rowCount: 1,
+        }
+      : { rows: [], rowCount: 0 },
+  );
   const endMock = vi.fn(end);
   return {
     pool: { query, end: endMock } as unknown as Pool,
@@ -177,7 +209,7 @@ function makeRuntimeOptions(
   overrides: Partial<CreateSourceEvidenceRuntimeOptions> = {},
 ): CreateSourceEvidenceRuntimeOptions {
   return {
-    configuration: { databaseUrl: DATABASE_URL, firecrawlApiKey: FIRECRAWL_API_KEY },
+    configuration: { databaseUrl: DATABASE_URL, credentialKey: CREDENTIAL_KEY },
     siteId: SITE,
     fetch: successfulFetch(),
     now: vi.fn(() => RECEIVED_AT),
@@ -221,10 +253,15 @@ describe("createSourceEvidenceRuntime", () => {
       siteId: SITE,
     });
     expect(createFirecrawlSourceExtractor).toHaveBeenCalledOnce();
+    // The extractor is handed a way to fetch the key rather than the key. Building the runtime
+    // must not read the credential store, because the runtime outlives every edit to it.
     expect(createFirecrawlSourceExtractor).toHaveBeenCalledWith({
-      apiKey: FIRECRAWL_API_KEY,
+      resolveApiKey: expect.any(Function),
       fetch: fetchImplementation,
     });
+    expect(factoryMocks.createFirecrawlSourceExtractor.mock.calls[0]?.[0]).not.toHaveProperty(
+      "apiKey",
+    );
     expect(createRunSourceExtraction).toHaveBeenCalledOnce();
     expect(createPreserveUrlSource).toHaveBeenCalledOnce();
     expect(createExtractPersistedSource).toHaveBeenCalledOnce();
@@ -366,6 +403,60 @@ describe("createSourceEvidenceRuntime", () => {
     expect(now).toHaveBeenCalledTimes(5);
   });
 
+  it("tells an operator with no Firecrawl key about the key, not about the page", async () => {
+    const controlledPool = makeEmptyPool();
+    const repositories = makeRepositories();
+    factoryMocks.createPostgresSourceRepositories.mockReturnValue(repositories);
+    const fetchImplementation = successfulFetch();
+    const runtime = createSourceEvidenceRuntime(
+      makeRuntimeOptions(controlledPool, { fetch: fetchImplementation }),
+    );
+
+    const result = await runtime.preserveAndExtractUrlSource({
+      submittedUrl: "https://example.com/runtime",
+      submittedBy: OPERATOR,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "FIRECRAWL_API_KEY_REQUIRED",
+        reason: "CREDENTIAL_NOT_CONFIGURED",
+        slot: "firecrawl_api_key",
+      },
+    });
+    // Nothing was retrieved, so nothing about a retrieval is written down. A failed extraction
+    // here would tell whoever reads the Source later that the page was tried and would not open.
+    expect(repositories.append).not.toHaveBeenCalled();
+    expect(fetchImplementation).not.toHaveBeenCalled();
+  });
+
+  it("keeps an unreadable stored key distinct from one that was never entered", async () => {
+    const controlledPool = makePool();
+    const repositories = makeRepositories();
+    factoryMocks.createPostgresSourceRepositories.mockReturnValue(repositories);
+    const runtime = createSourceEvidenceRuntime(
+      makeRuntimeOptions(controlledPool, {
+        // The stored credential is real; this process is holding a different encryption key.
+        configuration: {
+          databaseUrl: DATABASE_URL,
+          credentialKey: Buffer.alloc(32, 8).toString("base64"),
+        },
+      }),
+    );
+
+    const result = await runtime.preserveAndExtractUrlSource({
+      submittedUrl: "https://example.com/runtime",
+      submittedBy: OPERATOR,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "CREDENTIAL_UNREADABLE", slot: "firecrawl_api_key" },
+    });
+    expect(repositories.append).not.toHaveBeenCalled();
+  });
+
   it("retains the Firecrawl adapter's fetch-rejection behavior", async () => {
     const controlledPool = makePool();
     const repositories = makeRepositories();
@@ -491,7 +582,6 @@ describe("createSourceEvidenceRuntimeFromEnvironment", () => {
       {
         NODE_ENV: "test" as const,
         STORYRAIL_DATABASE_URL: DATABASE_URL,
-        FIRECRAWL_API_KEY,
       },
       {
         get(target, property, receiver) {
@@ -513,10 +603,16 @@ describe("createSourceEvidenceRuntimeFromEnvironment", () => {
       createPool,
     });
 
-    expect(reads).toEqual(["STORYRAIL_DATABASE_URL", "FIRECRAWL_API_KEY", "STORYRAIL_SITE_ID"]);
+    // Firecrawl is no longer among them: an API key is per-Site and cannot come from a
+    // process-wide environment once one installation runs more than one newsroom.
+    expect(reads).toEqual([
+      "STORYRAIL_DATABASE_URL",
+      "STORYRAIL_CREDENTIAL_KEY",
+      "STORYRAIL_SITE_ID",
+    ]);
     expect(createPool).toHaveBeenCalledWith({ connectionString: DATABASE_URL });
     expect(createFirecrawlSourceExtractor).toHaveBeenCalledWith({
-      apiKey: FIRECRAWL_API_KEY,
+      resolveApiKey: expect.any(Function),
       fetch: fetchImplementation,
     });
     expect(factoryMocks.createRunSourceExtraction.mock.calls[0]?.[0].now).toBe(now);

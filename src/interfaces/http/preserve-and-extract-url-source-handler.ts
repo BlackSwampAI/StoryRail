@@ -1,5 +1,5 @@
 import type { PreserveAndExtractUrlSourceResult } from "@/application/source-evidence";
-import { operatorId, type OperatorActor } from "@/domain/editorial";
+import { isCredentialUnavailableError, operatorId, type OperatorActor } from "@/domain/editorial";
 import type { SourceEvidenceRuntime } from "@/runtime";
 
 export interface PreserveAndExtractUrlSourceHttpRequestBody {
@@ -92,7 +92,10 @@ function statusForApplicationResult(result: PreserveAndExtractUrlSourceResult): 
   }
 
   if (result.stage === "extraction") {
-    return 500;
+    // Nothing was attempted and no extraction was recorded, so this is not a server fault. The
+    // model routes answer 503 for the same condition; a client that handles a missing credential
+    // must not have to special-case which route reported it.
+    return isCredentialUnavailableError(result.error) ? 503 : 500;
   }
 
   if (PRESERVATION_VALIDATION_ERROR_CODES.has(result.error.code)) {

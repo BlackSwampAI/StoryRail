@@ -7,6 +7,7 @@ import type {
 } from "@/application/source-persistence";
 import {
   recordSourceEvidencePreparation,
+  type CredentialUnavailableError,
   type EditorialActor,
   type SourceEvidencePreparation,
   type SourceEvidencePreparationId,
@@ -60,6 +61,16 @@ export const preparedDocumentOutputSchema = z
   })
   .strict();
 
+/**
+ * The model a preparation will run on, or the named reason there is none.
+ *
+ * A result rather than a model, because the credential behind it is per-Site and may not have
+ * been entered. Answering with the reason lets the workflow decline before it writes anything.
+ */
+export type PreparationModelResolution =
+  | { readonly ok: true; readonly model: StructuredModel }
+  | { readonly ok: false; readonly error: CredentialUnavailableError };
+
 export type PrepareSourceEvidenceResult =
   | { readonly ok: true; readonly preparation: SourceEvidencePreparation }
   | {
@@ -84,7 +95,9 @@ export type PrepareSourceEvidenceResult =
             readonly code: "SOURCE_EVIDENCE_PREPARATION_ID_CONFLICT";
             readonly message: string;
             readonly preparationId: SourceEvidencePreparationId;
-          };
+          }
+        // Nothing was prepared and nothing was recorded, because there is no usable key.
+        | CredentialUnavailableError;
     };
 
 export interface PrepareSourceEvidenceCommand {
@@ -101,7 +114,10 @@ export function createPrepareSourceEvidence(dependencies: {
   readonly sources: UrlSourceRepository;
   readonly extractions: SourceExtractionRepository;
   readonly preparations: SourceEvidencePreparationRepository;
-  readonly model: StructuredModel;
+  // Built when a preparation starts rather than when the runtime is, because both the model
+  // identifier and the credential behind it are per-Site configuration that can change without
+  // the process ever restarting.
+  readonly resolveModel: () => Promise<PreparationModelResolution>;
   readonly createPreparationId: () => SourceEvidencePreparationId;
   readonly now: () => string;
 }): PrepareSourceEvidence {
@@ -141,18 +157,18 @@ export function createPrepareSourceEvidence(dependencies: {
       };
     }
 
+    const resolvedModel = await dependencies.resolveModel();
+    if (!resolvedModel.ok) return resolvedModel;
+    const { model } = resolvedModel;
     const rawMarkdown = extraction.document.content;
-    const submittedMarkdown = capEvidenceMarkdown(
-      rawMarkdown,
-      dependencies.model.limits.maximumInputCharacters,
-    );
+    const submittedMarkdown = capEvidenceMarkdown(rawMarkdown, model.limits.maximumInputCharacters);
     const input = {
       rawCharacters: rawMarkdown.length,
       submittedCharacters: submittedMarkdown.length,
     };
     const preparationId = dependencies.createPreparationId();
     const startedAt = dependencies.now();
-    const generated = await dependencies.model.generateStructured({
+    const generated = await model.generateStructured({
       systemPrompt: EVIDENCE_PREPARATION_SYSTEM_PROMPT,
       input: {
         rawMetadata: {
@@ -175,7 +191,7 @@ export function createPrepareSourceEvidence(dependencies: {
             preparationId,
             sourceId: source.id,
             extractionId: extraction.id,
-            model: dependencies.model.descriptor,
+            model: model.descriptor,
             preparer: EVIDENCE_PREPARER,
             requestedBy: command.requestedBy,
             input,
@@ -188,7 +204,7 @@ export function createPrepareSourceEvidence(dependencies: {
             preparationId,
             sourceId: source.id,
             extractionId: extraction.id,
-            model: dependencies.model.descriptor,
+            model: model.descriptor,
             preparer: EVIDENCE_PREPARER,
             requestedBy: command.requestedBy,
             input,

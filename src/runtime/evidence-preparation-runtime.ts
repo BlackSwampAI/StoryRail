@@ -9,9 +9,14 @@ import {
   createPrepareSourceEvidence,
   type PrepareSourceEvidence,
 } from "@/application/source-evidence-preparation";
-import { sourceEvidencePreparationId, type SiteId } from "@/domain/editorial";
+import {
+  OPENROUTER_API_KEY_SLOT,
+  sourceEvidencePreparationId,
+  type SiteId,
+} from "@/domain/editorial";
 
 import { resolveSiteId } from "./site-configuration";
+import { createSiteStore } from "./site-store";
 import {
   loadEvidencePreparationRuntimeConfiguration,
   type EvidencePreparationRuntimeConfiguration,
@@ -39,15 +44,30 @@ export function createEvidencePreparationRuntime(
   const repositories = createPostgresSourceRepositories({ pool, siteId: options.siteId });
   const preparations = createPostgresSourceEvidencePreparationRepository({ pool });
   const createUuid = options.createUuid ?? randomUUID;
-  const model = createOpenRouterStructuredModel({
-    apiKey: options.configuration.openRouterApiKey,
-    model: options.configuration.model,
+  const store = createSiteStore({
+    pool,
+    siteId: options.siteId,
+    credentialKey: options.configuration.credentialKey,
   });
   const prepareSourceEvidence = createPrepareSourceEvidence({
     sources: repositories.sources,
     extractions: repositories.extractions,
     preparations,
-    model,
+    // The model this newsroom prepares evidence with, read when a preparation starts so a change
+    // in the settings screen reaches the next Source rather than the next restart. The key is
+    // resolved here, before anything is recorded, so a newsroom with none is told about the key
+    // rather than shown a preparation that failed.
+    resolveModel: async () => {
+      const key = await store.resolveApiKey(OPENROUTER_API_KEY_SLOT);
+      if (!key.ok) return { ok: false as const, error: key.error };
+      return {
+        ok: true as const,
+        model: createOpenRouterStructuredModel({
+          resolveApiKey: async () => key.apiKey,
+          model: (await store.readModelIds()).evidencePreparation,
+        }),
+      };
+    },
     createPreparationId: () => sourceEvidencePreparationId(createUuid()),
     now: options.now ?? (() => new Date().toISOString()),
   });

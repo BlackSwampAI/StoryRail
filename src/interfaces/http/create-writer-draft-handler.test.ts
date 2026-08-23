@@ -57,4 +57,43 @@ describe("Writer draft HTTP handler", () => {
     expect(scheduled).toHaveLength(1);
     await Promise.all(scheduled.map((task) => task()));
   });
+
+  it("answers 503 naming the credential when the newsroom has no OpenRouter key", async () => {
+    const runtime = {
+      createWriterDraft: vi.fn(async () => ({
+        ok: false as const,
+        error: {
+          code: "OPENROUTER_API_KEY_REQUIRED",
+          reason: "CREDENTIAL_NOT_CONFIGURED",
+          slot: "openrouter_api_key",
+          message: "No openrouter_api_key has been configured for this newsroom.",
+        },
+      })),
+      createWriterRevision: vi.fn(),
+      close: vi.fn(),
+    };
+
+    const response = await createWriterDraftHttpHandler({
+      getRuntime: () => runtime as never,
+      environment: { STORYRAIL_OPERATOR_ID: "operator" },
+      after: () => {},
+    })(
+      new Request("http://test/api", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      }),
+      context,
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      ok: false,
+      error: {
+        code: "OPENROUTER_API_KEY_REQUIRED",
+        reason: "CREDENTIAL_NOT_CONFIGURED",
+        slot: "openrouter_api_key",
+      },
+    });
+  });
 });

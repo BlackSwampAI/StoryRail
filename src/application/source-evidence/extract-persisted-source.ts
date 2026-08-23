@@ -1,5 +1,6 @@
 import type { RunSourceExtraction } from "@/application/source-extraction";
 import type {
+  CredentialUnavailableError,
   EditorialActor,
   SourceExtraction,
   SourceExtractionValidationError,
@@ -25,7 +26,11 @@ export interface ExtractPersistedSourceDependencies {
 }
 
 type ExtractPersistedSourceError =
-  SourceNotFoundError | SourceExtractionValidationError | SourceExtractionIdConflictError;
+  | SourceNotFoundError
+  | SourceExtractionValidationError
+  | SourceExtractionIdConflictError
+  // Nothing was retrieved and nothing was recorded, because the newsroom has no usable key.
+  | CredentialUnavailableError;
 
 export type ExtractPersistedSourceResult =
   | {

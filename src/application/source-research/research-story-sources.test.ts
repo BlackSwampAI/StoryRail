@@ -137,7 +137,7 @@ function workflow(options: {
           document: document("RFC 1234 defines the format."),
         })),
     },
-    resolveModel: () => ({
+    resolveModel: async () => ({
       ok: true,
       model: {
         descriptor: { provider: "openrouter", model: "researcher" },

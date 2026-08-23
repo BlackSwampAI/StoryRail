@@ -8,6 +8,8 @@ import type {
 } from "@/application/source-evidence";
 import {
   canonicalizeSourceUrl,
+  credentialUnavailable,
+  FIRECRAWL_API_KEY_SLOT,
   operatorId,
   sourceExtractionId,
   sourceId,
@@ -475,6 +477,29 @@ describe("createPreserveAndExtractUrlSourceHttpHandler", () => {
     await expectJsonResponse(response, 500, result);
     expect(result.source).toBe(SOURCE);
     expect(result.error).toBe(error);
+  });
+
+  it("answers 503 naming the credential when the newsroom has no Firecrawl key", async () => {
+    const error = credentialUnavailable(
+      FIRECRAWL_API_KEY_SLOT,
+      "CREDENTIAL_NOT_CONFIGURED",
+      "No firecrawl_api_key has been configured for this newsroom.",
+    );
+    const result = Object.freeze({
+      ok: false,
+      stage: "extraction",
+      source: SOURCE,
+      error,
+    } satisfies PreserveAndExtractUrlSourceResult);
+    const controlled = makeDependencies(result);
+
+    const response = await createPreserveAndExtractUrlSourceHttpHandler(controlled.dependencies)(
+      makeRequest(),
+    );
+
+    // Nothing was attempted, so this is not a server fault. The model routes answer 503 for the
+    // same condition and a client must not have to know which route refused it.
+    await expectJsonResponse(response, 503, result);
   });
 
   it.each(["configuration", "runtime", "workflow"] as const)(

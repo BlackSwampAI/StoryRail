@@ -1,16 +1,21 @@
+import { resolveCredentialKey } from "./credential-configuration";
+
+/**
+ * What this runtime needs before it can be built, which is now only how to reach the database and
+ * how to read what the database is holding. The connector credentials and the model identifiers
+ * it used to take are per-Site values resolved when a run needs them.
+ */
 export interface DirectorRuntimeConfiguration {
   readonly databaseUrl: string;
-  readonly openRouterApiKey: string;
-  readonly defaultModel: string | null;
+  /** Null when no key is set. An installation with no credentials stored still starts. */
+  readonly credentialKey: string | null;
 }
 
 export class DirectorRuntimeConfigurationError extends Error {
-  readonly code: "STORYRAIL_DATABASE_URL_REQUIRED" | "OPENROUTER_API_KEY_REQUIRED";
-  constructor(code: DirectorRuntimeConfigurationError["code"]) {
-    super(
-      `${code === "STORYRAIL_DATABASE_URL_REQUIRED" ? "STORYRAIL_DATABASE_URL" : "OPENROUTER_API_KEY"} is required.`,
-    );
-    this.code = code;
+  readonly code = "STORYRAIL_DATABASE_URL_REQUIRED" as const;
+
+  constructor() {
+    super("STORYRAIL_DATABASE_URL is required.");
     this.name = "DirectorRuntimeConfigurationError";
   }
 }
@@ -19,12 +24,6 @@ export function loadDirectorRuntimeConfiguration(
   environment: Readonly<Partial<NodeJS.ProcessEnv>> = process.env,
 ): DirectorRuntimeConfiguration {
   const databaseUrl = environment.STORYRAIL_DATABASE_URL?.trim();
-  const openRouterApiKey = environment.OPENROUTER_API_KEY?.trim();
-  if (!databaseUrl) throw new DirectorRuntimeConfigurationError("STORYRAIL_DATABASE_URL_REQUIRED");
-  if (!openRouterApiKey) throw new DirectorRuntimeConfigurationError("OPENROUTER_API_KEY_REQUIRED");
-  return Object.freeze({
-    databaseUrl,
-    openRouterApiKey,
-    defaultModel: environment.STORYRAIL_DIRECTOR_MODEL?.trim() || null,
-  });
+  if (!databaseUrl) throw new DirectorRuntimeConfigurationError();
+  return Object.freeze({ databaseUrl, credentialKey: resolveCredentialKey(environment) });
 }

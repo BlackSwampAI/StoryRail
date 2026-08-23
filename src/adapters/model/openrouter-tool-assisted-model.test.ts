@@ -21,7 +21,10 @@ function model(invoke: (input: unknown) => Promise<unknown>) {
   const bindTools = vi.fn(() => ({ invoke: vi.fn(invoke) }));
   return {
     bindTools,
-    tool: withOpenRouterTools(base, { chatModel: { bindTools } as never, mapFailure }),
+    tool: withOpenRouterTools(base, {
+      resolveChatModel: async () => ({ bindTools }) as never,
+      mapFailure,
+    }),
   };
 }
 

@@ -88,7 +88,7 @@ Durable Profiles configure the Assignment Editor, Writer, and Director/editor-in
 - The first persisted Story transition, `intake` to `assigned`, committed atomically with its Assignment and durable transition receipt/activity.
 - Supervised Assignment Editor proposal generation through the provider-neutral structured-model boundary, with no browsing or tools.
 - Durable, append-ordered AgentRun history that records the exact Story, evidence references, Writer candidates, model, prompt version, requester, outcome, and proposal or safe failure.
-- Supervised Writer execution with Assignment-selected identity, Profile model override or `STORYRAIL_WRITER_MODEL` default, durable Article Revision 1, and an `assigned` to `in_progress` transition.
+- Supervised Writer execution with Assignment-selected identity, Profile model override or the newsroom's configured Writer model, durable Article Revision 1, and an `assigned` to `in_progress` transition.
 - Supervised review submission, a durable Director AgentRun against the exact evidence IDs recorded by the Writer run, and an operator-owned ReviewDecision that atomically moves the Story to Approved or Changes Requested.
 - Explicit operator rejection from Intake, Assigned, In Progress, In Review, or Changes Requested, with a required reason and an atomic terminal Story transition receipt.
 - Supervised Writer revisions after Request Changes, with immutable Revision 2/3 history, exact evidence reuse, operator-owned revision direction, and an atomic return to In Progress.
@@ -184,19 +184,17 @@ Open [http://localhost:3133](http://localhost:3133) to use the development newsr
 
 ## Environment variables
 
-| Variable                               | Required for                      | Purpose                                                                        |
-| -------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------ |
-| `STORYRAIL_DATABASE_URL`               | All persisted workflows           | PostgreSQL connection string for editorial state.                              |
-| `STORYRAIL_OPERATOR_ID`                | Operator-attributed HTTP actions  | Identifies the current fixed development operator; this is not authentication. |
-| `FIRECRAWL_API_KEY`                    | URL intake/extraction             | Authenticates Firecrawl v2 requests.                                           |
-| `OPENROUTER_API_KEY`                   | Model-backed workflows            | Authenticates the current OpenRouter model adapter.                            |
-| `STORYRAIL_EVIDENCE_PREPARATION_MODEL` | Prepared Evidence only            | Selects the OpenRouter model used for evidence preparation.                    |
-| `STORYRAIL_ASSIGNMENT_EDITOR_MODEL`    | Assignment Editor only            | Explicitly selects the OpenRouter model used for supervised proposals.         |
-| `STORYRAIL_WRITER_MODEL`               | Writer default                    | Used when the assigned Writer Profile has no OpenRouter model.                 |
-| `STORYRAIL_DIRECTOR_MODEL`             | Director default                  | Used when the built-in Director Profile has no OpenRouter model.               |
-| `STORYRAIL_TEST_DATABASE_URL`          | PostgreSQL integration tests only | Points to a disposable database named exactly `storyrail_test`.                |
+| Variable                      | Required for                      | Purpose                                                                                     |
+| ----------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------- |
+| `STORYRAIL_DATABASE_URL`      | All persisted workflows           | PostgreSQL connection string for editorial state.                                           |
+| `STORYRAIL_CREDENTIAL_KEY`    | Any stored connector credential   | 32 random bytes in base64 that every stored credential is encrypted under. Not recoverable. |
+| `STORYRAIL_SITE_ID`           | Installations with a second Site  | Selects the Site this process serves; unset means the Site the installation started with.   |
+| `STORYRAIL_OPERATOR_ID`       | Operator-attributed HTTP actions  | Identifies the current fixed development operator; this is not authentication.              |
+| `STORYRAIL_TEST_DATABASE_URL` | PostgreSQL integration tests only | Points to a disposable database named exactly `storyrail_test`.                             |
 
-Normal Story, Inbox, triage, inspection, Agent Profile, and manual Assignment workflows do not require Firecrawl or OpenRouter. Writer and Director execution are isolated. Each Profile's explicit OpenRouter model wins; otherwise its `STORYRAIL_WRITER_MODEL` or `STORYRAIL_DIRECTOR_MODEL` fallback is required. The resolved model is recorded in the durable AgentRun and is not exposed as browser configuration.
+Connector credentials and model selection are no longer environment variables. The OpenRouter and Firecrawl keys are per-Site secrets held encrypted in `storyrail.site_credentials`, and the model each agent role runs on is per-Site configuration in `storyrail.site_settings`. Both are resolved when a run needs them rather than when a process starts, so a change takes effect on the next request. Credentials are write-only over HTTP: `PUT` and `DELETE /api/site-credentials/[slot]` set and remove one, and `GET /api/site-settings` reports only which slots are configured and the last four characters of each. No endpoint returns a stored credential.
+
+Normal Story, Inbox, triage, inspection, Agent Profile, and manual Assignment workflows need no credential at all, and an installation with none configured stays usable: only the runs that reach outside fail, and they fail as recorded Agent Run and extraction failures rather than as errors out of a route.
 
 ## Development and validation
 

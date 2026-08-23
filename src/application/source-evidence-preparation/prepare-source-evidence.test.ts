@@ -10,6 +10,8 @@ import type {
   UrlSourceRepository,
 } from "@/application/source-persistence";
 import {
+  credentialUnavailable,
+  OPENROUTER_API_KEY_SLOT,
   operatorId,
   sourceEvidencePreparationId,
   sourceExtractionId,
@@ -108,7 +110,7 @@ function harness(
     sources,
     extractions,
     preparations,
-    model,
+    resolveModel: async () => ({ ok: true as const, model }),
     createPreparationId: () => sourceEvidencePreparationId("preparation-25"),
     now: () => times.shift() ?? "unexpected-time",
   });
@@ -360,5 +362,40 @@ describe("capEvidenceMarkdown", () => {
 
     expect(narrow.stored[0]?.input.submittedCharacters).toBeLessThanOrEqual(400);
     expect(wide.stored[0]?.input.submittedCharacters).toBeGreaterThan(400);
+  });
+
+  it("prepares nothing and records nothing when the newsroom has no OpenRouter key", async () => {
+    const harnessed = harness({});
+    const prepare = createPrepareSourceEvidence({
+      sources: { findById: async () => source, persist: vi.fn(), findByCanonicalUrl: vi.fn() },
+      extractions: { append: vi.fn(), listBySourceId: async () => [extraction] },
+      preparations: harnessed.preparations,
+      resolveModel: async () => ({
+        ok: false as const,
+        error: credentialUnavailable(
+          OPENROUTER_API_KEY_SLOT,
+          "CREDENTIAL_NOT_CONFIGURED",
+          "No openrouter_api_key has been configured for this newsroom.",
+        ),
+      }),
+      createPreparationId: () => sourceEvidencePreparationId("preparation-unused"),
+      now: () => "unused",
+    });
+
+    await expect(
+      prepare({
+        sourceId: source.id,
+        extractionId: extraction.id,
+        requestedBy: source.submittedBy,
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "OPENROUTER_API_KEY_REQUIRED",
+        reason: "CREDENTIAL_NOT_CONFIGURED",
+        slot: "openrouter_api_key",
+      },
+    });
+    expect(harnessed.preparations.append).not.toHaveBeenCalled();
   });
 });

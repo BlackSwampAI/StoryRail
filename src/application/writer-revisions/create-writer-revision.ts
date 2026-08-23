@@ -11,6 +11,7 @@ import {
 import {
   withNewsroomStandards,
   createArticleRevision,
+  type CredentialUnavailableCode,
   articleBodyMarkdown,
   recordAgentRun,
   transitionStory,
@@ -81,6 +82,7 @@ export type CreateWriterRevisionResult =
           | "WRITER_EVIDENCE_UNAVAILABLE"
           | "WRITER_MODEL_UNSUPPORTED"
           | "WRITER_MODEL_UNAVAILABLE"
+          | CredentialUnavailableCode
           | "AGENT_RUN_ID_CONFLICT"
           | "WRITER_REVISION_CONFLICT";
         readonly message: string;
@@ -107,7 +109,9 @@ export function createWriterRevision(dependencies: {
   readonly inspections: StoryInspectionRepository;
   readonly runs: AgentRunRepository;
   readonly persistence: WriterRevisionPersistence;
-  readonly resolveModel: (descriptor: ModelDescriptor | null) => WriterModelResolution;
+  // Resolution is asynchronous because the model identifier is per-Site configuration read
+  // from the store when the run starts, not a value the process was started with.
+  readonly resolveModel: (descriptor: ModelDescriptor | null) => Promise<WriterModelResolution>;
   readonly createAgentRunId: () => AgentRunId;
   readonly createRevisionId: () => ArticleRevisionId;
   readonly createTransitionId: () => TransitionId;
@@ -261,7 +265,7 @@ export function createWriterRevision(dependencies: {
       selected.push({ reference, document: evidence.document });
     }
 
-    const resolved = dependencies.resolveModel(writerProfile.model);
+    const resolved = await dependencies.resolveModel(writerProfile.model);
     if (!resolved.ok) return { ok: false, error: { ...resolved.error, storyId: story.id } };
     const id = dependencies.createAgentRunId();
     const startedAt = dependencies.now();

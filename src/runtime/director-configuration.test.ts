@@ -16,20 +16,21 @@ const createModel = (model: string): StructuredModel => ({
 });
 
 describe("Director runtime configuration", () => {
-  it("allows a missing default for Profile-first resolution", () => {
+  it("carries the encryption key and no credential of its own", () => {
     expect(
       loadDirectorRuntimeConfiguration({
         STORYRAIL_DATABASE_URL: "postgres://db",
+        STORYRAIL_CREDENTIAL_KEY: "  base64-key  ",
         OPENROUTER_API_KEY: "key",
       }),
-    ).toEqual({ databaseUrl: "postgres://db", openRouterApiKey: "key", defaultModel: null });
+    ).toEqual({ databaseUrl: "postgres://db", credentialKey: "base64-key" });
   });
 
-  it("requires database and OpenRouter configuration only when constructed", () => {
+  it("requires the database URL only when constructed", () => {
     expect(() => loadDirectorRuntimeConfiguration({})).toThrow(DirectorRuntimeConfigurationError);
   });
 
-  it("uses the exact Profile model before the STORYRAIL_DIRECTOR_MODEL fallback", () => {
+  it("uses the exact Profile model before the newsroom's configured default", () => {
     expect(
       resolveDirectorModel(
         { provider: "openrouter", model: "profile-model" },

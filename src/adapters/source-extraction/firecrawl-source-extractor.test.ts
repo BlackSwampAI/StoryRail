@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { canonicalizeSourceUrl, operatorId, sourceId, type UrlSource } from "@/domain/editorial";
-
 import {
-  createFirecrawlSourceExtractor,
-  FirecrawlSourceExtractorConfigurationError,
-} from "./firecrawl-source-extractor";
+  canonicalizeSourceUrl,
+  credentialUnavailable,
+  operatorId,
+  sourceId,
+  FIRECRAWL_API_KEY_SLOT,
+  type UrlSource,
+} from "@/domain/editorial";
+
+import { createFirecrawlSourceExtractor } from "./firecrawl-source-extractor";
 import type {
   SourceExtractor,
   SourceExtractorFailure,
@@ -82,7 +86,7 @@ afterEach(() => {
 describe("createFirecrawlSourceExtractor", () => {
   it("exposes the exact Firecrawl v2 descriptor", () => {
     const extractor = createFirecrawlSourceExtractor({
-      apiKey: makeApiKey(),
+      resolveApiKey: async () => ({ ok: true as const, apiKey: makeApiKey() }),
       fetch: mockFetch(jsonResponse(successfulBody())),
     });
 
@@ -94,7 +98,9 @@ describe("createFirecrawlSourceExtractor", () => {
     const defaultFetch = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(jsonResponse(successfulBody()));
-    const extractor = createFirecrawlSourceExtractor({ apiKey: makeApiKey() });
+    const extractor = createFirecrawlSourceExtractor({
+      resolveApiKey: async () => ({ ok: true as const, apiKey: makeApiKey() }),
+    });
 
     await extractor.extract(makeSource());
 
@@ -104,7 +110,7 @@ describe("createFirecrawlSourceExtractor", () => {
   it("uses an injected fetch implementation when supplied", async () => {
     const injectedFetch = mockFetch(jsonResponse(successfulBody()));
     const extractor = createFirecrawlSourceExtractor({
-      apiKey: makeApiKey(),
+      resolveApiKey: async () => ({ ok: true as const, apiKey: makeApiKey() }),
       fetch: injectedFetch,
     });
 
@@ -113,49 +119,69 @@ describe("createFirecrawlSourceExtractor", () => {
     expect(injectedFetch).toHaveBeenCalledTimes(1);
   });
 
-  it.each(["", "   \t\n  "])("rejects a missing API key before fetch", (apiKey) => {
+  it("reports the missing credential itself rather than a page that could not be fetched", async () => {
     const fetchImplementation = mockFetch(jsonResponse(successfulBody()));
+    const extractor = createFirecrawlSourceExtractor({
+      resolveApiKey: async () => ({
+        ok: false as const,
+        error: credentialUnavailable(
+          FIRECRAWL_API_KEY_SLOT,
+          "CREDENTIAL_NOT_CONFIGURED",
+          "No firecrawl_api_key has been configured for this newsroom.",
+        ),
+      }),
+      fetch: fetchImplementation,
+    });
 
-    expect(() => createFirecrawlSourceExtractor({ apiKey, fetch: fetchImplementation })).toThrow(
-      FirecrawlSourceExtractorConfigurationError,
-    );
+    const result = await extractor.extract(makeSource());
+
+    expect(result).toEqual({
+      ok: false,
+      unavailable: {
+        code: "FIRECRAWL_API_KEY_REQUIRED",
+        reason: "CREDENTIAL_NOT_CONFIGURED",
+        slot: "firecrawl_api_key",
+        message: "No firecrawl_api_key has been configured for this newsroom.",
+      },
+    });
+    expect(result).not.toHaveProperty("failure");
     expect(fetchImplementation).not.toHaveBeenCalled();
   });
 
-  it("returns a stable configuration error without including the submitted value", () => {
-    const apiKey = " \t\n ";
+  it("keeps an unreadable credential distinct from one that was never entered", async () => {
+    const extractor = createFirecrawlSourceExtractor({
+      resolveApiKey: async () => ({
+        ok: false as const,
+        error: credentialUnavailable(
+          FIRECRAWL_API_KEY_SLOT,
+          "CREDENTIAL_UNREADABLE",
+          "The stored firecrawl_api_key could not be read.",
+        ),
+      }),
+      fetch: mockFetch(jsonResponse(successfulBody())),
+    });
 
-    try {
-      createFirecrawlSourceExtractor({ apiKey, fetch: mockFetch(jsonResponse({})) });
-      throw new Error("Expected configuration validation to fail.");
-    } catch (error) {
-      expect(error).toBeInstanceOf(FirecrawlSourceExtractorConfigurationError);
-      expect(error).toMatchObject({
-        code: "FIRECRAWL_API_KEY_REQUIRED",
-        message: "A Firecrawl API key is required.",
-      });
-      if (!(error instanceof Error)) {
-        throw new Error("Expected an Error instance.");
-      }
-      expect(error.message).not.toContain(JSON.stringify(apiKey));
-    }
+    expect(await extractor.extract(makeSource())).toMatchObject({
+      unavailable: { code: "CREDENTIAL_UNREADABLE", reason: "CREDENTIAL_UNREADABLE" },
+    });
   });
 
-  it("does not fall back to an environment variable", () => {
-    const originalValue = process.env.FIRECRAWL_API_KEY;
-    process.env.FIRECRAWL_API_KEY = makeApiKey();
+  it("reads the key for every retrieval rather than the one it was built with", async () => {
+    const keys = ["fc-first", "fc-second"];
+    const fetchImplementation = mockFetch(jsonResponse(successfulBody()));
+    const extractor = createFirecrawlSourceExtractor({
+      resolveApiKey: async () => ({ ok: true as const, apiKey: keys.shift() ?? "exhausted" }),
+      fetch: fetchImplementation,
+    });
 
-    try {
-      expect(() => createFirecrawlSourceExtractor({ apiKey: "" })).toThrow(
-        FirecrawlSourceExtractorConfigurationError,
-      );
-    } finally {
-      if (originalValue === undefined) {
-        delete process.env.FIRECRAWL_API_KEY;
-      } else {
-        process.env.FIRECRAWL_API_KEY = originalValue;
-      }
-    }
+    await extractor.extract(makeSource());
+    await extractor.extract(makeSource());
+
+    const authorizations = fetchImplementation.mock.calls.map(
+      ([, init]) =>
+        (init as RequestInit & { headers: Record<string, string> }).headers.Authorization,
+    );
+    expect(authorizations).toEqual(["Bearer fc-first", "Bearer fc-second"]);
   });
 });
 
@@ -164,7 +190,7 @@ describe("Firecrawl request contract", () => {
     const apiKey = makeApiKey();
     const fetchImplementation = mockFetch(jsonResponse(successfulBody()));
     const extractor = createFirecrawlSourceExtractor({
-      apiKey,
+      resolveApiKey: async () => ({ ok: true as const, apiKey }),
       fetch: fetchImplementation,
     });
 
@@ -198,7 +224,7 @@ describe("Firecrawl request contract", () => {
       jsonResponse({ success: false, error: "provider detail" }, status),
     );
     const extractor = createFirecrawlSourceExtractor({
-      apiKey: makeApiKey(),
+      resolveApiKey: async () => ({ ok: true as const, apiKey: makeApiKey() }),
       fetch: fetchImplementation,
     });
 
@@ -217,7 +243,7 @@ describe("Firecrawl successful response mapping", () => {
       "the guidance would be reissued before the next cycle so county clerks could plan.",
     ].join("\n");
     const extractor = createFirecrawlSourceExtractor({
-      apiKey: makeApiKey(),
+      resolveApiKey: async () => ({ ok: true as const, apiKey: makeApiKey() }),
       fetch: mockFetch(jsonResponse(successfulBody(markdown))),
     });
 
@@ -265,7 +291,7 @@ describe("Firecrawl successful response mapping", () => {
       }),
     );
     const extractor = createFirecrawlSourceExtractor({
-      apiKey: makeApiKey(),
+      resolveApiKey: async () => ({ ok: true as const, apiKey: makeApiKey() }),
       fetch: fetchImplementation,
     });
 
@@ -295,7 +321,7 @@ describe("Firecrawl successful response mapping", () => {
       jsonResponse({ success: true, data: { markdown: ARTICLE_MARKDOWN, metadata } }),
     );
     const extractor = createFirecrawlSourceExtractor({
-      apiKey: makeApiKey(),
+      resolveApiKey: async () => ({ ok: true as const, apiKey: makeApiKey() }),
       fetch: fetchImplementation,
     });
 
@@ -339,7 +365,7 @@ describe("Firecrawl successful response mapping", () => {
       }),
     );
     const extractor = createFirecrawlSourceExtractor({
-      apiKey,
+      resolveApiKey: async () => ({ ok: true as const, apiKey }),
       fetch: fetchImplementation,
     });
 
@@ -367,7 +393,7 @@ describe("Firecrawl successful response mapping", () => {
     const source = Object.freeze(makeSource());
     const before = { ...source };
     const extractor = createFirecrawlSourceExtractor({
-      apiKey: makeApiKey(),
+      resolveApiKey: async () => ({ ok: true as const, apiKey: makeApiKey() }),
       fetch: mockFetch(jsonResponse(successfulBody())),
     });
 
@@ -392,7 +418,7 @@ describe("Firecrawl failure mapping", () => {
     };
     const fetchImplementation = mockFetch(jsonResponse(providerBody));
     const extractor = createFirecrawlSourceExtractor({
-      apiKey: makeApiKey(),
+      resolveApiKey: async () => ({ ok: true as const, apiKey: makeApiKey() }),
       fetch: fetchImplementation,
     });
 
@@ -437,7 +463,7 @@ describe("Firecrawl failure mapping", () => {
       ),
     );
     const extractor = createFirecrawlSourceExtractor({
-      apiKey: makeApiKey(),
+      resolveApiKey: async () => ({ ok: true as const, apiKey: makeApiKey() }),
       fetch: fetchImplementation,
     });
 
@@ -447,7 +473,7 @@ describe("Firecrawl failure mapping", () => {
     expect(fetchImplementation).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(result)).not.toContain("provider");
     expect(Object.keys(result)).toEqual(["ok", "failure"]);
-    if (!result.ok) {
+    if (!result.ok && "failure" in result) {
       expect(Object.keys(result.failure)).toEqual(["code", "retryable"]);
     }
   });
@@ -458,7 +484,7 @@ describe("Firecrawl failure mapping", () => {
       throw new Error("Unstable transport failure.");
     });
     const extractor = createFirecrawlSourceExtractor({
-      apiKey,
+      resolveApiKey: async () => ({ ok: true as const, apiKey }),
       fetch: fetchImplementation,
     });
 
@@ -483,7 +509,7 @@ describe("Firecrawl failure mapping", () => {
     "records an upstream %s page as a failed extraction rather than evidence",
     async (_case, statusCode, expected) => {
       const extractor = createFirecrawlSourceExtractor({
-        apiKey: makeApiKey(),
+        resolveApiKey: async () => ({ ok: true as const, apiKey: makeApiKey() }),
         fetch: mockFetch(
           jsonResponse({
             success: true,
@@ -504,7 +530,7 @@ describe("Firecrawl failure mapping", () => {
 
   it("accepts an upstream success status alongside article content", async () => {
     const extractor = createFirecrawlSourceExtractor({
-      apiKey: makeApiKey(),
+      resolveApiKey: async () => ({ ok: true as const, apiKey: makeApiKey() }),
       fetch: mockFetch(
         jsonResponse({
           success: true,
@@ -528,7 +554,7 @@ describe("Firecrawl failure mapping", () => {
     ["fractional", 404.5],
   ])("ignores a %s upstream status and judges the content instead", async (_case, statusCode) => {
     const extractor = createFirecrawlSourceExtractor({
-      apiKey: makeApiKey(),
+      resolveApiKey: async () => ({ ok: true as const, apiKey: makeApiKey() }),
       fetch: mockFetch(
         jsonResponse({
           success: true,
@@ -542,7 +568,7 @@ describe("Firecrawl failure mapping", () => {
 
   it("rejects a rendering too short to be an article", async () => {
     const extractor = createFirecrawlSourceExtractor({
-      apiKey: makeApiKey(),
+      resolveApiKey: async () => ({ ok: true as const, apiKey: makeApiKey() }),
       fetch: mockFetch(jsonResponse(successfulBody("# 404 Not Found"))),
     });
 
@@ -560,7 +586,7 @@ describe("Firecrawl failure mapping", () => {
       "November ballot without further amendment.",
     ].join("\n");
     const extractor = createFirecrawlSourceExtractor({
-      apiKey: makeApiKey(),
+      resolveApiKey: async () => ({ ok: true as const, apiKey: makeApiKey() }),
       fetch: mockFetch(jsonResponse(successfulBody(brief))),
     });
 
@@ -572,7 +598,7 @@ describe("Firecrawl failure mapping", () => {
 
   it("maps malformed JSON to a stable extraction failure", async () => {
     const extractor = createFirecrawlSourceExtractor({
-      apiKey: makeApiKey(),
+      resolveApiKey: async () => ({ ok: true as const, apiKey: makeApiKey() }),
       fetch: mockFetch(new Response("{not-json", { status: 200 })),
     });
 
@@ -598,7 +624,7 @@ describe("Firecrawl failure mapping", () => {
   ])("maps %s to a stable extraction failure", async (_case, body) => {
     const response = body === null ? new Response(null, { status: 200 }) : jsonResponse(body, 200);
     const extractor = createFirecrawlSourceExtractor({
-      apiKey: makeApiKey(),
+      resolveApiKey: async () => ({ ok: true as const, apiKey: makeApiKey() }),
       fetch: mockFetch(response),
     });
 
@@ -615,7 +641,7 @@ describe("Firecrawl failure mapping", () => {
 describe("SourceExtractor type boundary", () => {
   it("uses UrlSource and discriminates provider-neutral results by ok", async () => {
     const extractor: SourceExtractor = createFirecrawlSourceExtractor({
-      apiKey: makeApiKey(),
+      resolveApiKey: async () => ({ ok: true as const, apiKey: makeApiKey() }),
       fetch: mockFetch(jsonResponse(successfulBody())),
     });
     const source: Parameters<SourceExtractor["extract"]>[0] = makeSource();
@@ -626,10 +652,12 @@ describe("SourceExtractor type boundary", () => {
         return value.document;
       }
 
-      return value.failure;
+      return "failure" in value ? value.failure : value.unavailable;
     }
 
-    expect(selectOutcome(result)).toEqual(result.ok ? result.document : result.failure);
+    expect(selectOutcome(result)).toEqual(
+      result.ok ? result.document : "failure" in result ? result.failure : result.unavailable,
+    );
   });
 
   it("excludes alternate formats, extraction identity, actors, and timestamps", () => {

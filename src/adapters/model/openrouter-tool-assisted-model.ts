@@ -90,7 +90,11 @@ function readText(message: unknown): string {
 export function withOpenRouterTools(
   model: StructuredModel,
   dependencies: {
-    readonly chatModel: ToolBindingChatModel;
+    /**
+     * Built per request rather than held, because the credential it carries is read from the
+     * per-Site store at the moment of use and a model bound once would keep the first key it saw.
+     */
+    readonly resolveChatModel: () => Promise<ToolBindingChatModel>;
     readonly timeoutMilliseconds?: number;
     readonly mapFailure: (error: unknown) => StructuredModelResult<never>;
   },
@@ -103,10 +107,11 @@ export function withOpenRouterTools(
       request: ToolAssistedRequest<Output>,
     ): Promise<StructuredModelResult<ToolAssistedTurn<Output>>> {
       try {
+        const chatModel = await dependencies.resolveChatModel();
         // Binding tools alone leaves the answer unconstrained, and a model that has just used a
         // tool will happily reply in prose. Constraining the response as well means each turn is
         // either a tool call or an answer in the shape the caller asked for — never neither.
-        const bound = dependencies.chatModel.bindTools(
+        const bound = chatModel.bindTools(
           request.tools.map((tool) => ({
             type: "function" as const,
             function: {

@@ -1,41 +1,29 @@
+import { resolveCredentialKey } from "./credential-configuration";
+
+/**
+ * What this runtime needs before it can be built, which is now only how to reach the database and
+ * how to read what the database is holding. The connector credentials and the model identifiers
+ * it used to take are per-Site values resolved when a run needs them.
+ */
 export interface ResearcherRuntimeConfiguration {
   readonly databaseUrl: string;
-  readonly openRouterApiKey: string;
-  readonly firecrawlApiKey: string;
-  readonly defaultModel: string | null;
+  /** Null when no key is set. An installation with no credentials stored still starts. */
+  readonly credentialKey: string | null;
 }
 
 export class ResearcherRuntimeConfigurationError extends Error {
-  readonly code:
-    | "STORYRAIL_DATABASE_URL_REQUIRED"
-    | "OPENROUTER_API_KEY_REQUIRED"
-    | "FIRECRAWL_API_KEY_REQUIRED";
-  constructor(code: ResearcherRuntimeConfigurationError["code"]) {
-    super(`${code.replace("_REQUIRED", "")} is required.`);
-    this.code = code;
+  readonly code = "STORYRAIL_DATABASE_URL_REQUIRED" as const;
+
+  constructor() {
+    super("STORYRAIL_DATABASE_URL is required.");
     this.name = "ResearcherRuntimeConfigurationError";
   }
 }
 
-/**
- * Research needs a way to retrieve as well as a way to reason, so retrieval is part of the
- * runtime's configuration rather than something discovered when the first tool call fails.
- */
 export function loadResearcherRuntimeConfiguration(
   environment: Readonly<Partial<NodeJS.ProcessEnv>> = process.env,
 ): ResearcherRuntimeConfiguration {
   const databaseUrl = environment.STORYRAIL_DATABASE_URL?.trim();
-  const openRouterApiKey = environment.OPENROUTER_API_KEY?.trim();
-  const firecrawlApiKey = environment.FIRECRAWL_API_KEY?.trim();
-  if (!databaseUrl)
-    throw new ResearcherRuntimeConfigurationError("STORYRAIL_DATABASE_URL_REQUIRED");
-  if (!openRouterApiKey)
-    throw new ResearcherRuntimeConfigurationError("OPENROUTER_API_KEY_REQUIRED");
-  if (!firecrawlApiKey) throw new ResearcherRuntimeConfigurationError("FIRECRAWL_API_KEY_REQUIRED");
-  return Object.freeze({
-    databaseUrl,
-    openRouterApiKey,
-    firecrawlApiKey,
-    defaultModel: environment.STORYRAIL_RESEARCHER_MODEL?.trim() || null,
-  });
+  if (!databaseUrl) throw new ResearcherRuntimeConfigurationError();
+  return Object.freeze({ databaseUrl, credentialKey: resolveCredentialKey(environment) });
 }

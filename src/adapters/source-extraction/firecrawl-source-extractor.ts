@@ -1,4 +1,5 @@
 import type {
+  ApiKeyResolution,
   ExtractedSourceDocument,
   SourceExtractionFailure,
   SourceExtractorDescriptor,
@@ -14,17 +15,13 @@ const FIRECRAWL_DESCRIPTOR: SourceExtractorDescriptor = Object.freeze({
 });
 
 export interface FirecrawlSourceExtractorOptions {
-  readonly apiKey: string;
+  /**
+   * Resolved when a page is retrieved, never when the extractor is built. The runtime that owns
+   * this extractor is cached for the life of the process, so a key read at construction could
+   * only ever be replaced by a restart.
+   */
+  readonly resolveApiKey: () => Promise<ApiKeyResolution>;
   readonly fetch?: typeof globalThis.fetch;
-}
-
-export class FirecrawlSourceExtractorConfigurationError extends Error {
-  readonly code = "FIRECRAWL_API_KEY_REQUIRED" as const;
-
-  constructor() {
-    super("A Firecrawl API key is required.");
-    this.name = "FirecrawlSourceExtractorConfigurationError";
-  }
 }
 
 function failure(code: SourceExtractionFailure["code"], retryable: boolean): SourceExtractorResult {
@@ -129,16 +126,17 @@ function mapSuccessfulBody(body: unknown): SourceExtractorResult {
 export function createFirecrawlSourceExtractor(
   options: FirecrawlSourceExtractorOptions,
 ): SourceExtractor {
-  if (options.apiKey.trim().length === 0) {
-    throw new FirecrawlSourceExtractorConfigurationError();
-  }
-
-  const apiKey = options.apiKey;
   const fetchImplementation = options.fetch ?? globalThis.fetch;
 
   return {
     descriptor: FIRECRAWL_DESCRIPTOR,
     async extract(source) {
+      // Asked for before anything else, so a newsroom with no key is told that rather than being
+      // told the page could not be fetched. Nothing has been attempted at this point.
+      const resolved = await options.resolveApiKey();
+      if (!resolved.ok) return { ok: false, unavailable: resolved.error };
+      const apiKey = resolved.apiKey;
+
       let response: Response;
 
       try {

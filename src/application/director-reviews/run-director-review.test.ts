@@ -218,7 +218,7 @@ describe("run Director review", () => {
         }),
         listByStoryId: vi.fn(),
       },
-      resolveModel: () => ({ ok: true, model }),
+      resolveModel: async () => ({ ok: true, model }),
       createAgentRunId: () => agentRunId("director-run-38"),
       now: vi.fn().mockReturnValueOnce("start").mockReturnValue("end"),
     });
@@ -276,7 +276,7 @@ describe("run Director review", () => {
         complete: vi.fn(async (run) => ({ ok: true as const, run })),
         listByStoryId: vi.fn(),
       },
-      resolveModel: () => ({ ok: true, model }),
+      resolveModel: async () => ({ ok: true, model }),
       createAgentRunId: () => agentRunId("director-run-ungrounded"),
       now: vi.fn().mockReturnValueOnce("start").mockReturnValue("end"),
     });
@@ -333,7 +333,7 @@ describe("run Director review", () => {
         complete: vi.fn(async (run) => ({ ok: true as const, run })),
         listByStoryId: vi.fn(),
       },
-      resolveModel: () => ({ ok: true, model }),
+      resolveModel: async () => ({ ok: true, model }),
       createAgentRunId: () => agentRunId("director-run-headline"),
       now: vi.fn().mockReturnValueOnce("start").mockReturnValue("end"),
     });
@@ -369,7 +369,7 @@ describe("run Director review", () => {
         complete: vi.fn(async (run) => ({ ok: true as const, run })),
         listByStoryId: vi.fn(),
       },
-      resolveModel: () => ({ ok: true, model }),
+      resolveModel: async () => ({ ok: true, model }),
       createAgentRunId: () => agentRunId("director-run-input"),
       now: vi.fn().mockReturnValueOnce("start").mockReturnValue("end"),
     });
@@ -404,7 +404,7 @@ describe("run Director review", () => {
       inspections: { inspect: vi.fn(async () => ({ ok: true as const, inspection })) },
       profiles: { findById: vi.fn(async () => facts.director), list: vi.fn(), append: vi.fn() },
       runs: { append: vi.fn(), complete: vi.fn(), listByStoryId: vi.fn() },
-      resolveModel: () => ({
+      resolveModel: async () => ({
         ok: true,
         model: {
           descriptor: { provider: "openrouter", model: "director" },
@@ -466,7 +466,7 @@ describe("run Director review", () => {
         }),
         listByStoryId: vi.fn(),
       },
-      resolveModel: () => ({
+      resolveModel: async () => ({
         ok: true,
         model: {
           descriptor: { provider: "openrouter", model: "director" },
