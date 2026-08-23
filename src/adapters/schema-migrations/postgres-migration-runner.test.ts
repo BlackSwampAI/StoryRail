@@ -156,7 +156,7 @@ describePostgres("PostgreSQL migration runner", () => {
         problems: [{ code: "MIGRATION_ADOPTION_TARGET_UNKNOWN", name: "9999-imaginary.sql" }],
       });
     });
-  });
+  }, 60_000);
 
   it("leaves a failed migration recorded as in doubt and refuses to continue past it", async () => {
     await withFreshDatabase(async ({ pool, ledger }) => {

@@ -16,8 +16,10 @@ import {
   agentRunId,
   type EditorialActor,
   type ModelDescriptor,
+  type SiteId,
   type StoryId,
 } from "@/domain/editorial";
+import { resolveSiteId } from "./site-configuration";
 import {
   loadDirectorRuntimeConfiguration,
   type DirectorRuntimeConfiguration,
@@ -58,6 +60,7 @@ export function resolveDirectorModel(
 
 export function createDirectorRuntime(options: {
   readonly configuration: DirectorRuntimeConfiguration;
+  readonly siteId: SiteId;
   readonly now?: () => string;
   readonly createUuid?: () => string;
   readonly createPool?: (configuration: PoolConfig) => Pool;
@@ -68,14 +71,17 @@ export function createDirectorRuntime(options: {
   // The standards in force when a run starts. Read per run rather than cached, so an edit
   // reaches the next piece of work rather than the next restart.
   const readNewsroomStandards = async (): Promise<string | null> => {
-    const history = await createPostgresNewsroomStandardsRepository({ pool }).list();
+    const history = await createPostgresNewsroomStandardsRepository({
+      pool,
+      siteId: options.siteId,
+    }).list();
     return history.at(-1)?.text ?? null;
   };
   const uuid = options.createUuid ?? randomUUID;
   const workflow = createRunDirectorReview({
     readNewsroomStandards,
-    inspections: createPostgresStoryInspectionRepository({ pool }),
-    profiles: createPostgresAgentProfileRepository({ pool }),
+    inspections: createPostgresStoryInspectionRepository({ pool, siteId: options.siteId }),
+    profiles: createPostgresAgentProfileRepository({ pool, siteId: options.siteId }),
     runs: createPostgresAgentRunRepository({ pool }),
     resolveModel: (descriptor) =>
       resolveDirectorModel(descriptor, options.configuration.defaultModel, (model) =>
@@ -104,6 +110,7 @@ export function createDirectorRuntimeFromEnvironment(
 ): DirectorRuntime {
   return createDirectorRuntime({
     configuration: loadDirectorRuntimeConfiguration(options.environment),
+    siteId: resolveSiteId(options.environment ?? process.env),
     now: options.now,
     createUuid: options.createUuid,
     createPool: options.createPool,

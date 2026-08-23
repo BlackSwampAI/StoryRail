@@ -2,12 +2,13 @@ import { isDeepStrictEqual } from "node:util";
 
 import type { Pool, QueryResultRow } from "pg";
 
-import type { Story, StoryId, StoryState } from "@/domain/editorial";
+import type { SiteId, Story, StoryId, StoryState } from "@/domain/editorial";
 import { STORY_STATES } from "@/domain/editorial";
 import type { PersistStoryResult, StoryRepository } from "@/application/story-persistence";
 
 export interface CreatePostgresStoryRepositoryOptions {
   readonly pool: Pool;
+  readonly siteId: SiteId;
 }
 
 interface StoryPayloadRow extends QueryResultRow {
@@ -79,12 +80,17 @@ function serializeStory(story: Story): string {
   return serialized;
 }
 
-async function findStoryById(pool: Pool, storyIdentity: StoryId): Promise<Story | null> {
+async function findStoryById(
+  pool: Pool,
+  siteId: SiteId,
+  storyIdentity: StoryId,
+): Promise<Story | null> {
   const result = await pool.query<StoryPayloadRow>(
     `SELECT story_id, state, revision_cycle, payload
      FROM storyrail.stories
-     WHERE story_id = $1`,
-    [storyIdentity],
+     WHERE story_id = $1
+       AND site_id = $2`,
+    [storyIdentity, siteId],
   );
   const row = result.rows[0];
   return row ? decodeStory(row) : null;
@@ -93,28 +99,37 @@ async function findStoryById(pool: Pool, storyIdentity: StoryId): Promise<Story 
 export function createPostgresStoryRepository(
   options: CreatePostgresStoryRepositoryOptions,
 ): StoryRepository {
-  const { pool } = options;
+  const { pool, siteId } = options;
 
   return {
-    findById: (storyIdentity) => findStoryById(pool, storyIdentity),
+    findById: (storyIdentity) => findStoryById(pool, siteId, storyIdentity),
     async persist({ story }): Promise<PersistStoryResult> {
       const payload = serializeStory(story);
       const inserted = await pool.query<StoryPayloadRow>(
-        `INSERT INTO storyrail.stories (story_id, state, revision_cycle, payload)
-         VALUES ($1, $2, $3, $4::jsonb)
+        `INSERT INTO storyrail.stories (story_id, state, revision_cycle, payload, site_id)
+         VALUES ($1, $2, $3, $4::jsonb, $5)
          ON CONFLICT DO NOTHING
          RETURNING story_id, state, revision_cycle, payload`,
-        [story.id, story.state, story.revisionCycle, payload],
+        [story.id, story.state, story.revisionCycle, payload, siteId],
       );
 
       if (inserted.rows[0]) {
         return { ok: true, story: decodeStory(inserted.rows[0]) };
       }
 
-      const existing = await findStoryById(pool, story.id);
+      const existing = await findStoryById(pool, siteId, story.id);
 
+      // The identifier is taken, but by a Story on another Site. Reporting the conflict rather
+      // than the other Story is what keeps the two newsrooms from learning about each other.
       if (!existing) {
-        throw invariantError();
+        return {
+          ok: false,
+          error: {
+            code: "STORY_ID_CONFLICT",
+            message: "A different Story with the same Story ID already exists.",
+            storyId: story.id,
+          },
+        };
       }
 
       if (isDeepStrictEqual(existing, story)) {

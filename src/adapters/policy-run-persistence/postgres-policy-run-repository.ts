@@ -13,6 +13,7 @@ import {
   recordPolicyRun,
   type PolicyRun,
   type PolicyRunId,
+  type SiteId,
   type StoryId,
 } from "@/domain/editorial";
 
@@ -57,6 +58,7 @@ function decode(payload: unknown): PolicyRun {
 
 export function createPostgresPolicyRunRepository(dependencies: {
   readonly pool: Pool;
+  readonly siteId: SiteId;
 }): PolicyRunRepository {
   const readOne = async (id: PolicyRunId): Promise<PolicyRun> => {
     const { rows } = await dependencies.pool.query<{ payload: unknown }>(
@@ -159,12 +161,18 @@ export function createPostgresPolicyRunRepository(dependencies: {
       return rows.map((row) => decode(row.payload));
     },
 
+    // Reconciliation sweeps rather than following an identifier the caller already proved it may
+    // see, so it reaches the Site through the Story each run belongs to. Left unscoped it would
+    // let one newsroom's housekeeping settle another newsroom's abandoned work.
     async listStaleRunning(before: string): Promise<readonly PolicyRun[]> {
       const { rows } = await dependencies.pool.query<{ payload: unknown }>(
-        `SELECT payload FROM storyrail.policy_runs
-         WHERE status = 'running' AND observed_at < $1::timestamptz
-         ORDER BY append_position`,
-        [before],
+        `SELECT run.payload FROM storyrail.policy_runs AS run
+         JOIN storyrail.stories AS story ON story.story_id = run.story_id
+         WHERE run.status = 'running'
+           AND run.observed_at < $1::timestamptz
+           AND story.site_id = $2
+         ORDER BY run.append_position`,
+        [before, dependencies.siteId],
       );
       return rows.map((row) => decode(row.payload));
     },

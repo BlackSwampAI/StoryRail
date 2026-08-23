@@ -17,6 +17,7 @@ import {
   operatorId,
   policyRunId,
   reviewDecisionId,
+  siteId,
   sourceEvidencePreparationId,
   sourceExtractionId,
   sourceId,
@@ -29,6 +30,7 @@ import {
   type CanonicalSourceUrl,
   type FailedSourceExtraction,
   type OperatorActor,
+  type SiteId,
   type SourceExtraction,
   type SourceEvidencePreparation,
   type SourceTriageDecision,
@@ -57,6 +59,7 @@ import { createPostgresAgentProfileRepository } from "../agent-profile-persisten
 import { createPostgresAssignmentPersistence } from "../assignment-persistence/postgres-assignment-persistence";
 import { createPostgresAgentToolCallRepository } from "@/adapters/agent-tool-call-persistence";
 import { createPostgresArchiveRepository } from "@/adapters/archive";
+import { createPostgresSiteRepository } from "@/adapters/site-persistence";
 import { createPostgresNewsroomStandardsRepository } from "@/adapters/newsroom-standards-persistence";
 import { createPostgresPolicyRunRepository } from "@/adapters/policy-run-persistence";
 import { createPostgresAgentRunRepository } from "../agent-run-persistence/postgres-agent-run-repository";
@@ -158,6 +161,13 @@ const archiveSearchMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0064-archive-search.sql",
 );
+const siteTenancyMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0065-site-tenancy.sql",
+);
+
+const DEFAULT_SITE = siteId("site-default");
+const OTHER_SITE = siteId("site-other");
 
 const OPERATOR: OperatorActor = {
   type: "operator",
@@ -382,6 +392,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let toolDurabilityMigrationSql: string;
   let standardsMigrationSql: string;
   let archiveSearchMigrationSql: string;
+  let siteTenancyMigrationSql: string;
 
   /** Every migration, in order. One list so a rebuild can never drift from the first build. */
   const orderedMigrations = (): readonly string[] => [
@@ -409,8 +420,29 @@ describePostgres("PostgreSQL persistence repositories", () => {
     toolDurabilityMigrationSql,
     standardsMigrationSql,
     archiveSearchMigrationSql,
+    siteTenancyMigrationSql,
   ];
   let destructiveSetupAllowed = false;
+
+  /**
+   * A second newsroom, so isolation can be asserted against something real rather than against
+   * the absence of anything to leak. It belongs with the migrations rather than beside a test:
+   * anything that rebuilds the schema has to put it back or every later case silently runs
+   * single-site again.
+   */
+  const addSecondSite = (queryable: {
+    query: (sql: string, values: unknown[]) => Promise<unknown>;
+  }) =>
+    queryable.query(
+      `INSERT INTO storyrail.sites (site_id, payload)
+       VALUES ($1, jsonb_build_object(
+         'id', $1::text,
+         'name', 'Second Newsroom',
+         'domain', 'second.test',
+         'description', 'The other website this installation publishes.'
+       ))`,
+      [OTHER_SITE],
+    );
 
   beforeAll(async () => {
     sourceMigrationSql = await readFile(sourceMigrationPath, "utf8");
@@ -437,6 +469,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     toolDurabilityMigrationSql = await readFile(toolDurabilityMigrationPath, "utf8");
     standardsMigrationSql = await readFile(standardsMigrationPath, "utf8");
     archiveSearchMigrationSql = await readFile(archiveSearchMigrationPath, "utf8");
+    siteTenancyMigrationSql = await readFile(siteTenancyMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -454,6 +487,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       destructiveSetupAllowed = true;
       await client.query("DROP SCHEMA IF EXISTS storyrail CASCADE");
       for (const migration of orderedMigrations()) await client.query(migration);
+      await addSecondSite(client);
     } finally {
       client.release();
     }
@@ -484,24 +518,36 @@ describePostgres("PostgreSQL persistence repositories", () => {
     }
   });
 
-  describeSourceRepositoriesContract(() => createPostgresSourceRepositories({ pool }));
-  describeStoryRepositoryContract(() => createPostgresStoryRepository({ pool }));
+  describeSourceRepositoriesContract(() =>
+    createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE }),
+  );
+  describeStoryRepositoryContract(() =>
+    createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }),
+  );
   describeStoryInspectionRepositoryContract(() => ({
-    createRepository: () => createPostgresStoryInspectionRepository({ pool }),
+    createRepository: () => createPostgresStoryInspectionRepository({ pool, siteId: DEFAULT_SITE }),
     async addStory(story) {
-      const result = await createPostgresStoryRepository({ pool }).persist({ story });
+      const result = await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({
+        story,
+      });
       if (!result.ok) {
         throw new Error("The PostgreSQL Story inspection contract Story write must succeed.");
       }
     },
     async addSource(source) {
-      const result = await createPostgresSourceRepositories({ pool }).sources.persist({ source });
+      const result = await createPostgresSourceRepositories({
+        pool,
+        siteId: DEFAULT_SITE,
+      }).sources.persist({ source });
       if (!result.ok) {
         throw new Error("The PostgreSQL Story inspection contract Source write must succeed.");
       }
     },
     async addAttachment(attachment) {
-      const result = await createPostgresStorySourceAttachmentRepository({ pool }).attach({
+      const result = await createPostgresStorySourceAttachmentRepository({
+        pool,
+        siteId: DEFAULT_SITE,
+      }).attach({
         attachment,
       });
       if (!result.ok) {
@@ -509,7 +555,10 @@ describePostgres("PostgreSQL persistence repositories", () => {
       }
     },
     async addExtraction(extraction) {
-      const result = await createPostgresSourceRepositories({ pool }).extractions.append({
+      const result = await createPostgresSourceRepositories({
+        pool,
+        siteId: DEFAULT_SITE,
+      }).extractions.append({
         extraction,
       });
       if (!result.ok) {
@@ -533,9 +582,11 @@ describePostgres("PostgreSQL persistence repositories", () => {
   describeStoryListingRepositoryContract(() => {
     let sourceSequence = 0;
     return {
-      createRepository: () => createPostgresStoryListingRepository({ pool }),
+      createRepository: () => createPostgresStoryListingRepository({ pool, siteId: DEFAULT_SITE }),
       async addStory(story) {
-        const result = await createPostgresStoryRepository({ pool }).persist({ story });
+        const result = await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({
+          story,
+        });
         if (!result.ok) throw new Error("The Story listing contract Story write must succeed.");
       },
       async attachSource(storyIdentity, sourceIdentity) {
@@ -548,7 +599,10 @@ describePostgres("PostgreSQL persistence repositories", () => {
           ),
           id: sourceIdentity,
         };
-        const sourceResult = await createPostgresSourceRepositories({ pool }).sources.persist({
+        const sourceResult = await createPostgresSourceRepositories({
+          pool,
+          siteId: DEFAULT_SITE,
+        }).sources.persist({
           source,
         });
         if (!sourceResult.ok) {
@@ -556,6 +610,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         }
         const attachmentResult = await createPostgresStorySourceAttachmentRepository({
           pool,
+          siteId: DEFAULT_SITE,
         }).attach({
           attachment: makeAttachment(`listing-${sourceSequence}`, {
             storyId: storyIdentity,
@@ -571,9 +626,10 @@ describePostgres("PostgreSQL persistence repositories", () => {
   describeStorySourceAttachmentRepositoryContract(() => {
     let sourceSequence = 0;
     return {
-      createRepository: () => createPostgresStorySourceAttachmentRepository({ pool }),
+      createRepository: () =>
+        createPostgresStorySourceAttachmentRepository({ pool, siteId: DEFAULT_SITE }),
       async addStory(id) {
-        await createPostgresStoryRepository({ pool }).persist({
+        await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({
           story: makeStory(`contract-${id}`, { id }),
         });
       },
@@ -584,16 +640,18 @@ describePostgres("PostgreSQL persistence repositories", () => {
           OPERATOR,
           `https://example.com/attachment-contract/${sourceSequence}`,
         );
-        await createPostgresSourceRepositories({ pool }).sources.persist({
+        await createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE }).sources.persist({
           source: { ...source, id },
         });
       },
     };
   });
-  describeAgentProfileRepositoryContract(() => createPostgresAgentProfileRepository({ pool }));
+  describeAgentProfileRepositoryContract(() =>
+    createPostgresAgentProfileRepository({ pool, siteId: DEFAULT_SITE }),
+  );
   describe("PostgreSQL AgentRun repository", () => {
     beforeEach(async () => {
-      await createPostgresStoryRepository({ pool }).persist({
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({
         story: makeStory("agent-run-contract", { id: storyId("story-contract-agent-runs") }),
       });
     });
@@ -603,7 +661,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   describe("newsroom standards", () => {
     it("is history, not state: a written revision can never be edited or removed", async () => {
       // A piece written last month has to stay explainable by the standards of last month.
-      const repository = createPostgresNewsroomStandardsRepository({ pool });
+      const repository = createPostgresNewsroomStandardsRepository({ pool, siteId: DEFAULT_SITE });
       const revision = {
         id: newsroomStandardsId("standards-postgres-1"),
         revisionNumber: 1,
@@ -655,8 +713,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
       // Two automations driving the same Story would race each other through the same
       // workflows, and neither would be answerable for the result.
       const story = makeStory("policy-in-flight");
-      await createPostgresStoryRepository({ pool }).persist({ story });
-      const repository = createPostgresPolicyRunRepository({ pool });
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
+      const repository = createPostgresPolicyRunRepository({ pool, siteId: DEFAULT_SITE });
 
       await expect(repository.append(policyRun("policy-a", story))).resolves.toMatchObject({
         ok: true,
@@ -681,8 +739,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
     it("moves the progress pointer and refuses to reopen a settled run", async () => {
       const story = makeStory("policy-progress");
-      await createPostgresStoryRepository({ pool }).persist({ story });
-      const repository = createPostgresPolicyRunRepository({ pool });
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
+      const repository = createPostgresPolicyRunRepository({ pool, siteId: DEFAULT_SITE });
       await repository.append(policyRun("policy-progress", story));
 
       await expect(
@@ -711,8 +769,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
     it("finds only the runs that have gone quiet", async () => {
       const story = makeStory("policy-stale");
-      await createPostgresStoryRepository({ pool }).persist({ story });
-      const repository = createPostgresPolicyRunRepository({ pool });
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
+      const repository = createPostgresPolicyRunRepository({ pool, siteId: DEFAULT_SITE });
       await repository.append(
         policyRun("policy-stale", story, { observedAt: "2026-08-23T10:00:00.000Z" }),
       );
@@ -729,7 +787,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     // had already reached for.
     it("records intent first, completes once, and never reopens", async () => {
       const story = makeStory("tool-calls");
-      await createPostgresStoryRepository({ pool }).persist({ story });
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
       const run = makeAgentRun(story, "tool-calls");
       await createPostgresAgentRunRepository({ pool }).append(run);
       const repository = createPostgresAgentToolCallRepository({ pool });
@@ -779,7 +837,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
     it("refuses a recorded result large enough to be a copy of the material", async () => {
       const story = makeStory("tool-call-size");
-      await createPostgresStoryRepository({ pool }).persist({ story });
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
       const run = makeAgentRun(story, "tool-call-size");
       await createPostgresAgentRunRepository({ pool }).append(run);
       const client = await pool.connect();
@@ -819,7 +877,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   describe("AgentRuns", () => {
     it("completes a run that is still in flight and refuses to reopen it", async () => {
       const story = makeStory("agent-run-in-flight");
-      await createPostgresStoryRepository({ pool }).persist({ story });
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
       const repository = createPostgresAgentRunRepository({ pool });
       const { proposal: _proposal, ...started } = makeAgentRun(story, "in-flight") as never as {
         proposal: unknown;
@@ -849,7 +907,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
     it("refuses to move a completed run back to running at the database boundary", async () => {
       const story = makeStory("agent-run-one-way");
-      await createPostgresStoryRepository({ pool }).persist({ story });
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
       const repository = createPostgresAgentRunRepository({ pool });
       const run = makeAgentRun(story, "one-way");
       await repository.append(run);
@@ -873,7 +931,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
     it("refuses to rewrite the input snapshot while completing a run", async () => {
       const story = makeStory("agent-run-input-immutable");
-      await createPostgresStoryRepository({ pool }).persist({ story });
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
       const repository = createPostgresAgentRunRepository({ pool });
       const { proposal: _proposal, ...started } = makeAgentRun(
         story,
@@ -906,7 +964,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
     it("rejects malformed payload shape and profile-role disagreement at the database boundary", async () => {
       const story = makeStory("agent-run-checks");
-      await createPostgresStoryRepository({ pool }).persist({ story });
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
       const run = makeAgentRun(story, "checks");
       await expect(
         pool.query(
@@ -947,7 +1005,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
     it("turns a malformed persisted run into one safe inspection invariant failure", async () => {
       const story = makeStory("agent-run-malformed");
-      await createPostgresStoryRepository({ pool }).persist({ story });
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
       const run = makeAgentRun(story, "malformed");
       await createPostgresAgentRunRepository({ pool }).append(run);
       const client = await pool.connect();
@@ -969,6 +1027,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         await expect(
           createPostgresStoryInspectionRepository({
             pool: client as unknown as Pool,
+            siteId: DEFAULT_SITE,
           }).inspect(story.id),
         ).rejects.toMatchObject({
           name: "PostgresStoryInspectionPersistenceInvariantError",
@@ -1026,7 +1085,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         createdAt: `created-${suffix}`,
         updatedAt: `created-${suffix}`,
       };
-      await createPostgresStoryRepository({ pool }).persist({ story });
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
       return story;
     }
 
@@ -1041,7 +1100,10 @@ describePostgres("PostgreSQL persistence repositories", () => {
           transitionReceipt: command.transitionReceipt,
         },
       );
-      const inspection = await createPostgresStoryInspectionRepository({ pool }).inspect(story.id);
+      const inspection = await createPostgresStoryInspectionRepository({
+        pool,
+        siteId: DEFAULT_SITE,
+      }).inspect(story.id);
       expect(inspection).toMatchObject({
         ok: true,
         inspection: {
@@ -1092,7 +1154,10 @@ describePostgres("PostgreSQL persistence repositories", () => {
         ok: false,
         error: { code: "STORY_ASSIGNMENT_CONFLICT" },
       });
-      const durableStory = await createPostgresStoryRepository({ pool }).findById(second.id);
+      const durableStory = await createPostgresStoryRepository({
+        pool,
+        siteId: DEFAULT_SITE,
+      }).findById(second.id);
       expect(durableStory).toEqual(second);
       const counts = await pool.query<{ assignments: string; receipts: string }>(
         `SELECT
@@ -1108,9 +1173,13 @@ describePostgres("PostgreSQL persistence repositories", () => {
     it("commits the Writer run, Article, Revision 1, Story, and receipt as one inspectable result", async () => {
       const intake = makeStory("writer-draft");
       const source = makeSource("writer-draft", OPERATOR, "https://example.com/writer-draft");
-      await createPostgresStoryRepository({ pool }).persist({ story: intake });
-      await createPostgresSourceRepositories({ pool }).sources.persist({ source });
-      await createPostgresStorySourceAttachmentRepository({ pool }).attach({
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({
+        story: intake,
+      });
+      await createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE }).sources.persist({
+        source,
+      });
+      await createPostgresStorySourceAttachmentRepository({ pool, siteId: DEFAULT_SITE }).attach({
         attachment: makeAttachment("writer-draft", { storyId: intake.id, sourceId: source.id }),
       });
       const assignedAt = "assigned-writer-draft";
@@ -1244,7 +1313,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         }),
       ).resolves.toEqual({ ok: true, run, article, revision, story, transitionReceipt });
       await expect(
-        createPostgresStoryInspectionRepository({ pool }).inspect(intake.id),
+        createPostgresStoryInspectionRepository({ pool, siteId: DEFAULT_SITE }).inspect(intake.id),
       ).resolves.toMatchObject({
         ok: true,
         inspection: {
@@ -1420,7 +1489,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         transitionReceipt: decisionReceipt,
       });
       await expect(
-        createPostgresStoryInspectionRepository({ pool }).inspect(story.id),
+        createPostgresStoryInspectionRepository({ pool, siteId: DEFAULT_SITE }).inspect(story.id),
       ).resolves.toMatchObject({
         ok: true,
         inspection: {
@@ -1450,12 +1519,13 @@ describePostgres("PostgreSQL persistence repositories", () => {
     async function publishReport(
       suffix: string,
       report: { readonly headline: string; readonly body: string; readonly publishedAt: string },
+      site: SiteId = DEFAULT_SITE,
     ) {
       const intake = makeStory(suffix);
       const source = makeSource(suffix, OPERATOR, `https://example.com/archive/${suffix}`);
-      await createPostgresStoryRepository({ pool }).persist({ story: intake });
-      await createPostgresSourceRepositories({ pool }).sources.persist({ source });
-      await createPostgresStorySourceAttachmentRepository({ pool }).attach({
+      await createPostgresStoryRepository({ pool, siteId: site }).persist({ story: intake });
+      await createPostgresSourceRepositories({ pool, siteId: site }).sources.persist({ source });
+      await createPostgresStorySourceAttachmentRepository({ pool, siteId: site }).attach({
         attachment: makeAttachment(suffix, { storyId: intake.id, sourceId: source.id }),
       });
       const assignment = {
@@ -1601,6 +1671,33 @@ describePostgres("PostgreSQL persistence repositories", () => {
       return { storyId: intake.id, source };
     }
 
+    it("does not return another Site's published Revision", async () => {
+      await publishReport(
+        "archive-other-site",
+        {
+          headline: "Inline const expressions reached stable",
+          body: "The other newsroom covered inline const expressions this week.",
+          publishedAt: "2026-03-04T10:00:00.000Z",
+        },
+        OTHER_SITE,
+      );
+
+      await expect(
+        createPostgresArchiveRepository({ pool, siteId: DEFAULT_SITE }).search({
+          terms: "inline const expressions",
+          limit: 5,
+          excludeStoryId: null,
+        }),
+      ).resolves.toEqual([]);
+      await expect(
+        createPostgresArchiveRepository({ pool, siteId: OTHER_SITE }).search({
+          terms: "inline const expressions",
+          limit: 5,
+          excludeStoryId: null,
+        }),
+      ).resolves.toMatchObject([{ headline: "Inline const expressions reached stable" }]);
+    });
+
     it("finds published reporting by its words, with the Sources behind it", async () => {
       const published = await publishReport("archive-hit", {
         headline: "Inline const expressions reached stable",
@@ -1609,7 +1706,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       });
 
       await expect(
-        createPostgresArchiveRepository({ pool }).search({
+        createPostgresArchiveRepository({ pool, siteId: DEFAULT_SITE }).search({
           terms: "inline const expressions",
           limit: 5,
           excludeStoryId: null,
@@ -1633,7 +1730,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       });
 
       await expect(
-        createPostgresArchiveRepository({ pool }).search({
+        createPostgresArchiveRepository({ pool, siteId: DEFAULT_SITE }).search({
           terms: "trait solver regressions",
           limit: 5,
           excludeStoryId: null,
@@ -1643,10 +1740,12 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
     it("leaves out work the newsroom has not published", async () => {
       const intake = makeStory("archive-unpublished");
-      await createPostgresStoryRepository({ pool }).persist({ story: intake });
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({
+        story: intake,
+      });
 
       await expect(
-        createPostgresArchiveRepository({ pool }).search({
+        createPostgresArchiveRepository({ pool, siteId: DEFAULT_SITE }).search({
           terms: "Durable Story",
           limit: 5,
           excludeStoryId: null,
@@ -1662,7 +1761,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       });
 
       await expect(
-        createPostgresArchiveRepository({ pool }).search({
+        createPostgresArchiveRepository({ pool, siteId: DEFAULT_SITE }).search({
           terms: "inline const expressions",
           limit: 5,
           excludeStoryId: published.storyId,
@@ -1676,7 +1775,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         body: "The compiler team shipped inline const expressions this week.",
         publishedAt: "2026-03-07T10:00:00.000Z",
       });
-      const archive = createPostgresArchiveRepository({ pool });
+      const archive = createPostgresArchiveRepository({ pool, siteId: DEFAULT_SITE });
 
       // Text that would be operators in a tsquery, and a quoted phrase that is not in any report.
       await expect(
@@ -1912,9 +2011,9 @@ describePostgres("PostgreSQL persistence repositories", () => {
     ];
 
     it("seeds the stable built-in identities in the order the newsroom works", async () => {
-      await expect(createPostgresAgentProfileRepository({ pool }).list()).resolves.toEqual(
-        BUILT_INS,
-      );
+      await expect(
+        createPostgresAgentProfileRepository({ pool, siteId: DEFAULT_SITE }).list(),
+      ).resolves.toEqual(BUILT_INS);
     });
 
     it("reconstructs an appended custom Writer through a new repository instance", async () => {
@@ -1926,11 +2025,10 @@ describePostgres("PostgreSQL persistence repositories", () => {
         model: { provider: "provider", model: "model-id" },
         builtIn: false,
       };
-      await createPostgresAgentProfileRepository({ pool }).append(custom);
-      await expect(createPostgresAgentProfileRepository({ pool }).list()).resolves.toEqual([
-        ...BUILT_INS,
-        custom,
-      ]);
+      await createPostgresAgentProfileRepository({ pool, siteId: DEFAULT_SITE }).append(custom);
+      await expect(
+        createPostgresAgentProfileRepository({ pool, siteId: DEFAULT_SITE }).list(),
+      ).resolves.toEqual([...BUILT_INS, custom]);
     });
 
     it("rejects malformed persisted profile payload during invariant decoding", async () => {
@@ -1942,7 +2040,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         model: null,
         builtIn: false,
       };
-      await createPostgresAgentProfileRepository({ pool }).append(custom);
+      await createPostgresAgentProfileRepository({ pool, siteId: DEFAULT_SITE }).append(custom);
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
@@ -1956,7 +2054,10 @@ describePostgres("PostgreSQL persistence repositories", () => {
           [custom.id],
         );
         await expect(
-          createPostgresAgentProfileRepository({ pool: client as unknown as Pool }).list(),
+          createPostgresAgentProfileRepository({
+            pool: client as unknown as Pool,
+            siteId: DEFAULT_SITE,
+          }).list(),
         ).rejects.toMatchObject({ name: "PostgresAgentProfileInvariantError" });
       } finally {
         await client.query("ROLLBACK");
@@ -1968,7 +2069,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   describe("Source Inbox and triage", () => {
     it("round-trips append-ordered preparations without duplicating their raw extraction", async () => {
       const source = makeSource("inbox-preparations");
-      const sourceRepositories = createPostgresSourceRepositories({ pool });
+      const sourceRepositories = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE });
       await sourceRepositories.sources.persist({ source });
       const extraction = makeSuccessfulExtraction(source, "inbox-preparations");
       await sourceRepositories.extractions.append({ extraction });
@@ -1989,9 +2090,9 @@ describePostgres("PostgreSQL persistence repositories", () => {
       }
       (mutableFirst.document as { content: string }).content = "mutated read";
       await expect(preparations.listBySourceId(source.id)).resolves.toEqual([first, second]);
-      await expect(createPostgresSourceInboxRepository({ pool }).listPending()).resolves.toEqual([
-        { source, extractions: [extraction], preparations: [first, second] },
-      ]);
+      await expect(
+        createPostgresSourceInboxRepository({ pool, siteId: DEFAULT_SITE }).listPending(),
+      ).resolves.toEqual([{ source, extractions: [extraction], preparations: [first, second] }]);
       await expect(
         preparations.append({ ...first, completedAt: "conflicting-completion" }),
       ).resolves.toMatchObject({
@@ -2005,7 +2106,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
     it("restores a preparation written before the input measurement existed", async () => {
       const source = makeSource("preparation-malformed");
-      const sourceRepositories = createPostgresSourceRepositories({ pool });
+      const sourceRepositories = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE });
       await sourceRepositories.sources.persist({ source });
       const upgradeExtraction = makeSuccessfulExtraction(source, "preparation-upgrade");
       await sourceRepositories.extractions.append({ extraction: upgradeExtraction });
@@ -2053,7 +2154,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
     it("rejects a persisted input measurement that claims more was submitted than existed", async () => {
       const source = makeSource("preparation-input-invariant");
-      const sourceRepositories = createPostgresSourceRepositories({ pool });
+      const sourceRepositories = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE });
       await sourceRepositories.sources.persist({ source });
       const extraction = makeSuccessfulExtraction(source, "preparation-input-invariant");
       await sourceRepositories.extractions.append({ extraction });
@@ -2082,7 +2183,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
     it("fails safely when a persisted preparation payload has an unexpected key", async () => {
       const source = makeSource("preparation-malformed");
-      const sourceRepositories = createPostgresSourceRepositories({ pool });
+      const sourceRepositories = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE });
       await sourceRepositories.sources.persist({ source });
       const extraction = makeSuccessfulExtraction(source, "preparation-malformed");
       await sourceRepositories.extractions.append({ extraction });
@@ -2115,42 +2216,47 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
     it("lists each unattached and untriaged Source once with append-ordered extraction history", async () => {
       const source = makeSource("inbox-pending");
-      const repositories = createPostgresSourceRepositories({ pool });
+      const repositories = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE });
       await repositories.sources.persist({ source });
       const first = makeFailedExtraction(source, "inbox-first");
       const second = makeSuccessfulExtraction(source, "inbox-second");
       await repositories.extractions.append({ extraction: first });
       await repositories.extractions.append({ extraction: second });
 
-      await expect(createPostgresSourceInboxRepository({ pool }).listPending()).resolves.toEqual([
-        { source, extractions: [first, second], preparations: [] },
-      ]);
+      await expect(
+        createPostgresSourceInboxRepository({ pool, siteId: DEFAULT_SITE }).listPending(),
+      ).resolves.toEqual([{ source, extractions: [first, second], preparations: [] }]);
     });
 
     it("returns a pending Source with no extraction and excludes historical attached Sources", async () => {
       const pending = makeSource("inbox-no-extraction");
       const attached = makeSource("inbox-historical-attached");
       const story = makeStory("inbox-historical-attached");
-      const sources = createPostgresSourceRepositories({ pool }).sources;
+      const sources = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE }).sources;
       await sources.persist({ source: pending });
       await sources.persist({ source: attached });
-      await createPostgresStoryRepository({ pool }).persist({ story });
-      await createPostgresStorySourceAttachmentRepository({ pool }).attach({
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
+      await createPostgresStorySourceAttachmentRepository({ pool, siteId: DEFAULT_SITE }).attach({
         attachment: makeAttachment("inbox-historical-attached", {
           storyId: story.id,
           sourceId: attached.id,
         }),
       });
 
-      await expect(createPostgresSourceInboxRepository({ pool }).listPending()).resolves.toEqual([
-        { source: pending, extractions: [], preparations: [] },
-      ]);
+      await expect(
+        createPostgresSourceInboxRepository({ pool, siteId: DEFAULT_SITE }).listPending(),
+      ).resolves.toEqual([{ source: pending, extractions: [], preparations: [] }]);
     });
 
     it("persists skip, preserves complete payload, and replays the original decidedAt", async () => {
       const source = makeSource("triage-skip");
-      await createPostgresSourceRepositories({ pool }).sources.persist({ source });
-      const repository = createPostgresSourceTriageDecisionRepository({ pool });
+      await createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE }).sources.persist({
+        source,
+      });
+      const repository = createPostgresSourceTriageDecisionRepository({
+        pool,
+        siteId: DEFAULT_SITE,
+      });
       const first: SourceTriageDecision = {
         sourceId: source.id,
         decision: "skip",
@@ -2164,17 +2270,22 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await expect(repository.record(first)).resolves.toEqual({ ok: true, triageDecision: first });
       await expect(repository.record(replay)).resolves.toEqual({ ok: true, triageDecision: first });
       await expect(repository.findBySourceId(source.id)).resolves.toEqual(first);
-      await expect(createPostgresSourceInboxRepository({ pool }).listPending()).resolves.toEqual(
-        [],
-      );
+      await expect(
+        createPostgresSourceInboxRepository({ pool, siteId: DEFAULT_SITE }).listPending(),
+      ).resolves.toEqual([]);
     });
 
     it("requires the selected durable attachment for linked decisions and conflicts on divergence", async () => {
       const source = makeSource("triage-linked");
       const story = makeStory("triage-linked");
-      await createPostgresSourceRepositories({ pool }).sources.persist({ source });
-      await createPostgresStoryRepository({ pool }).persist({ story });
-      const repository = createPostgresSourceTriageDecisionRepository({ pool });
+      await createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE }).sources.persist({
+        source,
+      });
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
+      const repository = createPostgresSourceTriageDecisionRepository({
+        pool,
+        siteId: DEFAULT_SITE,
+      });
       const decision: SourceTriageDecision = {
         sourceId: source.id,
         decision: "new_story",
@@ -2187,7 +2298,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         ok: false,
         error: { code: "STORY_SOURCE_ATTACHMENT_NOT_FOUND" },
       });
-      await createPostgresStorySourceAttachmentRepository({ pool }).attach({
+      await createPostgresStorySourceAttachmentRepository({ pool, siteId: DEFAULT_SITE }).attach({
         attachment: makeAttachment("triage-linked", { storyId: story.id, sourceId: source.id }),
       });
       await expect(repository.record(decision)).resolves.toEqual({
@@ -2205,15 +2316,20 @@ describePostgres("PostgreSQL persistence repositories", () => {
     it("refuses to skip an already attached Source without mutating existing facts", async () => {
       const source = makeSource("triage-attached-skip");
       const story = makeStory("triage-attached-skip");
-      await createPostgresSourceRepositories({ pool }).sources.persist({ source });
-      await createPostgresStoryRepository({ pool }).persist({ story });
-      await createPostgresStorySourceAttachmentRepository({ pool }).attach({
+      await createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE }).sources.persist({
+        source,
+      });
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
+      await createPostgresStorySourceAttachmentRepository({ pool, siteId: DEFAULT_SITE }).attach({
         attachment: makeAttachment("triage-attached-skip", {
           storyId: story.id,
           sourceId: source.id,
         }),
       });
-      const result = await createPostgresSourceTriageDecisionRepository({ pool }).record({
+      const result = await createPostgresSourceTriageDecisionRepository({
+        pool,
+        siteId: DEFAULT_SITE,
+      }).record({
         sourceId: source.id,
         decision: "skip",
         storyId: null,
@@ -2229,8 +2345,13 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
     it("turns malformed persisted triage payload into one safe PostgreSQL invariant failure", async () => {
       const source = makeSource("triage-malformed");
-      await createPostgresSourceRepositories({ pool }).sources.persist({ source });
-      const repository = createPostgresSourceTriageDecisionRepository({ pool });
+      await createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE }).sources.persist({
+        source,
+      });
+      const repository = createPostgresSourceTriageDecisionRepository({
+        pool,
+        siteId: DEFAULT_SITE,
+      });
       await repository.record({
         sourceId: source.id,
         decision: "skip",
@@ -2254,6 +2375,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         await expect(
           createPostgresSourceTriageDecisionRepository({
             pool: client as unknown as Pool,
+            siteId: DEFAULT_SITE,
           }).findBySourceId(source.id),
         ).rejects.toMatchObject({
           name: "PostgresSourceTriageInvariantError",
@@ -2296,6 +2418,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         "newsroom_standards",
         "policy_runs",
         "review_decisions",
+        "sites",
         "source_evidence_preparations",
         "source_extractions",
         "source_triage_decisions",
@@ -2808,7 +2931,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           },
         ]),
       );
-      expect(columns.rows).toHaveLength(101);
+      expect(columns.rows).toHaveLength(109);
     });
 
     it("creates the required primary, unique, foreign-key, and check constraints", async () => {
@@ -3137,7 +3260,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           },
           {
             table_name: "url_sources",
-            constraint_name: "url_sources_canonical_url_key",
+            constraint_name: "url_sources_site_canonical_url_key",
             constraint_type: "u",
           },
           {
@@ -3233,10 +3356,27 @@ describePostgres("PostgreSQL persistence repositories", () => {
           referenced_schema: "storyrail",
           referenced_table: "url_sources",
         },
+        // The pair, not each half of it: a Story on one Site cannot hold a Source from another.
+        {
+          constraint_name: "story_source_attachments_source_site_fk",
+          definition: expect.stringMatching(
+            /^FOREIGN KEY \(source_id, site_id\) REFERENCES (?:storyrail\.)?url_sources\(source_id, site_id\)$/,
+          ),
+          referenced_schema: "storyrail",
+          referenced_table: "url_sources",
+        },
         {
           constraint_name: "story_source_attachments_story_id_fkey",
           definition: expect.stringMatching(
             /^FOREIGN KEY \(story_id\) REFERENCES (?:storyrail\.)?stories\(story_id\) ON UPDATE RESTRICT ON DELETE RESTRICT$/,
+          ),
+          referenced_schema: "storyrail",
+          referenced_table: "stories",
+        },
+        {
+          constraint_name: "story_source_attachments_story_site_fk",
+          definition: expect.stringMatching(
+            /^FOREIGN KEY \(story_id, site_id\) REFERENCES (?:storyrail\.)?stories\(story_id, site_id\)$/,
           ),
           referenced_schema: "storyrail",
           referenced_table: "stories",
@@ -3343,6 +3483,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         "story_id",
         "source_id",
         "payload",
+        "site_id",
       ]);
       expect(indexes.rows).toEqual([
         {
@@ -3354,7 +3495,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
 
     it("enforces identity, canonical uniqueness, outcome shape, and restrictive references", async () => {
-      const repositories = createPostgresSourceRepositories({ pool });
+      const repositories = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE });
       const source = makeSource("constraints");
       const extraction = makeSuccessfulExtraction(source, "constraints");
       await repositories.sources.persist({ source });
@@ -3370,16 +3511,21 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
       await expect(
         pool.query(
-          `INSERT INTO storyrail.url_sources (source_id, canonical_url, payload)
-           VALUES ($1, $2, $3::jsonb)`,
-          [sameId.id, sameId.canonicalUrl, JSON.stringify(sameId)],
+          `INSERT INTO storyrail.url_sources (source_id, canonical_url, payload, site_id)
+           VALUES ($1, $2, $3::jsonb, $4)`,
+          [sameId.id, sameId.canonicalUrl, JSON.stringify(sameId), DEFAULT_SITE],
         ),
       ).rejects.toMatchObject({ code: "23505" });
       await expect(
         pool.query(
-          `INSERT INTO storyrail.url_sources (source_id, canonical_url, payload)
-           VALUES ($1, $2, $3::jsonb)`,
-          [sameCanonical.id, sameCanonical.canonicalUrl, JSON.stringify(sameCanonical)],
+          `INSERT INTO storyrail.url_sources (source_id, canonical_url, payload, site_id)
+           VALUES ($1, $2, $3::jsonb, $4)`,
+          [
+            sameCanonical.id,
+            sameCanonical.canonicalUrl,
+            JSON.stringify(sameCanonical),
+            DEFAULT_SITE,
+          ],
         ),
       ).rejects.toMatchObject({ code: "23505" });
       await expect(
@@ -3437,7 +3583,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
   describe("opaque fact round trips", () => {
     it("stores opaque and SQL-like strings solely as parameterized content", async () => {
-      const repositories = createPostgresSourceRepositories({ pool });
+      const repositories = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE });
       const source = makeSource(
         "id with spaces; DROP SCHEMA storyrail; --",
         AGENT,
@@ -3465,7 +3611,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
 
     it("preserves exact timestamp strings rather than normalizing equivalent values", async () => {
-      const repositories = createPostgresSourceRepositories({ pool });
+      const repositories = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE });
       const source = makeSource("timestamp-text");
       const extraction = makeSuccessfulExtraction(source, "timestamp-text", {
         startedAt: "2026-08-09T07:00:00-04:00",
@@ -3484,7 +3630,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
   describe("complete structural replay equality", () => {
     it("detects differences in every variable Source fact", async () => {
-      const repositories = createPostgresSourceRepositories({ pool });
+      const repositories = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE });
       const source = makeSource("complete-source-equality");
       const variants: UrlSource[] = [
         { ...source, submittedUrl: "https://example.net/different-submitted-url" },
@@ -3512,7 +3658,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
 
     it("detects every common, outcome, and successful-document extraction difference", async () => {
-      const repositories = createPostgresSourceRepositories({ pool });
+      const repositories = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE });
       const source = makeSource("complete-success-equality");
       const extraction = makeSuccessfulExtraction(source, "complete-success-equality");
       const unknownSource = makeSource("complete-success-equality-unknown");
@@ -3556,7 +3702,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
 
     it("detects every failed-extraction fact difference", async () => {
-      const repositories = createPostgresSourceRepositories({ pool });
+      const repositories = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE });
       const source = makeSource("complete-failure-equality");
       const extraction = makeFailedExtraction(source, "complete-failure-equality");
       const variants: FailedSourceExtraction[] = [
@@ -3591,7 +3737,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
   describe("durable Story persistence", () => {
     it("round-trips the exact complete Story, including SQL-like title, identity, and opaque timestamps", async () => {
-      const repository = createPostgresStoryRepository({ pool });
+      const repository = createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE });
       const story = makeStory("$1; DROP SCHEMA storyrail; --", {
         id: storyId("story '$1'; SELECT pg_sleep(10); --"),
         title: "Title $1; DROP TABLE storyrail.stories; --  interior  spacing",
@@ -3610,7 +3756,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
 
     it("decodes every accepted Story state and allowed revision-cycle boundary", async () => {
-      const repository = createPostgresStoryRepository({ pool });
+      const repository = createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE });
 
       for (const [index, state] of STORY_STATES.entries()) {
         const story = makeStory(`accepted-${state}`, {
@@ -3629,21 +3775,28 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
       await expect(
         pool.query(
-          `INSERT INTO storyrail.stories (story_id, state, revision_cycle, payload)
-           VALUES ($1, $2, $3, $4::jsonb)`,
+          `INSERT INTO storyrail.stories (story_id, state, revision_cycle, payload, site_id)
+           VALUES ($1, $2, $3, $4::jsonb, $5)`,
           [
             invalidState.id,
             "invented_state",
             invalidState.revisionCycle,
             JSON.stringify({ ...invalidState, state: "invented_state" }),
+            DEFAULT_SITE,
           ],
         ),
       ).rejects.toMatchObject({ code: "23514" });
       await expect(
         pool.query(
-          `INSERT INTO storyrail.stories (story_id, state, revision_cycle, payload)
-           VALUES ($1, $2, $3, $4::jsonb)`,
-          [invalidRevision.id, invalidRevision.state, 3, JSON.stringify(invalidRevision)],
+          `INSERT INTO storyrail.stories (story_id, state, revision_cycle, payload, site_id)
+           VALUES ($1, $2, $3, $4::jsonb, $5)`,
+          [
+            invalidRevision.id,
+            invalidRevision.state,
+            3,
+            JSON.stringify(invalidRevision),
+            DEFAULT_SITE,
+          ],
         ),
       ).rejects.toMatchObject({ code: "23514" });
     });
@@ -3665,9 +3818,9 @@ describePostgres("PostgreSQL persistence repositories", () => {
         const payload = createPayload({ ...story, id: rowId });
         await expect(
           pool.query(
-            `INSERT INTO storyrail.stories (story_id, state, revision_cycle, payload)
-             VALUES ($1, $2, $3, $4::jsonb)`,
-            [rowId, story.state, story.revisionCycle, JSON.stringify(payload)],
+            `INSERT INTO storyrail.stories (story_id, state, revision_cycle, payload, site_id)
+             VALUES ($1, $2, $3, $4::jsonb, $5)`,
+            [rowId, story.state, story.revisionCycle, JSON.stringify(payload), DEFAULT_SITE],
           ),
         ).rejects.toMatchObject({ code: "23514" });
       }
@@ -3686,7 +3839,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       "rejects a stored payload with a %s using one safe invariant",
       async (_, constraint, mutation) => {
         const story = makeStory(`corrupt-${constraint ?? "extra"}`);
-        const repository = createPostgresStoryRepository({ pool });
+        const repository = createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE });
         await repository.persist({ story });
         const client = await pool.connect();
 
@@ -3701,6 +3854,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           );
           const transactionRepository = createPostgresStoryRepository({
             pool: client as unknown as Pool,
+            siteId: DEFAULT_SITE,
           });
 
           await expect(transactionRepository.persist({ story })).rejects.toMatchObject({
@@ -3723,14 +3877,17 @@ describePostgres("PostgreSQL persistence repositories", () => {
         OPERATOR,
         `https://example.com/attachment-parent/${encodeURIComponent(attachment.sourceId)}`,
       );
-      await createPostgresStoryRepository({ pool }).persist({ story });
-      await createPostgresSourceRepositories({ pool }).sources.persist({
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
+      await createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE }).sources.persist({
         source: { ...source, id: attachment.sourceId },
       });
     }
 
     it("round-trips exact SQL-like identities, relevance, actor identity, and timestamp", async () => {
-      const repository = createPostgresStorySourceAttachmentRepository({ pool });
+      const repository = createPostgresStorySourceAttachmentRepository({
+        pool,
+        siteId: DEFAULT_SITE,
+      });
       const attachment = makeAttachment("sql-like", {
         storyId: storyId("story '$1'; DROP TABLE storyrail.stories; --"),
         sourceId: sourceId("source $2; DELETE FROM storyrail.url_sources; --"),
@@ -3762,7 +3919,10 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
 
     it("accepts and round-trips assignment-editor attachment provenance", async () => {
-      const repository = createPostgresStorySourceAttachmentRepository({ pool });
+      const repository = createPostgresStorySourceAttachmentRepository({
+        pool,
+        siteId: DEFAULT_SITE,
+      });
       const attachedBy = {
         type: "agent" as const,
         role: "assignment_editor" as const,
@@ -3819,9 +3979,9 @@ describePostgres("PostgreSQL persistence repositories", () => {
       for (const [, payload] of variants) {
         await expect(
           pool.query(
-            `INSERT INTO storyrail.story_source_attachments (story_id, source_id, payload)
-             VALUES ($1, $2, $3::jsonb)`,
-            [attachment.storyId, attachment.sourceId, JSON.stringify(payload)],
+            `INSERT INTO storyrail.story_source_attachments (story_id, source_id, payload, site_id)
+             VALUES ($1, $2, $3::jsonb, $4)`,
+            [attachment.storyId, attachment.sourceId, JSON.stringify(payload), DEFAULT_SITE],
           ),
         ).rejects.toMatchObject({ code: "23514" });
       }
@@ -3864,7 +4024,10 @@ describePostgres("PostgreSQL persistence repositories", () => {
       "rejects a stored attachment with %s through one safe invariant",
       async (_, constraint, mutation) => {
         const attachment = makeAttachment(`corrupt-${constraint ?? mutation.length}`);
-        const repository = createPostgresStorySourceAttachmentRepository({ pool });
+        const repository = createPostgresStorySourceAttachmentRepository({
+          pool,
+          siteId: DEFAULT_SITE,
+        });
         await persistAttachmentParents(attachment);
         await repository.attach({ attachment });
         const client = await pool.connect();
@@ -3884,6 +4047,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           );
           const transactionRepository = createPostgresStorySourceAttachmentRepository({
             pool: client as unknown as Pool,
+            siteId: DEFAULT_SITE,
           });
 
           await expect(transactionRepository.attach({ attachment })).rejects.toMatchObject({
@@ -3899,7 +4063,10 @@ describePostgres("PostgreSQL persistence repositories", () => {
     );
 
     it("keeps every differing relationship fact in conflict and preserves the original row", async () => {
-      const repository = createPostgresStorySourceAttachmentRepository({ pool });
+      const repository = createPostgresStorySourceAttachmentRepository({
+        pool,
+        siteId: DEFAULT_SITE,
+      });
       const attachment = makeAttachment("all-conflicts");
       const variants: StorySourceAttachment[] = [
         { ...attachment, relevance: "different relevance" },
@@ -3946,16 +4113,19 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
 
     it("returns deterministic missing-parent failures without inserting a row", async () => {
-      const repository = createPostgresStorySourceAttachmentRepository({ pool });
+      const repository = createPostgresStorySourceAttachmentRepository({
+        pool,
+        siteId: DEFAULT_SITE,
+      });
       const missingStory = makeAttachment("missing-story-specific");
       const missingSource = makeAttachment("missing-source-specific");
       const bothMissing = makeAttachment("both-missing-specific");
 
       const sourceParent = makeSource("missing-story-parent");
-      await createPostgresSourceRepositories({ pool }).sources.persist({
+      await createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE }).sources.persist({
         source: { ...sourceParent, id: missingStory.sourceId },
       });
-      await createPostgresStoryRepository({ pool }).persist({
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({
         story: makeStory("missing-source-parent", { id: missingSource.storyId }),
       });
 
@@ -3977,7 +4147,10 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
 
     it("restricts updates and deletion of either attached parent", async () => {
-      const repository = createPostgresStorySourceAttachmentRepository({ pool });
+      const repository = createPostgresStorySourceAttachmentRepository({
+        pool,
+        siteId: DEFAULT_SITE,
+      });
       const attachment = makeAttachment("restrict-parents");
       await persistAttachmentParents(attachment);
       await repository.attach({ attachment });
@@ -4049,8 +4222,11 @@ describePostgres("PostgreSQL persistence repositories", () => {
         },
         attachedAt: "9999-apparently-later",
       });
-      await createPostgresStoryRepository({ pool }).persist({ story });
-      const sourceRepository = createPostgresSourceRepositories({ pool }).sources;
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
+      const sourceRepository = createPostgresSourceRepositories({
+        pool,
+        siteId: DEFAULT_SITE,
+      }).sources;
       await sourceRepository.persist({ source: orderedSourceZ });
       await sourceRepository.persist({ source: orderedSourceA });
       const extractionAFirst = makeSuccessfulExtraction(orderedSourceA, "inspection-a-first", {
@@ -4069,14 +4245,20 @@ describePostgres("PostgreSQL persistence repositories", () => {
         startedAt: "0000-apparently-earlier",
         failure: { code: "RETRIEVAL_FAILED", retryable: false },
       });
-      const extractionRepository = createPostgresSourceRepositories({ pool }).extractions;
+      const extractionRepository = createPostgresSourceRepositories({
+        pool,
+        siteId: DEFAULT_SITE,
+      }).extractions;
       await extractionRepository.append({ extraction: extractionAFirst });
       await extractionRepository.append({ extraction: extractionZ });
       await extractionRepository.append({ extraction: extractionASecond });
-      const attachmentRepository = createPostgresStorySourceAttachmentRepository({ pool });
+      const attachmentRepository = createPostgresStorySourceAttachmentRepository({
+        pool,
+        siteId: DEFAULT_SITE,
+      });
       await attachmentRepository.attach({ attachment: attachmentZ });
       await attachmentRepository.attach({ attachment: attachmentA });
-      const repository = createPostgresStoryInspectionRepository({ pool });
+      const repository = createPostgresStoryInspectionRepository({ pool, siteId: DEFAULT_SITE });
       const expected = {
         ok: true as const,
         inspection: {
@@ -4138,19 +4320,29 @@ describePostgres("PostgreSQL persistence repositories", () => {
         storyId: story.id,
         sourceId: source.id,
       });
-      await createPostgresStoryRepository({ pool }).persist({ story });
-      await createPostgresSourceRepositories({ pool }).sources.persist({ source });
-      await createPostgresStorySourceAttachmentRepository({ pool }).attach({ attachment });
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
+      await createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE }).sources.persist({
+        source,
+      });
+      await createPostgresStorySourceAttachmentRepository({ pool, siteId: DEFAULT_SITE }).attach({
+        attachment,
+      });
       const client = await pool.connect();
 
       try {
         await client.query("BEGIN");
+        // Both references to the Source have to go before the row can be made to disappear, which
+        // is itself the point: the composite key alone would still have refused this.
         await client.query(
           "ALTER TABLE storyrail.story_source_attachments DROP CONSTRAINT story_source_attachments_source_id_fkey",
+        );
+        await client.query(
+          "ALTER TABLE storyrail.story_source_attachments DROP CONSTRAINT story_source_attachments_source_site_fk",
         );
         await client.query("DELETE FROM storyrail.url_sources WHERE source_id = $1", [source.id]);
         const repository = createPostgresStoryInspectionRepository({
           pool: client as unknown as Pool,
+          siteId: DEFAULT_SITE,
         });
 
         await expect(repository.inspect(story.id)).rejects.toMatchObject({
@@ -4172,11 +4364,13 @@ describePostgres("PostgreSQL persistence repositories", () => {
         sourceId: source.id,
       });
       const extraction = makeSuccessfulExtraction(source, "inspection-corrupt-extraction");
-      await createPostgresStoryRepository({ pool }).persist({ story });
-      const sourceRepositories = createPostgresSourceRepositories({ pool });
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
+      const sourceRepositories = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE });
       await sourceRepositories.sources.persist({ source });
       await sourceRepositories.extractions.append({ extraction });
-      await createPostgresStorySourceAttachmentRepository({ pool }).attach({ attachment });
+      await createPostgresStorySourceAttachmentRepository({ pool, siteId: DEFAULT_SITE }).attach({
+        attachment,
+      });
       await pool.query(
         `UPDATE storyrail.source_extractions
          SET payload = payload - 'extractor'
@@ -4185,7 +4379,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       );
 
       await expect(
-        createPostgresStoryInspectionRepository({ pool }).inspect(story.id),
+        createPostgresStoryInspectionRepository({ pool, siteId: DEFAULT_SITE }).inspect(story.id),
       ).rejects.toMatchObject({
         name: "PostgresStoryInspectionPersistenceInvariantError",
         message: "PostgreSQL Story inspection returned an invalid or impossible persisted result.",
@@ -4210,8 +4404,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
 
     it("linearizes concurrent exact Story writes to one row and two successes", async () => {
-      const firstRepository = createPostgresStoryRepository({ pool });
-      const secondRepository = createPostgresStoryRepository({ pool });
+      const firstRepository = createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE });
+      const secondRepository = createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE });
       const story = makeStory("race-exact");
 
       const results = await Promise.all([
@@ -4232,7 +4426,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
 
     it("linearizes divergent same-ID Story writes to one success and one conflict", async () => {
-      const repository = createPostgresStoryRepository({ pool });
+      const repository = createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE });
       const first = makeStory("race-divergent");
       const second = { ...first, title: "A divergent Story" };
 
@@ -4261,13 +4455,19 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
 
     it("linearizes concurrent exact attachment writes to one row and two successes", async () => {
-      const firstRepository = createPostgresStorySourceAttachmentRepository({ pool });
-      const secondRepository = createPostgresStorySourceAttachmentRepository({ pool });
+      const firstRepository = createPostgresStorySourceAttachmentRepository({
+        pool,
+        siteId: DEFAULT_SITE,
+      });
+      const secondRepository = createPostgresStorySourceAttachmentRepository({
+        pool,
+        siteId: DEFAULT_SITE,
+      });
       const attachment = makeAttachment("race-exact-attachment");
       const story = makeStory("race-exact-attachment", { id: attachment.storyId });
       const source = makeSource("race-exact-attachment");
-      await createPostgresStoryRepository({ pool }).persist({ story });
-      await createPostgresSourceRepositories({ pool }).sources.persist({
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
+      await createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE }).sources.persist({
         source: { ...source, id: attachment.sourceId },
       });
 
@@ -4291,13 +4491,16 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
 
     it("linearizes concurrent divergent attachment writes to one winner and one conflict", async () => {
-      const repository = createPostgresStorySourceAttachmentRepository({ pool });
+      const repository = createPostgresStorySourceAttachmentRepository({
+        pool,
+        siteId: DEFAULT_SITE,
+      });
       const first = makeAttachment("race-divergent-attachment");
       const second = { ...first, relevance: "Divergent relationship relevance" };
       const story = makeStory("race-divergent-attachment", { id: first.storyId });
       const source = makeSource("race-divergent-attachment");
-      await createPostgresStoryRepository({ pool }).persist({ story });
-      await createPostgresSourceRepositories({ pool }).sources.persist({
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
+      await createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE }).sources.persist({
         source: { ...source, id: first.sourceId },
       });
 
@@ -4331,8 +4534,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
 
     it("linearizes concurrent exact Source replays to one stored row", async () => {
-      const firstRepositories = createPostgresSourceRepositories({ pool });
-      const secondRepositories = createPostgresSourceRepositories({ pool });
+      const firstRepositories = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE });
+      const secondRepositories = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE });
       const source = makeSource("race-source-replay");
 
       const results = await Promise.all([
@@ -4352,7 +4555,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
 
     it("allows one same-Source-ID value to win and reports the other as a conflict", async () => {
-      const repositories = createPostgresSourceRepositories({ pool });
+      const repositories = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE });
       const first = makeSource("race-source-id");
       const second = {
         ...first,
@@ -4386,7 +4589,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
 
     it("allows one canonical URL owner to win and identifies it in the duplicate result", async () => {
-      const repositories = createPostgresSourceRepositories({ pool });
+      const repositories = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE });
       const first = makeSource("race-canonical-first");
       const second = {
         ...makeSource("race-canonical-second"),
@@ -4424,7 +4627,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
 
     it("linearizes concurrent exact extraction replays to one row and position", async () => {
-      const repositories = createPostgresSourceRepositories({ pool });
+      const repositories = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE });
       const source = makeSource("race-extraction-replay");
       const extraction = makeSuccessfulExtraction(source, "race-extraction-replay");
       await repositories.sources.persist({ source });
@@ -4449,7 +4652,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
 
     it("allows one same-extraction-ID value to win without overwriting it", async () => {
-      const repositories = createPostgresSourceRepositories({ pool });
+      const repositories = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE });
       const source = makeSource("race-extraction-id");
       const first = makeSuccessfulExtraction(source, "race-extraction-id");
       const second = {
@@ -4484,7 +4687,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
 
     it("appends every distinct concurrent successful and failed attempt once in stable order", async () => {
-      const repositories = createPostgresSourceRepositories({ pool });
+      const repositories = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE });
       const source = makeSource("race-distinct-extractions");
       const attempts: SourceExtraction[] = Array.from({ length: 12 }, (_, index) =>
         index % 2 === 0
@@ -4525,7 +4728,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
 
     it("does not allocate a visible extraction for a missing Source", async () => {
-      const repositories = createPostgresSourceRepositories({ pool });
+      const repositories = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE });
       const missingSource = makeSource("race-missing-source");
       const extraction = makeFailedExtraction(missingSource, "race-missing-source");
 
@@ -4554,6 +4757,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         await client.query("DROP TABLE storyrail.story_source_attachments CASCADE");
         const repository = createPostgresStoryListingRepository({
           pool: client as unknown as Pool,
+          siteId: DEFAULT_SITE,
         });
 
         await expect(repository.list()).rejects.toBeTruthy();
@@ -4571,6 +4775,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         await client.query("DROP TABLE storyrail.story_source_attachments CASCADE");
         const repository = createPostgresStoryInspectionRepository({
           pool: client as unknown as Pool,
+          siteId: DEFAULT_SITE,
         });
         const operation = repository.inspect(storyId("inspection-query-failure"));
 
@@ -4588,13 +4793,16 @@ describePostgres("PostgreSQL persistence repositories", () => {
     it("does not translate Story inspection connection failures into STORY_NOT_FOUND", async () => {
       const closedPool = new Pool({ connectionString: databaseUrl });
       await closedPool.end();
-      const repository = createPostgresStoryInspectionRepository({ pool: closedPool });
+      const repository = createPostgresStoryInspectionRepository({
+        pool: closedPool,
+        siteId: DEFAULT_SITE,
+      });
 
       await expect(repository.inspect(storyId("inspection-closed-pool"))).rejects.toBeTruthy();
     });
 
     it("rejects a corrupt Source payload with only a safe adapter invariant", async () => {
-      const repositories = createPostgresSourceRepositories({ pool });
+      const repositories = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE });
       const source = makeSource("corrupt-source");
       await repositories.sources.persist({ source });
       await pool.query(
@@ -4615,7 +4823,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
 
     it("rejects a corrupt extraction payload with only a safe adapter invariant", async () => {
-      const repositories = createPostgresSourceRepositories({ pool });
+      const repositories = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE });
       const source = makeSource("corrupt-extraction");
       const extraction = makeSuccessfulExtraction(source, "corrupt-extraction");
       await repositories.sources.persist({ source });
@@ -4634,7 +4842,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
 
     it("does not translate query failures into expected editorial results", async () => {
-      const repositories = createPostgresSourceRepositories({ pool });
+      const repositories = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE });
       const source = makeSource("query-failure");
       await pool.query("DROP SCHEMA storyrail CASCADE");
 
@@ -4649,13 +4857,17 @@ describePostgres("PostgreSQL persistence repositories", () => {
         // Rebuild the whole schema, not the part this case happened to need: a partial
         // rebuild leaves every later case running against a schema that is missing migrations.
         for (const migration of orderedMigrations()) await pool.query(migration);
+        await addSecondSite(pool);
       }
     });
 
     it("does not translate connection failures into expected editorial results", async () => {
       const closedPool = new Pool({ connectionString: databaseUrl });
       await closedPool.end();
-      const repositories = createPostgresSourceRepositories({ pool: closedPool });
+      const repositories = createPostgresSourceRepositories({
+        pool: closedPool,
+        siteId: DEFAULT_SITE,
+      });
 
       await expect(repositories.sources.findById(sourceId("closed-pool"))).rejects.toBeTruthy();
     });
@@ -4667,7 +4879,10 @@ describePostgres("PostgreSQL persistence repositories", () => {
       try {
         await client.query("BEGIN");
         await client.query("DROP TABLE storyrail.stories CASCADE");
-        const repository = createPostgresStoryRepository({ pool: client as unknown as Pool });
+        const repository = createPostgresStoryRepository({
+          pool: client as unknown as Pool,
+          siteId: DEFAULT_SITE,
+        });
         const operation = repository.persist({ story });
         await expect(operation).rejects.toBeTruthy();
         await expect(operation).rejects.not.toMatchObject({
@@ -4683,7 +4898,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     it("does not translate Story connection failures into expected persistence results", async () => {
       const closedPool = new Pool({ connectionString: databaseUrl });
       await closedPool.end();
-      const repository = createPostgresStoryRepository({ pool: closedPool });
+      const repository = createPostgresStoryRepository({ pool: closedPool, siteId: DEFAULT_SITE });
 
       await expect(repository.persist({ story: makeStory("closed-pool") })).rejects.toBeTruthy();
     });
@@ -4697,6 +4912,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         await client.query("DROP TABLE storyrail.story_source_attachments CASCADE");
         const repository = createPostgresStorySourceAttachmentRepository({
           pool: client as unknown as Pool,
+          siteId: DEFAULT_SITE,
         });
         const operation = repository.attach({ attachment });
         await expect(operation).rejects.toBeTruthy();
@@ -4717,7 +4933,10 @@ describePostgres("PostgreSQL persistence repositories", () => {
     it("does not translate attachment connection failures into expected repository results", async () => {
       const closedPool = new Pool({ connectionString: databaseUrl });
       await closedPool.end();
-      const repository = createPostgresStorySourceAttachmentRepository({ pool: closedPool });
+      const repository = createPostgresStorySourceAttachmentRepository({
+        pool: closedPool,
+        siteId: DEFAULT_SITE,
+      });
 
       await expect(
         repository.attach({ attachment: makeAttachment("closed-pool") }),
@@ -4726,7 +4945,10 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
     it("propagates the exact attachment serialization failure before querying PostgreSQL", async () => {
       const failure = new Error("attachment serialization failed");
-      const repository = createPostgresStorySourceAttachmentRepository({ pool });
+      const repository = createPostgresStorySourceAttachmentRepository({
+        pool,
+        siteId: DEFAULT_SITE,
+      });
       const attachment = {
         ...makeAttachment("serialization-failure"),
         attachedBy: {
@@ -4745,7 +4967,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
     it("does not open or close the injected Pool while constructing repositories", async () => {
       const connectionCountBefore = pool.totalCount;
-      const repositories = createPostgresSourceRepositories({ pool });
+      const repositories = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE });
 
       expect(pool.totalCount).toBe(connectionCountBefore);
       await expect(repositories.sources.findById(sourceId("factory-boundary"))).resolves.toBeNull();
@@ -4756,7 +4978,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
     it("does not connect or close the injected Pool while constructing the Story repository", async () => {
       const connectionCountBefore = pool.totalCount;
-      const repository = createPostgresStoryRepository({ pool });
+      const repository = createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE });
 
       expect(pool.totalCount).toBe(connectionCountBefore);
       await expect(
@@ -4769,7 +4991,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
     it("does not connect or close the injected Pool while constructing the Story inspection repository", async () => {
       const connectionCountBefore = pool.totalCount;
-      const repository = createPostgresStoryInspectionRepository({ pool });
+      const repository = createPostgresStoryInspectionRepository({ pool, siteId: DEFAULT_SITE });
 
       expect(pool.totalCount).toBe(connectionCountBefore);
       await expect(repository.inspect(storyId("inspection-factory-boundary"))).resolves.toEqual({
@@ -4787,7 +5009,10 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
     it("does not connect or close the injected Pool while constructing the attachment repository", async () => {
       const connectionCountBefore = pool.totalCount;
-      const repository = createPostgresStorySourceAttachmentRepository({ pool });
+      const repository = createPostgresStorySourceAttachmentRepository({
+        pool,
+        siteId: DEFAULT_SITE,
+      });
 
       expect(pool.totalCount).toBe(connectionCountBefore);
       await expect(
@@ -4796,6 +5021,179 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await expect(pool.query("SELECT 1 AS healthy")).resolves.toMatchObject({
         rows: [{ healthy: 1 }],
       });
+    });
+  });
+  describe("Site tenancy", () => {
+    it("does not list a Story that belongs to another Site", async () => {
+      const mine = makeStory("tenancy-listing-mine");
+      const theirs = makeStory("tenancy-listing-theirs");
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story: mine });
+      await createPostgresStoryRepository({ pool, siteId: OTHER_SITE }).persist({ story: theirs });
+
+      const listed = await createPostgresStoryListingRepository({
+        pool,
+        siteId: DEFAULT_SITE,
+      }).list();
+
+      expect(listed.map((entry) => entry.story.id)).toEqual([mine.id]);
+    });
+
+    it("reports a Story from another Site as not found rather than reading it back", async () => {
+      const theirs = makeStory("tenancy-lookup-theirs");
+      await createPostgresStoryRepository({ pool, siteId: OTHER_SITE }).persist({ story: theirs });
+
+      await expect(
+        createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).findById(theirs.id),
+      ).resolves.toBeNull();
+      await expect(
+        createPostgresStoryInspectionRepository({ pool, siteId: DEFAULT_SITE }).inspect(theirs.id),
+      ).resolves.toMatchObject({ ok: false, error: { code: "STORY_NOT_FOUND" } });
+    });
+
+    it("lets two Sites each hold a Source for the same canonical URL", async () => {
+      const shared = "https://example.com/postgres/tenancy-shared-url";
+      const mine = makeSource("tenancy-url-mine", OPERATOR, shared);
+      const theirs = makeSource("tenancy-url-theirs", OPERATOR, shared);
+
+      await expect(
+        createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE }).sources.persist({
+          source: mine,
+        }),
+      ).resolves.toMatchObject({ ok: true });
+      await expect(
+        createPostgresSourceRepositories({ pool, siteId: OTHER_SITE }).sources.persist({
+          source: theirs,
+        }),
+      ).resolves.toMatchObject({ ok: true });
+
+      await expect(
+        createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE }).sources.findByCanonicalUrl(
+          mine.canonicalUrl,
+        ),
+      ).resolves.toMatchObject({ id: mine.id });
+      await expect(
+        createPostgresSourceRepositories({ pool, siteId: OTHER_SITE }).sources.findByCanonicalUrl(
+          theirs.canonicalUrl,
+        ),
+      ).resolves.toMatchObject({ id: theirs.id });
+    });
+
+    it("still reports a second Source for the same URL on one Site as a duplicate", async () => {
+      const shared = "https://example.com/postgres/tenancy-duplicate-url";
+      const first = makeSource("tenancy-duplicate-first", OPERATOR, shared);
+      const second = makeSource("tenancy-duplicate-second", OPERATOR, shared);
+      const repositories = createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE });
+      await repositories.sources.persist({ source: first });
+
+      await expect(repositories.sources.persist({ source: second })).resolves.toMatchObject({
+        ok: false,
+        error: {
+          code: "DUPLICATE_SOURCE",
+          existingSourceId: first.id,
+          canonicalUrl: first.canonicalUrl,
+        },
+      });
+    });
+
+    it("does not offer another Site's untriaged Source in the inbox", async () => {
+      const mine = makeSource("tenancy-inbox-mine");
+      const theirs = makeSource("tenancy-inbox-theirs");
+      await createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE }).sources.persist({
+        source: mine,
+      });
+      await createPostgresSourceRepositories({ pool, siteId: OTHER_SITE }).sources.persist({
+        source: theirs,
+      });
+
+      const pending = await createPostgresSourceInboxRepository({
+        pool,
+        siteId: DEFAULT_SITE,
+      }).listPending();
+
+      expect(pending.map((entry) => entry.source.id)).toEqual([mine.id]);
+    });
+
+    it("refuses an attachment pairing a Story and a Source from different Sites", async () => {
+      const story = makeStory("tenancy-attach-story");
+      const source = makeSource("tenancy-attach-source");
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
+      await createPostgresSourceRepositories({ pool, siteId: OTHER_SITE }).sources.persist({
+        source,
+      });
+      const attachment = makeAttachment("tenancy-attach", {
+        storyId: story.id,
+        sourceId: source.id,
+      });
+
+      // The database, not the repository: writing the pair directly is exactly the mistake the
+      // composite foreign keys exist to make impossible.
+      await expect(
+        pool.query(
+          `INSERT INTO storyrail.story_source_attachments (story_id, source_id, payload, site_id)
+           VALUES ($1, $2, $3::jsonb, $4)`,
+          [attachment.storyId, attachment.sourceId, JSON.stringify(attachment), DEFAULT_SITE],
+        ),
+      ).rejects.toMatchObject({ code: "23503" });
+      await expect(
+        pool.query(
+          `INSERT INTO storyrail.story_source_attachments (story_id, source_id, payload, site_id)
+           VALUES ($1, $2, $3::jsonb, $4)`,
+          [attachment.storyId, attachment.sourceId, JSON.stringify(attachment), OTHER_SITE],
+        ),
+      ).rejects.toMatchObject({ code: "23503" });
+      await expect(
+        createPostgresStorySourceAttachmentRepository({ pool, siteId: DEFAULT_SITE }).attach({
+          attachment,
+        }),
+      ).resolves.toMatchObject({ ok: false, error: { code: "SOURCE_NOT_FOUND" } });
+    });
+
+    it("lets each Site hold its own newsroom standards revision 1", async () => {
+      const revision = (site: string) => ({
+        id: newsroomStandardsId(`standards-${site}`),
+        revisionNumber: 1,
+        text: `House style for ${site}.`,
+        updatedBy: OPERATOR,
+        updatedAt: "2026-08-09T10:00:00.000Z",
+      });
+
+      await expect(
+        createPostgresNewsroomStandardsRepository({ pool, siteId: DEFAULT_SITE }).append(
+          revision("default") as never,
+        ),
+      ).resolves.toMatchObject({ ok: true });
+      await expect(
+        createPostgresNewsroomStandardsRepository({ pool, siteId: OTHER_SITE }).append(
+          revision("other") as never,
+        ),
+      ).resolves.toMatchObject({ ok: true });
+
+      await expect(
+        createPostgresNewsroomStandardsRepository({ pool, siteId: DEFAULT_SITE }).list(),
+      ).resolves.toMatchObject([{ text: "House style for default." }]);
+      await expect(
+        createPostgresNewsroomStandardsRepository({ pool, siteId: OTHER_SITE }).list(),
+      ).resolves.toMatchObject([{ text: "House style for other." }]);
+    });
+
+    it("reads back only the Sites this installation publishes", async () => {
+      const sites = createPostgresSiteRepository({ pool });
+
+      await expect(sites.list()).resolves.toEqual([
+        {
+          id: DEFAULT_SITE,
+          name: "Default Newsroom",
+          domain: "localhost",
+          description: "The newsroom this installation started with, before any site was named.",
+        },
+        {
+          id: OTHER_SITE,
+          name: "Second Newsroom",
+          domain: "second.test",
+          description: "The other website this installation publishes.",
+        },
+      ]);
+      await expect(sites.findById(siteId("site-never-created"))).resolves.toBeNull();
     });
   });
 });

@@ -24,9 +24,11 @@ import {
   sourceId,
   type EditorialActor,
   type ModelDescriptor,
+  type SiteId,
   type StoryId,
 } from "@/domain/editorial";
 
+import { resolveSiteId } from "./site-configuration";
 import {
   loadResearcherRuntimeConfiguration,
   type ResearcherRuntimeConfiguration,
@@ -42,6 +44,7 @@ export interface ResearcherRuntime {
 
 export function createResearcherRuntime(options: {
   readonly configuration: ResearcherRuntimeConfiguration;
+  readonly siteId: SiteId;
   readonly now?: () => string;
   readonly createUuid?: () => string;
   readonly createPool?: (configuration: PoolConfig) => Pool;
@@ -52,7 +55,10 @@ export function createResearcherRuntime(options: {
   // The standards in force when a run starts. Read per run rather than cached, so an edit
   // reaches the next piece of work rather than the next restart.
   const readNewsroomStandards = async (): Promise<string | null> => {
-    const history = await createPostgresNewsroomStandardsRepository({ pool }).list();
+    const history = await createPostgresNewsroomStandardsRepository({
+      pool,
+      siteId: options.siteId,
+    }).list();
     return history.at(-1)?.text ?? null;
   };
   const uuid = options.createUuid ?? randomUUID;
@@ -92,13 +98,13 @@ export function createResearcherRuntime(options: {
 
   const workflow = createResearchStorySources({
     readNewsroomStandards,
-    inspections: createPostgresStoryInspectionRepository({ pool }),
-    profiles: createPostgresAgentProfileRepository({ pool }),
+    inspections: createPostgresStoryInspectionRepository({ pool, siteId: options.siteId }),
+    profiles: createPostgresAgentProfileRepository({ pool, siteId: options.siteId }),
     runs: createPostgresAgentRunRepository({ pool }),
     toolCalls: createPostgresAgentToolCallRepository({ pool }),
-    persistence: createPostgresResearchPersistence({ pool }),
+    persistence: createPostgresResearchPersistence({ pool, siteId: options.siteId }),
     extractor: createFirecrawlSourceExtractor({ apiKey: options.configuration.firecrawlApiKey }),
-    archive: createPostgresArchiveRepository({ pool }),
+    archive: createPostgresArchiveRepository({ pool, siteId: options.siteId }),
     resolveModel,
     createAgentRunId: () => agentRunId(uuid()),
     createToolCallId: () => agentToolCallId(uuid()),
@@ -127,6 +133,7 @@ export function createResearcherRuntimeFromEnvironment(
 ): ResearcherRuntime {
   return createResearcherRuntime({
     configuration: loadResearcherRuntimeConfiguration(options.environment),
+    siteId: resolveSiteId(options.environment ?? process.env),
     now: options.now,
     createUuid: options.createUuid,
     createPool: options.createPool,

@@ -13,8 +13,9 @@ import {
   type PreserveAndExtractUrlSource,
   type PreserveUrlSource,
 } from "@/application/source-evidence";
-import { sourceExtractionId, sourceId } from "@/domain/editorial";
+import { sourceExtractionId, sourceId, type SiteId } from "@/domain/editorial";
 
+import { resolveSiteId } from "./site-configuration";
 import {
   loadSourceEvidenceRuntimeConfiguration,
   type SourceEvidenceRuntimeConfiguration,
@@ -29,6 +30,7 @@ export interface SourceEvidenceRuntime {
 
 export interface CreateSourceEvidenceRuntimeOptions {
   readonly configuration: SourceEvidenceRuntimeConfiguration;
+  readonly siteId: SiteId;
   readonly fetch?: typeof globalThis.fetch;
   readonly now?: () => string;
   readonly createUuid?: () => string;
@@ -50,7 +52,7 @@ export function createSourceEvidenceRuntime(
   const createUuid = options.createUuid ?? randomUUID;
   const now = options.now ?? (() => new Date().toISOString());
   const pool = createPool({ connectionString: options.configuration.databaseUrl });
-  const repositories = createPostgresSourceRepositories({ pool });
+  const repositories = createPostgresSourceRepositories({ pool, siteId: options.siteId });
   const extractor = createFirecrawlSourceExtractor({
     apiKey: options.configuration.firecrawlApiKey,
     fetch: options.fetch ?? globalThis.fetch,
@@ -94,6 +96,7 @@ export function createSourceEvidenceRuntimeFromEnvironment(
 
   return createSourceEvidenceRuntime({
     configuration,
+    siteId: resolveSiteId(options.environment ?? process.env),
     fetch: options.fetch,
     now: options.now,
     createUuid: options.createUuid,

@@ -6,10 +6,12 @@ import {
   MAXIMUM_ARCHIVE_RESULTS,
   type PriorReport,
   type PriorReportSource,
+  type SiteId,
 } from "@/domain/editorial";
 
 export interface CreatePostgresArchiveRepositoryOptions {
   readonly pool: Pool;
+  readonly siteId: SiteId;
 }
 
 interface ArchiveRow extends QueryResultRow {
@@ -38,6 +40,10 @@ class PostgresArchiveInvariantError extends Error {
  * agent asks for is parsed as a search phrase and can never become query syntax. Only Stories in
  * `published` are considered, so nothing an agent reads here is work the newsroom has not stood
  * behind.
+ *
+ * A Revision carries no Site of its own; it reaches one through the Article and the Story beneath
+ * it. Filtering the published set by that Site is what stops a Researcher on one website reading
+ * another website's reporting, which would be the whole isolation undone by a search box.
  */
 const SEARCH_SQL = `
 WITH published AS (
@@ -53,6 +59,7 @@ WITH published AS (
   FROM storyrail.stories AS story
   JOIN storyrail.articles AS article ON article.story_id = story.story_id
   WHERE story.state = 'published'
+    AND story.site_id = $4::text
     AND ($2::text IS NULL OR story.story_id <> $2::text)
 ),
 latest AS (
@@ -130,6 +137,7 @@ export function createPostgresArchiveRepository(
         terms,
         query.excludeStoryId === null ? null : String(query.excludeStoryId),
         limit,
+        options.siteId,
       ]);
 
       return result.rows.map((row) => {

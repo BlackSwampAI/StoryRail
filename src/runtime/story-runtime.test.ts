@@ -4,6 +4,7 @@ import type { Pool, PoolConfig } from "pg";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createPostgresStoryInspectionRepository } from "@/adapters/story-inspection";
+import { siteId } from "@/domain/editorial";
 import { createPostgresAgentProfileRepository } from "@/adapters/agent-profile-persistence";
 import { createPostgresAssignmentPersistence } from "@/adapters/assignment-persistence";
 import { createPostgresStoryListingRepository } from "@/adapters/story-listing";
@@ -70,6 +71,7 @@ vi.mock("@/adapters/assignment-persistence", () => ({
   createPostgresAssignmentPersistence: factoryMocks.createAssignmentPersistence,
 }));
 
+const SITE = siteId("site-default");
 const DATABASE_URL = "opaque-story-runtime-database-configuration";
 const STORY_UUID = "40000000-0000-4000-8000-000000000020";
 const SOURCE_ID = sourceId("source-runtime-0020");
@@ -174,6 +176,7 @@ describe("createStoryRuntime", () => {
     const now = vi.fn(() => CREATED_AT);
     const runtime = createStoryRuntime({
       databaseUrl: DATABASE_URL,
+      siteId: SITE,
       createPool,
       createUuid,
       now,
@@ -181,22 +184,33 @@ describe("createStoryRuntime", () => {
 
     expect(createPool).toHaveBeenCalledOnce();
     expect(createPool).toHaveBeenCalledWith({ connectionString: DATABASE_URL });
-    expect(createPostgresStoryRepository).toHaveBeenCalledWith({ pool: controlledPool.pool });
+    expect(createPostgresStoryRepository).toHaveBeenCalledWith({
+      pool: controlledPool.pool,
+      siteId: SITE,
+    });
     expect(createPostgresStorySourceAttachmentRepository).toHaveBeenCalledWith({
       pool: controlledPool.pool,
+      siteId: SITE,
     });
     expect(createPostgresStoryInspectionRepository).toHaveBeenCalledWith({
       pool: controlledPool.pool,
+      siteId: SITE,
     });
     expect(createPostgresStoryListingRepository).toHaveBeenCalledWith({
       pool: controlledPool.pool,
+      siteId: SITE,
     });
-    expect(createPostgresSourceInboxRepository).toHaveBeenCalledWith({ pool: controlledPool.pool });
+    expect(createPostgresSourceInboxRepository).toHaveBeenCalledWith({
+      pool: controlledPool.pool,
+      siteId: SITE,
+    });
     expect(createPostgresSourceTriageDecisionRepository).toHaveBeenCalledWith({
       pool: controlledPool.pool,
+      siteId: SITE,
     });
     expect(createPostgresAgentProfileRepository).toHaveBeenCalledWith({
       pool: controlledPool.pool,
+      siteId: SITE,
     });
     expect(createPostgresAssignmentPersistence).toHaveBeenCalledWith({ pool: controlledPool.pool });
     expect(controlledPool.query).not.toHaveBeenCalled();
@@ -245,6 +259,7 @@ describe("createStoryRuntime", () => {
       .mockReturnValueOnce(ATTACHED_AT);
     const runtime = createStoryRuntime({
       databaseUrl: DATABASE_URL,
+      siteId: SITE,
       createPool: () => controlledPool.pool,
       createUuid,
       now,
@@ -337,6 +352,7 @@ describe("createStoryRuntime", () => {
     const controlledPool = makePool();
     const runtime = createStoryRuntime({
       databaseUrl: DATABASE_URL,
+      siteId: SITE,
       createPool: () => controlledPool.pool,
     });
 
@@ -354,6 +370,7 @@ describe("createStoryRuntime", () => {
     });
     const runtime = createStoryRuntime({
       databaseUrl: DATABASE_URL,
+      siteId: SITE,
       createPool: () => controlledPool.pool,
     });
 

@@ -59,7 +59,10 @@ import {
   type AgentRunId,
   type OperatorActor,
   type ReviewDecisionValue,
+  type SiteId,
 } from "@/domain/editorial";
+
+import { resolveSiteId } from "./site-configuration";
 
 export interface StoryRuntime {
   readonly listNewsroomStandards: import("@/application/newsroom-standards").NewsroomStandardsRepository["list"];
@@ -97,6 +100,7 @@ export interface StoryRuntime {
 
 export interface CreateStoryRuntimeOptions {
   readonly databaseUrl: string;
+  readonly siteId: SiteId;
   readonly now?: () => string;
   readonly createUuid?: () => string;
   readonly createPool?: (configuration: PoolConfig) => Pool;
@@ -123,25 +127,32 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
   const createUuid = options.createUuid ?? randomUUID;
   const now = options.now ?? (() => new Date().toISOString());
   const pool = createPool({ connectionString: options.databaseUrl });
-  const storyRepository = createPostgresStoryRepository({ pool });
-  const attachmentRepository = createPostgresStorySourceAttachmentRepository({ pool });
-  const inspectionRepository = createPostgresStoryInspectionRepository({ pool });
-  const listingRepository = createPostgresStoryListingRepository({ pool });
-  const sourceInboxRepository = createPostgresSourceInboxRepository({ pool });
-  const sourceTriageRepository = createPostgresSourceTriageDecisionRepository({ pool });
-  const agentProfileRepository = createPostgresAgentProfileRepository({ pool });
+  const { siteId: site } = options;
+  const storyRepository = createPostgresStoryRepository({ pool, siteId: site });
+  const attachmentRepository = createPostgresStorySourceAttachmentRepository({
+    pool,
+    siteId: site,
+  });
+  const inspectionRepository = createPostgresStoryInspectionRepository({ pool, siteId: site });
+  const listingRepository = createPostgresStoryListingRepository({ pool, siteId: site });
+  const sourceInboxRepository = createPostgresSourceInboxRepository({ pool, siteId: site });
+  const sourceTriageRepository = createPostgresSourceTriageDecisionRepository({
+    pool,
+    siteId: site,
+  });
+  const agentProfileRepository = createPostgresAgentProfileRepository({ pool, siteId: site });
   const assignmentPersistence = createPostgresAssignmentPersistence({ pool });
   const reviewSubmissionPersistence = createPostgresReviewSubmissionPersistence({ pool });
   const reviewDecisionPersistence = createPostgresReviewDecisionPersistence({ pool });
   const storyRejectionPersistence = createPostgresStoryRejectionPersistence({ pool });
   const storyPublicationPersistence = createPostgresStoryPublicationPersistence({ pool });
-  const newsroomStandards = createPostgresNewsroomStandardsRepository({ pool });
+  const newsroomStandards = createPostgresNewsroomStandardsRepository({ pool, siteId: site });
   const setNewsroomStandards = createSetNewsroomStandards({
     repository: newsroomStandards,
     createUuid,
     now,
   });
-  const policyRuns = createPostgresPolicyRunRepository({ pool });
+  const policyRuns = createPostgresPolicyRunRepository({ pool, siteId: site });
   const reconcileAbandonedWork = createReconcileAbandonedWork({
     policyRuns,
     agentRuns: createPostgresAgentRunRepository({ pool }),
@@ -240,6 +251,7 @@ export function createStoryRuntimeFromEnvironment(
 
   return createStoryRuntime({
     databaseUrl,
+    siteId: resolveSiteId(options.environment ?? process.env),
     now: options.now,
     createUuid: options.createUuid,
     createPool: options.createPool,

@@ -3,7 +3,11 @@
 import type { Pool } from "pg";
 import { describe, expect, it, vi } from "vitest";
 
+import { siteId } from "@/domain/editorial";
+
 import { createPostgresStoryListingRepository } from "./postgres-story-listing-repository";
+
+const SITE = siteId("site-default");
 
 const PAYLOAD = {
   id: "story-listing-adapter",
@@ -30,14 +34,16 @@ describe("createPostgresStoryListingRepository", () => {
     const query = vi.fn(async () => ({ rows: [row()] }));
     const repository = createPostgresStoryListingRepository({
       pool: { query } as unknown as Pool,
+      siteId: SITE,
     });
 
     await expect(repository.list()).resolves.toEqual([{ story: PAYLOAD, sourceCount: 2 }]);
     expect(query).toHaveBeenCalledOnce();
     expect(query).toHaveBeenCalledWith(
       expect.stringContaining('ORDER BY story.story_id COLLATE "C" ASC'),
+      [SITE],
     );
-    expect(query.mock.calls[0]).toHaveLength(1);
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("WHERE story.site_id = $1"), [SITE]);
   });
 
   it.each([
@@ -48,6 +54,7 @@ describe("createPostgresStoryListingRepository", () => {
   ])("rejects %s as a safe persistence invariant", async (_label, invalidRow) => {
     const repository = createPostgresStoryListingRepository({
       pool: { query: vi.fn(async () => ({ rows: [invalidRow] })) } as unknown as Pool,
+      siteId: SITE,
     });
     await expect(repository.list()).rejects.toMatchObject({
       name: "PostgresStoryListingPersistenceInvariantError",
@@ -63,6 +70,7 @@ describe("createPostgresStoryListingRepository", () => {
           throw failure;
         }),
       } as unknown as Pool,
+      siteId: SITE,
     });
     await expect(repository.list()).rejects.toBe(failure);
   });

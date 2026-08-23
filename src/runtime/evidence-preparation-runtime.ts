@@ -9,8 +9,9 @@ import {
   createPrepareSourceEvidence,
   type PrepareSourceEvidence,
 } from "@/application/source-evidence-preparation";
-import { sourceEvidencePreparationId } from "@/domain/editorial";
+import { sourceEvidencePreparationId, type SiteId } from "@/domain/editorial";
 
+import { resolveSiteId } from "./site-configuration";
 import {
   loadEvidencePreparationRuntimeConfiguration,
   type EvidencePreparationRuntimeConfiguration,
@@ -23,6 +24,7 @@ export interface EvidencePreparationRuntime {
 
 export interface CreateEvidencePreparationRuntimeOptions {
   readonly configuration: EvidencePreparationRuntimeConfiguration;
+  readonly siteId: SiteId;
   readonly now?: () => string;
   readonly createUuid?: () => string;
   readonly createPool?: (configuration: PoolConfig) => Pool;
@@ -34,7 +36,7 @@ export function createEvidencePreparationRuntime(
   const pool = (options.createPool ?? ((configuration) => new Pool(configuration)))({
     connectionString: options.configuration.databaseUrl,
   });
-  const repositories = createPostgresSourceRepositories({ pool });
+  const repositories = createPostgresSourceRepositories({ pool, siteId: options.siteId });
   const preparations = createPostgresSourceEvidencePreparationRepository({ pool });
   const createUuid = options.createUuid ?? randomUUID;
   const model = createOpenRouterStructuredModel({
@@ -69,6 +71,7 @@ export function createEvidencePreparationRuntimeFromEnvironment(
 ): EvidencePreparationRuntime {
   return createEvidencePreparationRuntime({
     configuration: loadEvidencePreparationRuntimeConfiguration(options.environment),
+    siteId: resolveSiteId(options.environment ?? process.env),
     now: options.now,
     createUuid: options.createUuid,
     createPool: options.createPool,
