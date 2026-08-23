@@ -164,14 +164,21 @@ cp .env.example .env
 pnpm dev
 ```
 
-Before starting the app, configure `.env` and apply every SQL file in `database/migrations/` externally in numeric order. StoryRail does not currently include a migration runner and does not apply migrations automatically; use the PostgreSQL administration or migration tool appropriate to your environment.
-
-Every migration is plain SQL and safe to apply with any tool. Where no host `psql` is available, the installed `pg` package can apply them in order:
+Before starting the app, configure `.env` and bring the database up to date:
 
 ```bash
-STORYRAIL_DATABASE_URL=postgresql://user:password@127.0.0.1:5432/storyrail \
-  node --input-type=module --eval "import { readdir, readFile } from 'node:fs/promises'; import pg from 'pg'; const files = (await readdir('database/migrations')).filter((name) => name.endsWith('.sql')).sort(); const client = new pg.Client({ connectionString: process.env.STORYRAIL_DATABASE_URL }); await client.connect(); try { for (const file of files) { await client.query(await readFile(\`database/migrations/\${file}\`, 'utf8')); console.log('applied', file); } } finally { await client.end(); }"
+STORYRAIL_DATABASE_URL=postgresql://user:password@127.0.0.1:5432/storyrail pnpm migrate
 ```
+
+`pnpm migrate:status` reports what a database has, what it still needs, and anything contradictory — a migration edited after it was applied, two files that took the same number, or one that started and never finished. Migrations are still plain SQL in `database/migrations/`, applied in numeric order, and can still be run with any tool you prefer; what the runner adds is that the database records which ones it has, in `public.storyrail_schema_migrations`.
+
+A database created before that ledger existed has the schema and no record of it. Tell the runner what is already there, naming the last migration you know was applied:
+
+```bash
+STORYRAIL_DATABASE_URL=... pnpm migrate:adopt --through 0061-durable-policy-runs.sql
+```
+
+Adopted migrations are recorded as adopted rather than applied, because the runner did not run them and cannot vouch for them. Anything after the one you name is then applied normally by `pnpm migrate`.
 
 Open [http://localhost:3133](http://localhost:3133) to use the development newsroom. StoryRail runs on port 3133 so it does not collide with other local services on the usual Next.js default.
 
@@ -209,7 +216,7 @@ pnpm build
 
 ## Project status and limitations
 
-StoryRail is a development-oriented pre-alpha. It has no authentication, migrations are external and manual, and some anti-bot publishers remain inaccessible through Firecrawl.
+StoryRail is a development-oriented pre-alpha. It has no authentication, migrations are applied deliberately rather than on startup, and some anti-bot publishers remain inaccessible through Firecrawl.
 
 The editorial path is implemented from Source intake through research, assignment, cited drafting, review, and publication, and can run unattended. Autopilot is now a durable record with a reconciliation pass that closes out work whose process disappeared, and a tool call is recorded before it reaches outside rather than after. What remains is delivery: StoryRail has no publishing destination and no way to read an archive other than its own. Free and low-cost models also fail a meaningful share of the time; StoryRail records those failures rather than retrying silently, so an unattended run may stop partway with a durable reason.
 
