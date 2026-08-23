@@ -38,7 +38,9 @@ export function recordAgentToolCall(candidate: AgentToolCall): RecordAgentToolCa
     !nonEmpty(candidate.runId) ||
     !nonEmpty(candidate.storyId) ||
     !nonEmpty(candidate.requestedAt) ||
-    !nonEmpty(candidate.completedAt)
+    (candidate.outcome === "running"
+      ? candidate.completedAt !== null
+      : !nonEmpty(candidate.completedAt))
   )
     return invalid(
       "AGENT_TOOL_CALL_IDENTITY_INVALID",
@@ -63,6 +65,8 @@ export function recordAgentToolCall(candidate: AgentToolCall): RecordAgentToolCa
       "AGENT_TOOL_CALL_RECORD_TOO_LARGE",
       "Tool call arguments must be recordable within the audit record's size.",
     );
+
+  if (candidate.outcome === "running") return { ok: true, call: structuredClone(candidate) };
 
   if (candidate.outcome === "succeeded") {
     const resultSize = measured(candidate.result);

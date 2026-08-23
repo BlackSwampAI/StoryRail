@@ -143,6 +143,10 @@ const policyRunMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0061-durable-policy-runs.sql",
 );
+const toolDurabilityMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0062-tool-call-durability.sql",
+);
 
 const OPERATOR: OperatorActor = {
   type: "operator",
@@ -364,6 +368,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let researcherMigrationSql: string;
   let citationCorrectionMigrationSql: string;
   let policyRunMigrationSql: string;
+  let toolDurabilityMigrationSql: string;
 
   /** Every migration, in order. One list so a rebuild can never drift from the first build. */
   const orderedMigrations = (): readonly string[] => [
@@ -388,6 +393,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     researcherMigrationSql,
     citationCorrectionMigrationSql,
     policyRunMigrationSql,
+    toolDurabilityMigrationSql,
   ];
   let destructiveSetupAllowed = false;
 
@@ -413,6 +419,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     researcherMigrationSql = await readFile(researcherMigrationPath, "utf8");
     citationCorrectionMigrationSql = await readFile(citationCorrectionMigrationPath, "utf8");
     policyRunMigrationSql = await readFile(policyRunMigrationPath, "utf8");
+    toolDurabilityMigrationSql = await readFile(toolDurabilityMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -667,13 +674,13 @@ describePostgres("PostgreSQL persistence repositories", () => {
   describe("durable tool calls", () => {
     // A tool call is recorded as it happens, so a run that dies part-way still shows what it
     // had already reached for.
-    it("appends calls in order, refuses duplicates, and reads them back", async () => {
+    it("records intent first, completes once, and never reopens", async () => {
       const story = makeStory("tool-calls");
       await createPostgresStoryRepository({ pool }).persist({ story });
       const run = makeAgentRun(story, "tool-calls");
       await createPostgresAgentRunRepository({ pool }).append(run);
       const repository = createPostgresAgentToolCallRepository({ pool });
-      const call = (sequence: number, id: string) =>
+      const intent = (sequence: number, id: string) =>
         ({
           id: agentToolCallId(id),
           runId: run.id,
@@ -682,33 +689,38 @@ describePostgres("PostgreSQL persistence repositories", () => {
           tool: "fetch_url",
           request: { url: "https://example.test" },
           requestedAt: "requested",
-          completedAt: "completed",
-          outcome: "succeeded",
-          result: { url: "https://example.test", title: null, characters: 12 },
+          completedAt: null,
+          outcome: "running",
         }) as never;
 
-      await expect(repository.append(call(1, "tool-call-1"))).resolves.toMatchObject({ ok: true });
-      await expect(
-        repository.append({
-          ...(call(2, "tool-call-2") as unknown as Record<string, unknown>),
-          outcome: "failed",
-          result: undefined,
-          failure: { code: "TOOL_BUDGET_EXHAUSTED", retryable: false, message: null },
-        } as never),
-      ).resolves.toMatchObject({ ok: true });
-
-      await expect(repository.append(call(1, "tool-call-3"))).resolves.toMatchObject({
+      await expect(repository.append(intent(1, "tool-call-1"))).resolves.toMatchObject({
+        ok: true,
+        call: { outcome: "running" },
+      });
+      await expect(repository.append(intent(1, "tool-call-3"))).resolves.toMatchObject({
         ok: false,
         error: { code: "AGENT_TOOL_CALL_SEQUENCE_CONFLICT" },
       });
-      await expect(repository.append(call(3, "tool-call-1"))).resolves.toMatchObject({
+      await expect(repository.append(intent(3, "tool-call-1"))).resolves.toMatchObject({
         ok: false,
         error: { code: "AGENT_TOOL_CALL_ID_CONFLICT" },
       });
 
+      const completed = {
+        ...(intent(1, "tool-call-1") as unknown as Record<string, unknown>),
+        completedAt: "completed",
+        outcome: "succeeded",
+        result: { url: "https://example.test", title: null, characters: 12 },
+      } as never;
+      await expect(repository.complete(completed)).resolves.toMatchObject({ ok: true });
+      // A completed call is terminal, exactly as a completed AgentRun is.
+      await expect(repository.complete(completed)).resolves.toMatchObject({
+        ok: false,
+        error: { code: "AGENT_TOOL_CALL_NOT_RUNNING" },
+      });
+
       await expect(repository.listByRunId(run.id)).resolves.toMatchObject([
         { sequence: 1, outcome: "succeeded" },
-        { sequence: 2, outcome: "failed", failure: { code: "TOOL_BUDGET_EXHAUSTED" } },
       ]);
     });
 

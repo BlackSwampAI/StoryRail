@@ -9,6 +9,7 @@ import {
   sourceId,
   storyId,
   type AgentRun,
+  type AgentToolCall,
   type PolicyRun,
 } from "@/domain/editorial";
 
@@ -73,7 +74,9 @@ const runningAgentRun = (outcome: "running" | "succeeded" = "running"): AgentRun
 function harness(options: {
   readonly stale?: readonly PolicyRun[];
   readonly runs?: readonly AgentRun[];
+  readonly toolCalls?: readonly AgentToolCall[];
 }) {
+  const completeToolCall = vi.fn(async (call: AgentToolCall) => ({ ok: true as const, call }));
   const settle = vi.fn(async (command: { id: unknown }) => ({
     ok: true as const,
     run: policyRun({ id: command.id as never }),
@@ -82,6 +85,7 @@ function harness(options: {
   return {
     settle,
     complete,
+    completeToolCall,
     reconcile: createReconcileAbandonedWork({
       policyRuns: {
         append: vi.fn(),
@@ -94,6 +98,11 @@ function harness(options: {
         append: vi.fn(),
         complete,
         listByStoryId: vi.fn(async () => options.runs ?? []),
+      },
+      toolCalls: {
+        append: vi.fn(),
+        complete: completeToolCall,
+        listByRunId: vi.fn(async () => options.toolCalls ?? []),
       },
       now: () => NOW,
     }),
@@ -164,6 +173,7 @@ describe("closing out work whose process disappeared", () => {
     await expect(test.reconcile()).resolves.toEqual({
       abandonedPolicyRuns: [],
       abandonedAgentRuns: [],
+      abandonedToolCalls: [],
     });
     expect(test.settle).not.toHaveBeenCalled();
   });

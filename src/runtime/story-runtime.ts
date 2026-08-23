@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { Pool, type PoolConfig } from "pg";
 
 import { createPostgresAgentRunRepository } from "@/adapters/agent-run-persistence";
+import { createPostgresAgentToolCallRepository } from "@/adapters/agent-tool-call-persistence";
 import { createPostgresPolicyRunRepository } from "@/adapters/policy-run-persistence";
 import { createReconcileAbandonedWork } from "@/application/policy-runs";
 import { createPostgresStoryInspectionRepository } from "@/adapters/story-inspection";
@@ -132,6 +133,7 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
   const reconcileAbandonedWork = createReconcileAbandonedWork({
     policyRuns,
     agentRuns: createPostgresAgentRunRepository({ pool }),
+    toolCalls: createPostgresAgentToolCallRepository({ pool }),
     now,
   });
   const createStory = createCreateStory({

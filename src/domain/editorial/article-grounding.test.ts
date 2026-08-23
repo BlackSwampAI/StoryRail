@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  correctionStayedInScope,
   sourceEvidencePreparationId,
   sourceId,
   unsupportedDirectorQuotes,
@@ -248,5 +249,77 @@ describe("holding a Director to the standard it enforces", () => {
         article,
       ),
     ).toEqual(["assignment"]);
+  });
+});
+
+describe("keeping a correction to what it was asked to correct", () => {
+  const cite = (quote: string) => [{ sourceId: SOURCE, evidenceId: EVIDENCE, quote }];
+  const draft = (first: string, second: string): readonly ArticleBlock[] => [
+    { kind: "claim", markdown: first, citations: cite("Rust 2024 marks") },
+    { kind: "context", markdown: second, citations: [] },
+  ];
+  const finding = {
+    blockIndex: 0,
+    citationIndex: 0,
+    code: "CITATION_QUOTE_UNSUPPORTED" as const,
+    quote: "Rust 2024 marks",
+    evidenceId: String(EVIDENCE),
+  };
+
+  it("accepts a correction that changed only the block it was told about", () => {
+    const before = draft("A claim.", "Framing.");
+    const after: readonly ArticleBlock[] = [
+      { kind: "claim", markdown: "A claim.", citations: cite("Rust 2024 marks the largest") },
+      before[1]!,
+    ];
+
+    expect(correctionStayedInScope(before, after, [finding])).toBe(true);
+  });
+
+  it("accepts a claim restated as the Writer's own framing", () => {
+    // The escape hatch for a claim that cannot be supported: say it is your own, visibly.
+    const before = draft("A claim.", "Framing.");
+    const after: readonly ArticleBlock[] = [
+      { kind: "context", markdown: "A claim.", citations: [] },
+      before[1]!,
+    ];
+
+    expect(correctionStayedInScope(before, after, [finding])).toBe(true);
+  });
+
+  it("refuses a correction that rewrote a block nobody objected to", () => {
+    // Telling the model not to is a prompt instruction. This is the invariant.
+    const before = draft("A claim.", "Framing.");
+    const after: readonly ArticleBlock[] = [
+      before[0]!,
+      { kind: "context", markdown: "Rewritten framing nobody asked for.", citations: [] },
+    ];
+
+    expect(correctionStayedInScope(before, after, [finding])).toBe(false);
+  });
+
+  it("refuses a correction that added or removed a block", () => {
+    const before = draft("A claim.", "Framing.");
+    expect(correctionStayedInScope(before, [before[0]!], [finding])).toBe(false);
+    expect(
+      correctionStayedInScope(
+        before,
+        [...before, { kind: "context", markdown: "A new thought.", citations: [] }],
+        [finding],
+      ),
+    ).toBe(false);
+  });
+
+  it("refuses a citation quietly changed on a block that was not listed", () => {
+    const before: readonly ArticleBlock[] = [
+      { kind: "claim", markdown: "First.", citations: cite("Rust 2024 marks") },
+      { kind: "claim", markdown: "Second.", citations: cite("released to date") },
+    ];
+    const after: readonly ArticleBlock[] = [
+      before[0]!,
+      { kind: "claim", markdown: "Second.", citations: cite("something else entirely") },
+    ];
+
+    expect(correctionStayedInScope(before, after, [finding])).toBe(false);
   });
 });

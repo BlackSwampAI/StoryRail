@@ -14,9 +14,9 @@
   },
   "packageManager": "pnpm@11.20.0",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --port 3133",
     "build": "next build",
-    "start": "next start",
+    "start": "next start --port 3133",
     "test": "vitest run",
     "test:postgres": "node --input-type=module --eval \"if (!process.env.STORYRAIL_TEST_DATABASE_URL) { console.error('STORYRAIL_TEST_DATABASE_URL is required for PostgreSQL integration tests.'); process.exit(1); }\" && vitest run src/adapters/source-persistence/postgres-source-repositories.test.ts",
     "test:watch": "vitest",

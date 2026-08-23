@@ -30,6 +30,11 @@ export function createReconcileAbandonedWorkHttpHandler(dependencies: {
             role: run.role,
             operation: run.operation,
           })),
+          abandonedToolCalls: report.abandonedToolCalls.map((call) => ({
+            id: call.id,
+            runId: call.runId,
+            tool: call.tool,
+          })),
         },
         200,
       );
