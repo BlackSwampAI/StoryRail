@@ -13,6 +13,7 @@ export type CredentialSlot = string & { readonly [credentialSlotBrand]: "Credent
 
 export const OPENROUTER_API_KEY_SLOT = "openrouter_api_key" as CredentialSlot;
 export const FIRECRAWL_API_KEY_SLOT = "firecrawl_api_key" as CredentialSlot;
+export const STUDIOCMS_API_TOKEN_SLOT = "studiocms_api_token" as CredentialSlot;
 
 export const MAXIMUM_CREDENTIAL_SLOT_LENGTH = 64;
 export const MAXIMUM_CREDENTIAL_SECRET_LENGTH = 4_096;

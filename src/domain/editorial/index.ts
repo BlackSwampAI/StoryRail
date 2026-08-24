@@ -41,3 +41,5 @@ export * from "./site-credential-types";
 export * from "./site-credential";
 export * from "./site-settings-types";
 export * from "./site-settings";
+export * from "./story-delivery-types";
+export * from "./story-delivery";

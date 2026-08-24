@@ -41,7 +41,16 @@ export function createPostgresSiteSettingsRepository(
          VALUES ($1, $2::jsonb, $3)
          ON CONFLICT (site_id) DO UPDATE
            SET payload = EXCLUDED.payload, updated_at = EXCLUDED.updated_at`,
-        [options.siteId, JSON.stringify({ models: command.settings.models }), command.updatedAt],
+        [
+          options.siteId,
+          // A newsroom with nowhere to deliver stores no destination key at all rather than a
+          // null one, so the absent case has one representation in the database instead of two.
+          JSON.stringify({
+            models: command.settings.models,
+            ...(command.settings.destination ? { destination: command.settings.destination } : {}),
+          }),
+          command.updatedAt,
+        ],
       );
     },
   };

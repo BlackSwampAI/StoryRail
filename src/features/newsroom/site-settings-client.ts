@@ -67,10 +67,26 @@ function isModelId(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0 && value === value.trim();
 }
 
+/**
+ * The destination is read but never shown. This screen has no field for it, so the check exists
+ * only so that a newsroom which has one configured does not read as an unreadable response.
+ */
+function isDestination(value: unknown): boolean {
+  return (
+    value === null ||
+    (isRecord(value) &&
+      exact(value, ["baseUrl", "package", "draft"]) &&
+      isModelId(value.baseUrl) &&
+      isModelId(value.package) &&
+      typeof value.draft === "boolean")
+  );
+}
+
 function isSettings(value: unknown): value is SiteSettings {
   return (
     isRecord(value) &&
-    exact(value, ["models"]) &&
+    (exact(value, ["models"]) || exact(value, ["models", "destination"])) &&
+    isDestination(value.destination ?? null) &&
     isRecord(value.models) &&
     exact(value.models, SITE_MODEL_ROLES) &&
     SITE_MODEL_ROLES.every((role) => isModelId((value.models as Record<string, unknown>)[role]))
