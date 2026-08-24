@@ -13,6 +13,7 @@ import {
   type ConnectionStatus,
   type ScaffoldSection,
 } from "./account-scaffold";
+import { modelCatalogClient, type ModelCatalogClient } from "./model-catalog-client";
 import { siteSettingsClient, type SiteSettingsClient } from "./site-settings-client";
 import {
   AgentModelsForm,
@@ -142,6 +143,7 @@ export interface SettingsWorkspaceProps {
   readonly theme: NewsroomThemeId;
   readonly onThemeChange: (theme: NewsroomThemeId) => void;
   readonly requests?: SiteSettingsClient;
+  readonly catalog?: ModelCatalogClient;
 }
 
 type StoredSettingsState =
@@ -157,6 +159,7 @@ export function SettingsWorkspace({
   theme,
   onThemeChange,
   requests = siteSettingsClient,
+  catalog = modelCatalogClient,
 }: SettingsWorkspaceProps) {
   const [stored, setStored] = useState<StoredSettingsState>({ kind: "loading" });
 
@@ -289,6 +292,7 @@ export function SettingsWorkspace({
           {section.id === AGENT_MODELS_SECTION_ID ? (
             <AgentModelsForm
               models={stored.kind === "loaded" ? stored.models : null}
+              catalog={catalog}
               loading={loading}
               requests={requests}
               onModelsSaved={(models) =>

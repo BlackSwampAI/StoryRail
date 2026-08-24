@@ -22,3 +22,4 @@ export * from "./director-reviews";
 export * from "./sites";
 export * from "./site-credentials";
 export * from "./site-settings";
+export * from "./model-catalog";

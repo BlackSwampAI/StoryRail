@@ -5,6 +5,7 @@ import { AccountMenu } from "./account-menu";
 import { SCAFFOLD_SETTINGS } from "./account-scaffold";
 import { NEWSROOM_THEMES } from "./theme";
 import { ProfileWorkspace, SettingsWorkspace } from "./account-workspace";
+import type { ModelCatalogClient } from "./model-catalog-client";
 import type { SiteSettingsClient } from "./site-settings-client";
 
 // The scaffolding is what is on screen while nothing has been read, so these tests never resolve.
@@ -14,6 +15,8 @@ const inertClient: SiteSettingsClient = {
   setCredential: () => new Promise(() => {}),
   removeCredential: () => new Promise(() => {}),
 };
+
+const inertCatalog: ModelCatalogClient = { readCatalog: () => new Promise(() => {}) };
 
 describe("account scaffolding", () => {
   it("opens account navigation apart from the editorial desk", () => {
@@ -52,7 +55,12 @@ describe("account scaffolding", () => {
   it("lets the operator choose a theme, the one setting that works", () => {
     const onThemeChange = vi.fn();
     render(
-      <SettingsWorkspace theme="newsroom" onThemeChange={onThemeChange} requests={inertClient} />,
+      <SettingsWorkspace
+        theme="newsroom"
+        onThemeChange={onThemeChange}
+        requests={inertClient}
+        catalog={inertCatalog}
+      />,
     );
 
     const group = screen.getByRole("radiogroup", { name: "Theme" });
@@ -65,7 +73,14 @@ describe("account scaffolding", () => {
   });
 
   it("lays out every roadmap section and leaves each unbacked connector inert", () => {
-    render(<SettingsWorkspace theme="newsroom" onThemeChange={vi.fn()} requests={inertClient} />);
+    render(
+      <SettingsWorkspace
+        theme="newsroom"
+        onThemeChange={vi.fn()}
+        requests={inertClient}
+        catalog={inertCatalog}
+      />,
+    );
 
     for (const section of SCAFFOLD_SETTINGS) {
       expect(screen.getByRole("heading", { name: section.title })).toBeVisible();
@@ -78,7 +93,14 @@ describe("account scaffolding", () => {
   });
 
   it("says in its notice which settings are stored and which are still layout", () => {
-    render(<SettingsWorkspace theme="newsroom" onThemeChange={vi.fn()} requests={inertClient} />);
+    render(
+      <SettingsWorkspace
+        theme="newsroom"
+        onThemeChange={vi.fn()}
+        requests={inertClient}
+        catalog={inertCatalog}
+      />,
+    );
 
     const notice = screen.getAllByRole("note")[0];
     expect(notice).toHaveTextContent(/OpenRouter key/);
