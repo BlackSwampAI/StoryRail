@@ -30,6 +30,17 @@ Adapters implement the application-layer repository ports against external syste
 
 The provider-neutral structured-model port is implemented with LangChain's `ChatOpenRouter`. The operator selects the model through `STORYRAIL_EVIDENCE_PREPARATION_MODEL`; final prepared documents are validated by StoryRail before an immutable attempt is persisted.
 
+### Credential storage
+
+External service credentials (API keys, etc.) are stored per site in an encrypted credential store. The `postgres-site-credential-persistence.ts` adapter implements the `SiteCredentialRepository` port against the `storyrail.site_credentials` table.
+
+Credentials are encrypted using AES-GCM with a site-specific associated data (the newsroom's site ID and credential slot) and the `STORYRAIL_CREDENTIAL_KEY` environment variable. The store never returns the full credential; instead, it provides a four-character hint (the last four characters of the decrypted value) so operators can verify which credential is stored without exposing secrets.
+
+The credential cipher (`aes-gcm-credential-cipher.ts`) ensures that:
+- Credentials are bound to their site and slot (a credential stored for one site cannot be decrypted by another)
+- Tampering with ciphertext or authTag is detected and treated as unreadable
+- Only the hint is exposed; the actual secret never leaves the encryption boundary
+
 ### PostgreSQL persistence adapters
 
 All PostgreSQL adapters share a defensive pattern: they serialize the domain object to JSONB `payload`, store denormalized relational columns alongside it, and decode rows back into typed domain objects with strict shape validation (`hasExactKeys`, `isActor`, `isAgentRole`). Any row that fails the expected shape throws an `*InvariantError`, treating a corrupted payload as a programming error rather than returning malformed data.
@@ -52,6 +63,11 @@ All PostgreSQL adapters share a defensive pattern: they serialize the domain obj
 | `postgres-review-decision-persistence.ts`             | `storyrail.review_decisions`, `storyrail.stories`, `storyrail.story_transition_receipts` | `ReviewDecisionPersistence`                  |
 | `postgres-review-submission-persistence.ts`           | `storyrail.stories`, `storyrail.story_transition_receipts`           | `ReviewSubmissionPersistence`                        |
 | `postgres-story-rejection-persistence.ts`              | `storyrail.stories`, `storyrail.story_transition_receipts`           | `StoryRejectionPersistence`                           |
+| `postgres-agent-tool-call-persistence.ts`              | `storyrail.agent_tool_calls`                                         | `AgentToolCallRepository`                             |
+| `postgres-newsroom-standards-persistence.ts`           | `storyrail.newsroom_standards`                                       | `NewsroomStandardsRepository`                         |
+| `postgres-archive-repository.ts`                       | `storyrail.archive`                                                  | `ArchiveRepository`                                   |
+| `postgres-site-credential-persistence.ts`              | `storyrail.site_credentials`                                         | `SiteCredentialRepository`                            |
+| `postgres-site-settings-persistence.ts`                | `storyrail.site_settings`                                            | `SiteSettingsRepository`                              |
 
 `postgres-source-extraction-decoder.ts` decodes a persisted extraction row back into the `SuccessfulSourceExtraction` / `FailedSourceExtraction` union and is shared by the inspection and inbox adapters. `postgres-assignment-decoder.ts`, `postgres-agent-run-decoder.ts`, `postgres-article-decoder.ts`, and `postgres-review-decision-decoder.ts` perform the same strict-shape decoding for their respective payloads; the AgentRun decoder must handle the discriminated `assignment_proposal` / `article_draft` / `article_revision` / `article_review` union and its succeeded/failed variants, and the review-decision decoder re-validates the payload through the domain `createReviewDecision`. The review persistence adapters are transactional: both lock and recheck the expected Story under `FOR UPDATE` before persisting the transition, and the decision adapter verifies the current Article Revision matches and that no decision exists for that revision before inserting. The Story rejection persistence adapter (`postgres-story-rejection-persistence.ts`) follows the same transactional pattern: it pre-validates that the expected Story is in one of the rejectable states (`intake`, `assigned`, `in_progress`, `in_review`, `changes_requested`), the next state is `rejected`, and the receipt's actor is an `operator`, then `BEGIN`s, selects the Story `FOR UPDATE`, deep-compares the decoded row against the expected Story (`isDeepStrictEqual`), `UPDATE`s the Story, inserts the transition receipt, and verifies the durable result is byte-for-byte equal to the command before `COMMIT`. A changed Story returns `STORY_REJECTION_CONFLICT`; a unique/foreign-key violation (`23505`/`23503`) is also treated as a conflict. It reuses the existing `stories` and `story_transition_receipts` tables and the shared `decodePostgresTransitionReceipt` — no new migration is required. The Writer revision persistence adapter is similarly transactional: it locks and deep-compares the expected Story and current Article Revision under `FOR UPDATE`, takes a `FOR SHARE` lock on the matching ReviewDecision and its Director `AgentRun`, verifies they are byte-for-byte consistent with the run's input snapshot, then inserts the Writer revision `AgentRun`, the next `article_revisions` row, the updated Story, and the transition receipt in one transaction, returning `WRITER_REVISION_CONFLICT` if any expected row changed or a unique/foreign-key violation occurs.
 

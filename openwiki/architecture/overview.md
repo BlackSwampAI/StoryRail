@@ -9,6 +9,8 @@ tags: [architecture, overview, hexagonal]
 
 StoryRail is an open-source, agent-first editorial control plane. It is deliberately **not** a page-building CMS. It manages editorial state and is designed to publish through replaceable adapters in the future; Postgres is intended to be authoritative for editorial state, and agent memory must never become the database.
 
+Each newsroom operates within a site (tenant boundary) identified by `STORYRAIL_SITE_ID`. Stories, Sources, standards, and other editorial entities are scoped to their site, so a second newsroom with a different site ID sees an independent set of data.
+
 ## Core editorial model
 
 Three terms are kept strictly distinct (see `docs/product/terminology.md` and `AGENTS.md`):

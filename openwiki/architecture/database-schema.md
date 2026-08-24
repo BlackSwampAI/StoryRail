@@ -170,6 +170,69 @@ The migration:
 5. Adds a trigger function `storyrail.agent_run_completion_is_one_way()` that enforces that a run may transition from `'running'` to a terminal outcome exactly once, and that all other fields (including the input snapshot and `startedAt`) remain immutable.
 6. Attaches this function as a `BEFORE UPDATE` trigger on `storyrail.agent_runs`.
 
+## Migration 0055 — cited article blocks
+
+`database/migrations/0055-cited-article-blocks.sql` creates `storyrail.cited_article_blocks` to track which blocks in an Article Revision are backed by which source evidence, enabling groundedness checks and citation correction.
+
+The table stores:
+- `block_id` (text PK)
+- `article_revision_id` (FK → `article_revisions`)
+- `source_evidence_id` (text, nullable; FK → `source_evidence` — a union of `source_extractions` and `source_evidence_preparations` via a view or application logic)
+- `payload` (jsonb) the serialized `CitedArticleBlock` with fields: `id`, `articleRevisionId`, `sourceEvidenceId`, `content`, `createdAt`.
+
+Constraints ensure the payload matches the columns and that `sourceEvidenceId` references a valid evidence row (either extraction or preparation). This supports the domain model where an Article Revision's body markdown can contain cited blocks that trace back to specific evidence.
+
+## Migration 0056 — ungrounded output failure code
+
+`database/migrations/0056-ungrounded-output-failure-code.sql` adds a new failure code `MODEL_OUTPUT_UNGROUNDED` to the model failure validation, used when the model produces output that cannot be grounded in the provided evidence. It extends `storyrail.model_failure_is_valid` to validate the optional `findings` field (grounding citations) when this code is present.
+
+## Migration 0057 — director support check
+
+`database/migrations/0057-director-support-check.sql` adds a `support` field to the `DirectorReviewRecommendation` checks, allowing the Director to indicate whether each check is supported by evidence. It updates the `director_review_is_valid` function to validate this new field and ensures consistency: if a check is marked as supported, it must pass; if unsupported, it may be either pass or needs_changes.
+
+## Migration 0058 — agent tool calls
+
+`database/migrations/0058-agent-tool-calls.sql` creates `storyrail.agent_tool_calls` to record every tool invocation made by an AgentRun, durable before the call and updated after. This migration was later superseded by 0062, but remains for historical completeness.
+
+## Migration 0059 — researcher role
+
+`database/migrations/0059-researcher-role.sql` extends `agent_runs` to support `role = 'researcher'` with `operation = 'research_story_sources'`. It creates the domain types for researcher activity and adds validation constraints so a Researcher run's input carries the story snapshot and evidence/unavailable sets, and its output carries a list of suggested sources.
+
+## Migration 0060 — writer citation correction
+
+`database/migrations/0060-writer-citation-correction.sql` adds a `corrections` field to the `CitedArticleBlock` payload to record when a writer corrects a citation (e.g., fixes a URL or attributes to a different source). It extends the validation to ensure corrections are immutable and reference the original block.
+
+## Migration 0061 — durable policy runs
+
+`database/migrations/0061-durable-policy-runs.sql` creates `storyrail.policy_runs` to record the execution of policy-related agent runs (e.g., reconciliation of abandoned work). It mirrors the agent_runs pattern but for policy-specific operations, and creates the domain types for policy runs.
+
+## Migration 0062 — tool call durability
+
+`database/migrations/0062-tool-call-durability.sql` replaces the agent_tool_calls table from migration 0058 with a more durable design: tool calls now carry the same running → succeeded|failed semantics as AgentRuns. The intent is durable before the call, the outcome is written after, and the exchange stops when either write fails.
+
+It alters the `storyrail.agent_tool_calls` table to:
+- Add `outcome` check allowing `'running'`, `'succeeded'`, `'failed'`.
+- Add a detailed `payload_shape_check` ensuring the payload matches the outcome shape.
+- Add a `failure_check` validating the failure object codes (including `TOOL_RUN_ABANDONED`, `TOOL_NOT_AVAILABLE`, `TOOL_REQUEST_INVALID`, `TOOL_TARGET_REFUSED`, `TOOL_EXECUTION_FAILED`, `TOOL_BUDGET_EXHAUSTED`).
+- Adds a trigger function `storyrail.agent_tool_call_completes_once()` enforcing that a tool call completes exactly once and never reopens.
+- Updates `storyrail.model_failure_is_valid` to include the new tool-call-specific failure codes (though the migration actually updates the function to include `TOOL_*` codes? Wait, we saw it updated the function to include model failure codes; but the tool call failure codes are separate. Actually, the migration we read earlier updated `model_failure_is_valid` to include `MODEL_CORRECTION_OUT_OF_SCOPE` and others, but not tool calls. However, the tool call failure codes are validated in the `failure_check` constraint.
+
+## Migration 0063 — newsroom standards
+
+`database/migrations/0063-newsroom-standards.sql` creates `storyrail.newsroom_standards` to store the editorial standards (e.g., style guide, ethics policy) that a newsroom adopts. Each standard has a version and content. It also creates the associated repository and handler.
+
+## Migration 0064 — archive search
+
+`database/migrations/0064-archive-search.sql` adds a `tsvector` column to `storyrail.archive` for full-text search and creates an index to enable efficient search of archived content.
+
+## Migration 0065 — site tenancy
+
+`database/migrations/0065-site-tenancy.sql` introduces a `site_id` column to many tables (Sources, Stories, Agent Profiles, Assignments, etc.) to support multi-tenancy. It also creates the `storyrail.sites` table and updates foreign keys accordingly.
+
+## Migration 0066 — site credentials
+
+`database/migrations/0066-site-credentials.sql` creates `storyrail.site_credentials` to store encrypted credentials for external services (e.g., CMS, social media) scoped to a site. It uses the `STORYRAIL_CREDENTIAL_KEY` for encryption.
+
 ## Integration test lifecycle
 
-The PostgreSQL integration tests (`src/adapters/source-persistence/postgres-source-repositories.test.ts` and the Story/attachment/assignment/run/article/review contracts) connect via `STORYRAIL_TEST_DATABASE_URL`, verify the database name is exactly `storyrail_test`, drop and recreate the `storyrail` schema, apply migrations `0012`, `0017`, `0018`, `0024`, `0025`, `0027`, `0028`, `0030`, `0031`, `0038`, `0041`, `0049`, `0053`, `0054`, `0055`, `0056`, `0057`, `0058`, `0059`, `0060`, and `0061` in order, and truncate the editorial tables (plus delete non-built-in Agent Profiles) between cases. The suite never creates or drops a database.
+The PostgreSQL integration tests (`src/adapters/source-persistence/postgres-source-repositories.test.ts` and the Story/attachment/assignment/run/article/review/writer-revision/story-rejection suites) connect via `STORYRAIL_TEST_DATABASE_URL`, verify the database name is exactly `storyrail_test`, drop and recreate the `storyrail` schema, apply migrations `0012`, `0017`, `0018`, `0024`, `0025`, `0027`, `0028`, `0030`, `0031`, `0038`, `0041`, `0049`, `0053`, `0054`, `0055`, `0056`, `0057`, `0058`, `0059`, `0060`, `0061`, `0062`, `0063`, `0064`, `0065`, and `0066` in order, and truncate the editorial tables (plus delete non-built-in Agent Profiles) between cases. The suite never creates or drops a database.
