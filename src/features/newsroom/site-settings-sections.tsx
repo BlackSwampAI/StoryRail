@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 
 import {
   SITE_MODEL_ROLES,
@@ -10,7 +10,14 @@ import {
   type SiteModelRole,
 } from "@/domain/editorial";
 
+import {
+  MODEL_CATALOG_PROVIDERS,
+  type CatalogModel,
+  type ModelCatalogProviderId,
+} from "@/application/model-catalog";
+
 import type { ScaffoldStoredConnector } from "./account-scaffold";
+import { MODEL_CATALOG_UNAVAILABLE_MESSAGE, type ModelCatalogClient } from "./model-catalog-client";
 import type { SiteSettingsClient, SiteSettingsClientResult } from "./site-settings-client";
 import styles from "./newsroom-shell.module.css";
 
@@ -214,20 +221,55 @@ export function StoredConnectorRow({
   );
 }
 
+type CatalogState =
+  | { readonly kind: "loading" }
+  | { readonly kind: "loaded"; readonly models: readonly CatalogModel[] }
+  | { readonly kind: "unavailable"; readonly message: string };
+
+/** Enough of a number to judge whether a review schema fits, without spelling out every digit. */
+function describeContext(contextLength: number): string {
+  if (contextLength >= 1_000_000)
+    return `${String(Math.round(contextLength / 100_000) / 10)}M context`;
+  return contextLength >= 1000
+    ? `${String(Math.round(contextLength / 1000))}k context`
+    : `${String(contextLength)} context`;
+}
+
 export function AgentModelsForm({
   models,
   loading,
   requests,
+  catalog,
   onModelsSaved,
 }: {
   readonly models: SiteModelIds | null;
   readonly loading: boolean;
   readonly requests: SiteSettingsClient;
+  readonly catalog: ModelCatalogClient;
   readonly onModelsSaved: (models: SiteModelIds) => void;
 }) {
   const [draft, setDraft] = useState<Partial<Record<SiteModelRole, string>>>({});
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [provider, setProvider] = useState<ModelCatalogProviderId>(MODEL_CATALOG_PROVIDERS[0].id);
+  const [catalogState, setCatalogState] = useState<CatalogState>({ kind: "loading" });
+  const [manual, setManual] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    void catalog.readCatalog().then(
+      (result) => {
+        if (live) setCatalogState(result);
+      },
+      () => {
+        if (live)
+          setCatalogState({ kind: "unavailable", message: MODEL_CATALOG_UNAVAILABLE_MESSAGE });
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [catalog]);
 
   if (loading || models === null) {
     return (
@@ -238,6 +280,9 @@ export function AgentModelsForm({
   }
 
   const valueFor = (role: SiteModelRole) => draft[role] ?? models[role];
+  const available = catalogState.kind === "loaded" ? catalogState.models : [];
+  const edit = (role: SiteModelRole, value: string) =>
+    setDraft((current) => ({ ...current, [role]: value }));
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -265,24 +310,98 @@ export function AgentModelsForm({
     }
   }
 
+  function roleField(role: SiteModelRole) {
+    const value = valueFor(role);
+    const known = available.some((model) => model.id === value);
+
+    if (catalogState.kind === "loaded" && !manual) {
+      return (
+        <select
+          id={`model-${role}`}
+          name={role}
+          value={value}
+          onChange={(event) => edit(role, event.target.value)}
+          disabled={pending}
+        >
+          {/*
+            A slug the catalog no longer lists stays selected and says so. Providers retire
+            models, and silently moving a role onto some other model because a third party
+            rotated its catalog would replace a working configuration without telling anyone.
+          */}
+          {known ? null : <option value={value}>{`${value} · not in this catalog`}</option>}
+          {available.map((model) => (
+            <option key={model.id} value={model.id}>
+              {`${model.name} · ${describeContext(model.contextLength)}`}
+            </option>
+          ))}
+        </select>
+      );
+    }
+
+    if (catalogState.kind === "loading") {
+      return (
+        <select id={`model-${role}`} name={role} value={value} disabled>
+          <option value={value}>{value}</option>
+        </select>
+      );
+    }
+
+    return (
+      <input
+        id={`model-${role}`}
+        name={role}
+        value={value}
+        onChange={(event) => edit(role, event.target.value)}
+        disabled={pending || !manual}
+      />
+    );
+  }
+
   return (
     <form
       className={styles.agentModelsForm}
       aria-busy={pending}
       onSubmit={(event) => void submit(event)}
     >
+      <div className={styles.modelProviderChoice}>
+        <label htmlFor="model-provider">Model provider</label>
+        <select
+          id="model-provider"
+          name="provider"
+          value={provider}
+          onChange={(event) => setProvider(event.target.value as ModelCatalogProviderId)}
+          disabled={pending}
+        >
+          {MODEL_CATALOG_PROVIDERS.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {catalogState.kind === "unavailable" ? (
+        <div className={styles.modelCatalogNotice}>
+          <p role="status">{catalogState.message}</p>
+          {manual ? null : (
+            <button type="button" className={styles.tertiaryAction} onClick={() => setManual(true)}>
+              Enter a model slug by hand
+            </button>
+          )}
+        </div>
+      ) : null}
+
       {SITE_MODEL_ROLES.map((role) => (
         <div key={role}>
           <label htmlFor={`model-${role}`}>{MODEL_ROLE_LABELS[role]}</label>
-          <input
-            id={`model-${role}`}
-            name={role}
-            value={valueFor(role)}
-            onChange={(event) =>
-              setDraft((current) => ({ ...current, [role]: event.target.value }))
-            }
-            disabled={pending}
-          />
+          {roleField(role)}
+          {catalogState.kind === "loaded" &&
+          !manual &&
+          !available.some((model) => model.id === valueFor(role)) ? (
+            <small className={styles.unrecognisedModel}>
+              {`${valueFor(role)} is not in the catalog. It is kept until you choose another.`}
+            </small>
+          ) : null}
         </div>
       ))}
       <button type="submit" className={styles.primaryAction} disabled={pending}>

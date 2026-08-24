@@ -3684,6 +3684,31 @@
   text-transform: uppercase;
 }
 
+.agentModelsForm select {
+  border: 1px solid var(--tone-33);
+  border-radius: 0.55rem;
+  background: var(--tone-05);
+  padding: 0.55rem 0.7rem;
+  color: var(--tone-140);
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.modelProviderChoice {
+  grid-column: 1 / -1;
+}
+
+.modelCatalogNotice {
+  grid-column: 1 / -1;
+}
+
+.unrecognisedModel {
+  color: var(--tone-104);
+  font-size: 0.72rem;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
 .agentModelsForm input {
   border: 1px solid var(--tone-33);
   border-radius: 0.55rem;

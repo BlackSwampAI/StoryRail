@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { OPENROUTER_API_KEY_SLOT, type SiteModelIds } from "@/domain/editorial";
 
 import { SettingsWorkspace } from "./account-workspace";
+import type { ModelCatalogClient } from "./model-catalog-client";
 import type { SiteSettingsClient, SiteSettingsClientResult } from "./site-settings-client";
 
 const MODELS: SiteModelIds = {
@@ -15,6 +16,21 @@ const MODELS: SiteModelIds = {
 };
 
 const OPENROUTER_KEY = "sk-or-v1-0000000000000000abee";
+
+const CATALOG: ModelCatalogClient = {
+  readCatalog: () =>
+    Promise.resolve({
+      kind: "loaded",
+      models: [
+        {
+          id: "anthropic/claude-sonnet-4",
+          name: "Anthropic: Claude Sonnet 4",
+          contextLength: 200000,
+        },
+        { id: "google/gemini-3.7-flash", name: "Google: Gemini 3.7 Flash", contextLength: 1000000 },
+      ],
+    }),
+};
 
 function completed<Value>(value: Value): SiteSettingsClientResult<Value> {
   return { kind: "completed", value };
@@ -31,8 +47,15 @@ function client(overrides: Partial<SiteSettingsClient> = {}): SiteSettingsClient
   };
 }
 
-function renderSettings(requests: SiteSettingsClient) {
-  render(<SettingsWorkspace theme="newsroom" onThemeChange={vi.fn()} requests={requests} />);
+function renderSettings(requests: SiteSettingsClient, catalog: ModelCatalogClient = CATALOG) {
+  render(
+    <SettingsWorkspace
+      theme="newsroom"
+      onThemeChange={vi.fn()}
+      requests={requests}
+      catalog={catalog}
+    />,
+  );
 }
 
 /** Both stored connectors offer the same controls, so every assertion names the row it means. */
@@ -119,9 +142,11 @@ describe("settings workspace", () => {
     const saveModels = vi.fn(client().saveModels);
     renderSettings(client({ saveModels }));
 
-    fireEvent.change(await screen.findByLabelText("Director"), {
-      target: { value: "anthropic/claude-sonnet-4" },
-    });
+    const director = await screen.findByLabelText("Director");
+    await waitFor(() =>
+      expect(within(director as HTMLSelectElement).getAllByRole("option")).toHaveLength(2),
+    );
+    fireEvent.change(director, { target: { value: "anthropic/claude-sonnet-4" } });
     fireEvent.click(screen.getByRole("button", { name: "Save agent models" }));
 
     await waitFor(() =>
@@ -149,7 +174,12 @@ describe("settings workspace", () => {
         }),
     });
     const { unmount } = render(
-      <SettingsWorkspace theme="newsroom" onThemeChange={vi.fn()} requests={unreadable} />,
+      <SettingsWorkspace
+        theme="newsroom"
+        onThemeChange={vi.fn()}
+        requests={unreadable}
+        catalog={CATALOG}
+      />,
     );
     fireEvent.click(await screen.findByRole("button", { name: "Save agent models" }));
     const unreadableMessage = (await screen.findByText(/cannot be read/)).textContent;
@@ -167,7 +197,14 @@ describe("settings workspace", () => {
           },
         }),
     });
-    render(<SettingsWorkspace theme="newsroom" onThemeChange={vi.fn()} requests={missing} />);
+    render(
+      <SettingsWorkspace
+        theme="newsroom"
+        onThemeChange={vi.fn()}
+        requests={missing}
+        catalog={CATALOG}
+      />,
+    );
     fireEvent.click(await screen.findByRole("button", { name: "Save agent models" }));
     const missingMessage = (await screen.findByText(/No key is stored/)).textContent;
 
@@ -198,6 +235,99 @@ describe("settings workspace", () => {
     expect(await row.findByText(/STORYRAIL_CREDENTIAL_KEY is required/)).toBeVisible();
     expect(row.getByText("No key stored")).toBeVisible();
     expect(document.body.textContent).not.toContain(OPENROUTER_KEY);
+  });
+
+  it("offers every compatible model as a choice rather than a slug to type", async () => {
+    renderSettings(client());
+
+    const director = await screen.findByLabelText("Director");
+    await waitFor(() =>
+      expect(
+        within(director).getByRole("option", { name: /Anthropic: Claude Sonnet 4/ }),
+      ).toBeVisible(),
+    );
+    expect(director.tagName).toBe("SELECT");
+    expect(
+      within(director).getByRole("option", { name: /Google: Gemini 3.7 Flash/ }),
+    ).toHaveTextContent("1M context");
+    expect(screen.getByLabelText("Model provider")).toHaveValue("openrouter");
+  });
+
+  it("keeps showing a stored slug the catalog no longer lists and marks it unrecognised", async () => {
+    const saveModels = vi.fn(client().saveModels);
+    renderSettings(
+      client({
+        saveModels,
+        readSettings: () =>
+          Promise.resolve(
+            completed({
+              settings: { models: { ...MODELS, writer: "vendor/retired-model" } },
+              credentials: [],
+            }),
+          ),
+      }),
+    );
+
+    const writer = await screen.findByLabelText("Writer");
+    await waitFor(() => expect(writer).toHaveValue("vendor/retired-model"));
+    expect(screen.getByText(/vendor\/retired-model is not in the catalog/)).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save agent models" }));
+    await waitFor(() =>
+      expect(saveModels).toHaveBeenCalledWith({ ...MODELS, writer: "vendor/retired-model" }),
+    );
+  });
+
+  it("says the catalog is unavailable, keeps the current models, and still saves", async () => {
+    const saveModels = vi.fn(client().saveModels);
+    renderSettings(client({ saveModels }), {
+      readCatalog: () =>
+        Promise.resolve({ kind: "unavailable", message: "The model catalog is unavailable." }),
+    });
+
+    expect(await screen.findByText("The model catalog is unavailable.")).toBeVisible();
+    expect(await screen.findByLabelText("Director")).toHaveValue(MODELS.director);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save agent models" }));
+    await waitFor(() => expect(saveModels).toHaveBeenCalledWith(MODELS));
+  });
+
+  it("offers typing a slug by hand only once the catalog cannot be read", async () => {
+    const { unmount } = render(
+      <SettingsWorkspace
+        theme="newsroom"
+        onThemeChange={vi.fn()}
+        requests={client()}
+        catalog={CATALOG}
+      />,
+    );
+    expect(await screen.findByLabelText("Director")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Enter a model slug by hand" })).toBeNull();
+    unmount();
+
+    const saveModels = vi.fn(client().saveModels);
+    render(
+      <SettingsWorkspace
+        theme="newsroom"
+        onThemeChange={vi.fn()}
+        requests={client({ saveModels })}
+        catalog={{
+          readCatalog: () =>
+            Promise.resolve({ kind: "unavailable", message: "The model catalog is unavailable." }),
+        }}
+      />,
+    );
+
+    const escape = await screen.findByRole("button", { name: "Enter a model slug by hand" });
+    fireEvent.click(escape);
+    fireEvent.change(screen.getByLabelText("Director"), {
+      target: { value: "vendor/hand-typed" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save agent models" }));
+
+    await waitFor(() =>
+      expect(saveModels).toHaveBeenCalledWith({ ...MODELS, director: "vendor/hand-typed" }),
+    );
   });
 
   it("says the stored settings could not be read rather than showing invented ones", async () => {

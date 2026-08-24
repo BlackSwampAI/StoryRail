@@ -7,6 +7,7 @@ export * from "./story-inspection";
 export * from "./story-listing";
 export * from "./story-source-persistence";
 export * from "./model";
+export * from "./model-catalog";
 export * from "./agent-profile-persistence";
 export * from "./assignment-persistence";
 export * from "./review-persistence";
