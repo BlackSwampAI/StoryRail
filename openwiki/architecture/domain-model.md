@@ -146,6 +146,19 @@ Both functions copy the actor defensively (`copyActor`) so returned objects do n
 
 Profiles are configuration, not execution: they do not invoke models or carry credentials. Migration `0027` seeds three built-in profiles (`storyrail-assignment-editor-v1`, `storyrail-general-writer-v1`, `storyrail-director-v1`) and enforces that a non-built-in profile must be a `writer` (custom profiles can only be Writers).
 
+## Newsroom standards
+
+`newsroom-standards-types.ts` and `newsroom-standards.ts` model the editorial standards that govern how work reads in a newsroom (voice, usage, publication practices). A `NewsroomStandards` record carries `id`, `revisionNumber`, `text`, `updatedBy` (must be an `OperatorActor`), and `updatedAt`.
+
+`recordNewsroomStandards` validates:
+- Identity fields: non-empty `id` and `updatedAt`, and `updatedBy` must be an operator with non-empty `operatorId` (`NEWSROOM_STANDARDS_IDENTITY_INVALID`).
+- `revisionNumber` must be an integer ≥ 1 (`NEWSROOM_STANDARDS_REVISION_INVALID`).
+- `text` must be non-empty and ≤ `MAXIMUM_STANDARDS_CHARACTERS` (8,000) (`NEWSROOM_STANDARDS_TEXT_INVALID`).
+
+Standards are append-only and timestamped: editing creates a new revision rather than replacing the existing text. The standards a run worked under are derived from when the run started rather than being copied onto every run, because both records already fix themselves in time. Standards govern how work reads, never what may be claimed; they are placed after each role's own rules in system prompts and labelled as what they are.
+
+Migration `0063` creates the `storyrail.newsroom_standards` table and seeds an initial empty standards document.
+
 ## Assignments
 
 `assignment-types.ts` and `assignment.ts` model an immutable, operator-created brief that selects one Writer Profile and snapshots every attached Source identity. An `Assignment` carries `id`, `storyId`, `writerProfileId`, a readonly `sourceIds` snapshot, trimmed `angle`, `brief`, optional `constraints: string | null`, `assignedBy`, and `assignedAt`.

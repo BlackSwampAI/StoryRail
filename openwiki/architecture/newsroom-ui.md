@@ -9,6 +9,11 @@ tags: [ui, react, newsroom, nextjs]
 
 The newsroom is a single-page React client rendered by the Next.js home route. `src/app/page.tsx` renders `<NewsroomShell />`, and `src/app/layout.tsx` sets the document title/metadata. The shell is a client component (`"use client"`) in `src/features/newsroom/`.
 
+The UI includes a settings workspace (accessible via the account menu) where operators can configure:
+- API keys for external services (OpenRouter, Firecrawl) stored in a per-site encrypted credential store
+- Model identifiers for each supervised agent role (Assignment Editor, Writer, Director, Evidence Preparation, Researcher)
+- These settings are persisted per newsroom/site and enable the corresponding agent runtimes to function
+
 ## NewsroomShell
 
 `newsroom-shell.tsx` renders a `ResizableNewsroomLayout` with two panels: a **desk** and a **workspace**. The desk header shows the StoryRail identity: an "Alpha preview" eyebrow and a branded `next/image` logo (`/public/logo.png`, `alt="StoryRail"`, `preload`) framed in `deskLogoFrame`/`deskLogo`, replacing the earlier text wordmark. Below it, Source navigation is led by a primary **Add Source** action button (`.addSourceAction`, with a `+` mark) that opens the `source-intake` workspace and carries `aria-current="page"` when active; the **Inbox** remains a secondary nav button with a pending-Source count and its own `aria-current`. The desk also holds the Stories queue grouped by `StoryState` with expandable counts, a People section, and the `NewsroomStaff` roster. The workspace switches between four `WorkspaceMode`s: `story`, `source-inbox`, `source-intake`, and `agents`.
@@ -68,7 +73,9 @@ When the initial extraction records a failure, the workspace offers a primary **
 
 ### Agent Profiles workspace
 
-`agent-profiles-workspace.tsx` lists all profiles (built-in and custom) and offers a form to create a custom Writer Profile with an optional `{ provider, model }` OpenRouter model selection. `agent-profile-client.ts` (`AgentProfileClient`) wraps `GET/POST /api/agent-profiles` with strict shape validation of every returned `AgentProfile`. A Writer Profile whose `model` is `null` is labeled "Newsroom default at execution", meaning the Writer runtime's default model will be resolved at run time. The workspace accepts an optional `onProfileCreated?: (profile: AgentProfile) => void` callback, invoked with the persisted profile after a successful creation; `NewsroomShell` wires this to `upsertStaffProfile` so the Staff roster shows the new Writer immediately and without duplicates.
+`agent-profiles-workspace.tsx` lists all profiles (built-in and custom) and offers a form to create a custom Writer Profile with an optional `{ provider, model }` OpenRouter model selection. The profile grid now ends with a tile linking to the Writer creation form (below the grid) for discoverability without scripting. `agent-profile-client.ts` (`AgentProfileClient`) wraps `GET/POST /api/agent-profiles` with strict shape validation of every returned `AgentProfile`. A Writer Profile whose `model` is `null` is labeled "Newsroom default at execution", meaning the Writer runtime's default model will be resolved at run time. The workspace accepts an optional `onProfileCreated?: (profile: AgentProfile) => void` callback, invoked with the persisted profile after a successful creation; `NewsroomShell` wires this to `upsertStaffProfile` so the Staff roster shows the new Writer immediately and without duplicates.
+
+A CSS issue that caused the account card to restyle every Agent Profile has been fixed by renaming the account card's rule to `accountProfileCard`, giving each screen back its intended styles.
 
 ## SafeMarkdown
 
