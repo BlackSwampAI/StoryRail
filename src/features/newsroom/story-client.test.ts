@@ -641,6 +641,122 @@ describe("story-client", () => {
     });
   });
 
+  it("reads back a correction that went out of scope, findings and all", async () => {
+    // The domain and the database both allow findings on either grounding refusal. This validator
+    // named only one of them, so a Story whose Writer went out of scope could not be inspected at
+    // all: the run was refused here and the whole inspection reported unavailable. Observed live —
+    // the Story became unopenable after three such runs.
+    const findings = [
+      {
+        blockIndex: 0,
+        citationIndex: 0,
+        code: "CITATION_QUOTE_UNSUPPORTED",
+        quote: "a passage the evidence does not carry",
+        evidenceId: "preparation-31",
+      },
+    ];
+    const run = {
+      id: "writer-run-out-of-scope",
+      storyId: STORY.id,
+      profileId: "writer-31",
+      role: "writer",
+      operation: "article_draft",
+      model: { provider: "openrouter", model: "writer-model" },
+      prompt: { key: "storyrail_writer_draft", version: "1" },
+      requestedBy: { type: "operator", operatorId: "operator" },
+      startedAt: "started",
+      completedAt: "completed",
+      input: {
+        story: { id: STORY.id, title: STORY.title, state: "assigned", revisionCycle: 0 },
+        assignment: {
+          id: "assignment-31",
+          storyId: STORY.id,
+          writerProfileId: "writer-31",
+          sourceIds: ["source-31"],
+          angle: "Angle",
+          brief: "Brief",
+          constraints: null,
+        },
+        evidence: [
+          {
+            sourceId: "source-31",
+            relevance: "Primary",
+            evidenceKind: "prepared",
+            evidenceId: "preparation-31",
+          },
+        ],
+        unavailableSourceIds: [],
+      },
+      outcome: "failed",
+      failure: { code: "MODEL_CORRECTION_OUT_OF_SCOPE", retryable: true, findings },
+    };
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(200, { ok: true, inspection: { ...INSPECTION, agentRuns: [run] } }),
+    );
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).inspectStory(STORY.id),
+    ).resolves.toEqual({
+      kind: "completed",
+      value: { ...INSPECTION, agentRuns: [run] },
+    });
+  });
+
+  it("still refuses findings attached to a failure that is not about grounding", async () => {
+    const run = {
+      id: "writer-run-mislabelled",
+      storyId: STORY.id,
+      profileId: "writer-31",
+      role: "writer",
+      operation: "article_draft",
+      model: { provider: "openrouter", model: "writer-model" },
+      prompt: { key: "storyrail_writer_draft", version: "1" },
+      requestedBy: { type: "operator", operatorId: "operator" },
+      startedAt: "started",
+      completedAt: "completed",
+      input: {
+        story: { id: STORY.id, title: STORY.title, state: "assigned", revisionCycle: 0 },
+        assignment: {
+          id: "assignment-31",
+          storyId: STORY.id,
+          writerProfileId: "writer-31",
+          sourceIds: ["source-31"],
+          angle: "Angle",
+          brief: "Brief",
+          constraints: null,
+        },
+        evidence: [
+          {
+            sourceId: "source-31",
+            relevance: "Primary",
+            evidenceKind: "prepared",
+            evidenceId: "preparation-31",
+          },
+        ],
+        unavailableSourceIds: [],
+      },
+      outcome: "failed",
+      failure: {
+        code: "MODEL_REQUEST_TIMED_OUT",
+        retryable: true,
+        findings: [
+          {
+            blockIndex: 0,
+            citationIndex: 0,
+            code: "CITATION_QUOTE_UNSUPPORTED",
+            quote: "a passage the evidence does not carry",
+            evidenceId: "preparation-31",
+          },
+        ],
+      },
+    };
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(200, { ok: true, inspection: { ...INSPECTION, agentRuns: [run] } }),
+    );
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).inspectStory(STORY.id),
+    ).resolves.toMatchObject({ kind: "unavailable" });
+  });
+
   it("posts exactly {} for Writer execution and decodes its durable failed run", async () => {
     const run = {
       id: "writer-run-31",

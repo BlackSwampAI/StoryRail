@@ -47,6 +47,58 @@ describe("verifying that an Article Revision is grounded", () => {
     ).toEqual({ ok: true });
   });
 
+  it("looks past the Markdown a page was recorded in", () => {
+    // Evidence arrives as Markdown, so a sentence in the record carries emphasis and link syntax
+    // that the same sentence on the page does not. A Writer quoting what a reader would see was
+    // being refused for reproducing the source rather than the file. Taken verbatim from the
+    // first live run of a real press release, which failed three times in a row on exactly this.
+    const page: readonly GroundingEvidence[] = [
+      {
+        sourceId: SOURCE,
+        evidenceId: EVIDENCE,
+        content:
+          "- Mac Studio with M5 Max starts at **$2,499** (U.S.) and **$2,299** (U.S.) for [education](https://www.apple.com/us-edu/store).",
+      },
+    ];
+    expect(
+      verifyArticleGrounding(
+        claim("Mac Studio with M5 Max starts at $2,499 (U.S.) and $2,299 (U.S.) for education."),
+        page,
+      ),
+    ).toEqual({ ok: true });
+  });
+
+  it("still refuses a rewording once the Markdown is set aside", () => {
+    // The normalisation removes ways of writing the same words; it never makes two different sets
+    // of words equal, because both sides are reduced identically.
+    const page: readonly GroundingEvidence[] = [
+      {
+        sourceId: SOURCE,
+        evidenceId: EVIDENCE,
+        content:
+          "Mac Studio with M5 Max starts at **$2,499** for [education](https://example.test).",
+      },
+    ];
+    expect(
+      verifyArticleGrounding(claim("Mac Studio with M5 Max costs $2,499 for students."), page),
+    ).toMatchObject({ ok: false, findings: [{ code: "CITATION_QUOTE_UNSUPPORTED" }] });
+  });
+
+  it("gives an image no words to be quoted from", () => {
+    const page: readonly GroundingEvidence[] = [
+      {
+        sourceId: SOURCE,
+        evidenceId: EVIDENCE,
+        content: "![A photograph of the desktop](https://example.test/hero.png) The desk is small.",
+      },
+    ];
+    expect(verifyArticleGrounding(claim("The desk is small."), page)).toEqual({ ok: true });
+    expect(verifyArticleGrounding(claim("A photograph of the desktop"), page)).toMatchObject({
+      ok: false,
+      findings: [{ code: "CITATION_QUOTE_UNSUPPORTED" }],
+    });
+  });
+
   it("refuses a quote that does not appear in the evidence", () => {
     // The sentence is plausible, fluent, and absent from the source. This is the case the
     // whole batch exists for.

@@ -37,21 +37,38 @@ export type VerifyArticleGroundingResult =
  * writing a line break as the two characters `\n`, or a quotation mark as `\"`. Normalising those away keeps the check about whether the words
  * are present, not about how they were rendered.
  *
+ * Inline Markdown is the same kind of difference. Evidence arrives as Markdown, so a sentence in
+ * the record may read `starts at **$2,499** for [education](https://…)` while the same sentence
+ * on the page — and in any honest quotation of it — reads `starts at $2,499 for education`. The
+ * asterisks and the address are how the passage was rendered, not words it contains, and a
+ * Writer that reproduced them would be quoting the file rather than the source. Emphasis, code
+ * ticks, link syntax and images are therefore removed; a link keeps its text, an image leaves
+ * nothing, because an image carries no words a passage can quote.
+ *
  * The same transformation is applied to the evidence, so a source that genuinely contains an
- * escape sequence still matches a quote that reproduces it.
+ * escape sequence still matches a quote that reproduces it — and so this cannot let a reworded
+ * passage through. Both sides are reduced identically, which removes ways of writing the same
+ * words and never makes two different sets of words equal.
  *
  * Nothing else is normalised. Case, spelling, word order, and punctuation beyond this list stay
  * significant, so a passage that was reworded rather than quoted still fails.
  */
 function comparable(value: string): string {
-  return value
-    .replace(/[‘’‛′]/g, "'")
-    .replace(/[“”‟″]/g, '"')
-    .replace(/[‐-―−]/g, "-")
-    .replace(/\\[nrt]/g, " ")
-    .replace(/\\(["'\\])/g, "$1")
-    .replace(/\s+/g, " ")
-    .trim();
+  return (
+    value
+      // An image carries no words a passage can quote, so it leaves nothing behind.
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+      // A link reads as its text. The address is markup around the sentence, not part of it.
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/(\*\*|__|\*|_|`)/g, "")
+      .replace(/[‘’‛′]/g, "'")
+      .replace(/[“”‟″]/g, '"')
+      .replace(/[‐-―−]/g, "-")
+      .replace(/\\[nrt]/g, " ")
+      .replace(/\\(["'\\])/g, "$1")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
 }
 
 /** A Markdown list, block quote, or fenced block continues the paragraph that introduces it. */

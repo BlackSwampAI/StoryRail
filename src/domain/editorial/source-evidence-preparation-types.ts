@@ -26,6 +26,22 @@ export const MODEL_FAILURE_CODES = [
 ] as const;
 
 export type ModelFailureCode = (typeof MODEL_FAILURE_CODES)[number];
+
+/**
+ * The failures that refuse work for the evidence behind it, and so are the only ones a set of
+ * grounding findings may be attached to. Both are grounding refusals: one is a draft whose
+ * citations did not hold, the other a draft whose citations did not hold and whose single
+ * correction turn rewrote work nobody had objected to.
+ *
+ * It lives beside the codes themselves because it is read in three places — the domain that
+ * records a run, the database that stores it, and the browser that reads it back. Written out
+ * separately in each, the three drifted: the domain and the database were widened together and
+ * the browser was not, so a run the system had recorded correctly could not be loaded.
+ */
+export const GROUNDING_REFUSAL_CODES = [
+  "MODEL_OUTPUT_UNGROUNDED",
+  "MODEL_CORRECTION_OUT_OF_SCOPE",
+] as const satisfies readonly ModelFailureCode[];
 export const PREPARATION_FAILURE_CODES = MODEL_FAILURE_CODES;
 export type PreparationFailureCode = ModelFailureCode;
 
