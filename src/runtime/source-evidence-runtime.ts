@@ -20,7 +20,6 @@ import {
   type SiteId,
 } from "@/domain/editorial";
 
-import { resolveSiteId } from "./site-configuration";
 import { createSiteStore } from "./site-store";
 import {
   loadSourceEvidenceRuntimeConfiguration,
@@ -44,6 +43,7 @@ export interface CreateSourceEvidenceRuntimeOptions {
 }
 
 export interface CreateSourceEvidenceRuntimeFromEnvironmentOptions {
+  readonly siteId: SiteId;
   readonly environment?: NodeJS.ProcessEnv;
   readonly fetch?: typeof globalThis.fetch;
   readonly now?: () => string;
@@ -101,13 +101,13 @@ export function createSourceEvidenceRuntime(
 }
 
 export function createSourceEvidenceRuntimeFromEnvironment(
-  options: CreateSourceEvidenceRuntimeFromEnvironmentOptions = {},
+  options: CreateSourceEvidenceRuntimeFromEnvironmentOptions,
 ): SourceEvidenceRuntime {
   const configuration = loadSourceEvidenceRuntimeConfiguration(options.environment);
 
   return createSourceEvidenceRuntime({
     configuration,
-    siteId: resolveSiteId(options.environment ?? process.env),
+    siteId: options.siteId,
     fetch: options.fetch,
     now: options.now,
     createUuid: options.createUuid,

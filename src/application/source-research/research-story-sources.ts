@@ -14,7 +14,6 @@ import type { StoryInspectionRepository } from "@/application/story-inspection";
 import type { SourceExtractor } from "@/adapters/source-extraction";
 import {
   withNewsroomStandards,
-  agentProfileId,
   canonicalizeSourceUrl,
   recordAgentRun,
   recordSourceExtraction,
@@ -36,7 +35,6 @@ import {
 
 import type { ResearchPersistence } from "./research-persistence";
 
-export const RESEARCHER_PROFILE_ID = agentProfileId("storyrail-researcher-v1");
 export const SOURCE_RESEARCH_PROMPT = Object.freeze({
   key: "storyrail_source_research",
   version: "1",
@@ -208,7 +206,7 @@ export function createResearchStorySources(dependencies: {
         },
       };
 
-    const profile = await dependencies.profiles.findById(RESEARCHER_PROFILE_ID);
+    const profile = await dependencies.profiles.findBuiltIn("researcher");
     if (!profile || profile.role !== "researcher")
       return {
         ok: false,

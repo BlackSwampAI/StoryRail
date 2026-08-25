@@ -2,13 +2,14 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { FIRECRAWL_API_KEY_SLOT, OPENROUTER_API_KEY_SLOT } from "@/domain/editorial";
+import { FIRECRAWL_API_KEY_SLOT, OPENROUTER_API_KEY_SLOT, siteId } from "@/domain/editorial";
 
 import {
   SITE_SETTINGS_REQUEST_UNAVAILABLE_MESSAGE,
   createSiteSettingsClient,
-  siteSettingsClient,
 } from "./site-settings-client";
+
+const SITE_ID = siteId("site-second");
 
 const response = (status: number, value: unknown) =>
   new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
@@ -40,13 +41,13 @@ describe("site-settings-client", () => {
       .fn<typeof globalThis.fetch>()
       .mockResolvedValue(response(200, SETTINGS_RESPONSE));
 
-    const result = await createSiteSettingsClient({ fetch }).readSettings();
+    const result = await createSiteSettingsClient({ siteId: SITE_ID, fetch }).readSettings();
 
     expect(result).toEqual({
       kind: "completed",
       value: { settings: { models: MODELS }, credentials: SETTINGS_RESPONSE.credentials },
     });
-    expect(fetch).toHaveBeenCalledWith("/api/site-settings", {
+    expect(fetch).toHaveBeenCalledWith("/api/sites/site-second/site-settings", {
       method: "GET",
       headers: { Accept: "application/json" },
     });
@@ -62,7 +63,7 @@ describe("site-settings-client", () => {
         response(200, { ok: true, settings: { models: incomplete }, credentials: [] }),
       );
 
-    expect(await createSiteSettingsClient({ fetch }).readSettings()).toEqual({
+    expect(await createSiteSettingsClient({ siteId: SITE_ID, fetch }).readSettings()).toEqual({
       kind: "unavailable",
       message: SITE_SETTINGS_REQUEST_UNAVAILABLE_MESSAGE,
     });
@@ -84,7 +85,7 @@ describe("site-settings-client", () => {
       }),
     );
 
-    expect(await createSiteSettingsClient({ fetch }).readSettings()).toEqual({
+    expect(await createSiteSettingsClient({ siteId: SITE_ID, fetch }).readSettings()).toEqual({
       kind: "unavailable",
       message: SITE_SETTINGS_REQUEST_UNAVAILABLE_MESSAGE,
     });
@@ -95,7 +96,7 @@ describe("site-settings-client", () => {
       .fn<typeof globalThis.fetch>()
       .mockResolvedValue(response(200, { ok: true, slot: "openrouter_api_key", hint: "abee" }));
 
-    const result = await createSiteSettingsClient({ fetch }).setCredential(
+    const result = await createSiteSettingsClient({ siteId: SITE_ID, fetch }).setCredential(
       OPENROUTER_API_KEY_SLOT,
       "sk-or-v1-secret",
     );
@@ -104,11 +105,14 @@ describe("site-settings-client", () => {
       kind: "completed",
       value: { slot: "openrouter_api_key", hint: "abee" },
     });
-    expect(fetch).toHaveBeenCalledWith("/api/site-credentials/openrouter_api_key", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ secret: "sk-or-v1-secret" }),
-    });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sites/site-second/site-credentials/openrouter_api_key",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ secret: "sk-or-v1-secret" }),
+      },
+    );
   });
 
   it("reports a rejected secret as an application failure rather than an outage", async () => {
@@ -123,7 +127,10 @@ describe("site-settings-client", () => {
     );
 
     expect(
-      await createSiteSettingsClient({ fetch }).setCredential(OPENROUTER_API_KEY_SLOT, " "),
+      await createSiteSettingsClient({ siteId: SITE_ID, fetch }).setCredential(
+        OPENROUTER_API_KEY_SLOT,
+        " ",
+      ),
     ).toEqual({
       kind: "application-failure",
       error: {
@@ -146,7 +153,7 @@ describe("site-settings-client", () => {
       }),
     );
 
-    expect(await createSiteSettingsClient({ fetch }).saveModels(MODELS)).toEqual({
+    expect(await createSiteSettingsClient({ siteId: SITE_ID, fetch }).saveModels(MODELS)).toEqual({
       kind: "credential-unavailable",
       error: {
         code: "OPENROUTER_API_KEY_REQUIRED",
@@ -170,7 +177,7 @@ describe("site-settings-client", () => {
           },
         }),
       );
-    const client = createSiteSettingsClient({ fetch });
+    const client = createSiteSettingsClient({ siteId: SITE_ID, fetch });
 
     expect(await client.removeCredential(FIRECRAWL_API_KEY_SLOT)).toEqual({
       kind: "completed",
@@ -180,16 +187,20 @@ describe("site-settings-client", () => {
       kind: "application-failure",
       error: { code: "CREDENTIAL_NOT_CONFIGURED" },
     });
-    expect(fetch).toHaveBeenNthCalledWith(1, "/api/site-credentials/firecrawl_api_key", {
-      method: "DELETE",
-      headers: { Accept: "application/json" },
-    });
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "/api/sites/site-second/site-credentials/firecrawl_api_key",
+      {
+        method: "DELETE",
+        headers: { Accept: "application/json" },
+      },
+    );
   });
 
   it("reports a network failure as unavailable rather than throwing at the screen", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>().mockRejectedValue(new Error("offline"));
 
-    expect(await createSiteSettingsClient({ fetch }).readSettings()).toEqual({
+    expect(await createSiteSettingsClient({ siteId: SITE_ID, fetch }).readSettings()).toEqual({
       kind: "unavailable",
       message: SITE_SETTINGS_REQUEST_UNAVAILABLE_MESSAGE,
     });
@@ -201,6 +212,8 @@ describe("site-settings-client", () => {
       .mockResolvedValue(response(200, SETTINGS_RESPONSE));
     vi.stubGlobal("fetch", fetch);
 
-    expect(await siteSettingsClient.readSettings()).toMatchObject({ kind: "completed" });
+    expect(
+      await createSiteSettingsClient({ siteId: SITE_ID, fetch: globalThis.fetch }).readSettings(),
+    ).toMatchObject({ kind: "completed" });
   });
 });

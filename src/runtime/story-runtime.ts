@@ -83,7 +83,6 @@ import {
 } from "@/domain/editorial";
 
 import { resolveCredentialKey } from "./credential-configuration";
-import { resolveSiteId } from "./site-configuration";
 import { createSiteStore, DEFAULT_SITE_MODEL_IDS } from "./site-store";
 
 export interface StoryRuntime {
@@ -142,6 +141,7 @@ export interface CreateStoryRuntimeOptions {
 }
 
 export interface CreateStoryRuntimeFromEnvironmentOptions {
+  readonly siteId: SiteId;
   readonly environment?: NodeJS.ProcessEnv;
   readonly now?: () => string;
   readonly createUuid?: () => string;
@@ -176,7 +176,7 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
     siteId: site,
   });
   const agentProfileRepository = createPostgresAgentProfileRepository({ pool, siteId: site });
-  const assignmentPersistence = createPostgresAssignmentPersistence({ pool });
+  const assignmentPersistence = createPostgresAssignmentPersistence({ pool, siteId: site });
   const reviewSubmissionPersistence = createPostgresReviewSubmissionPersistence({ pool });
   const reviewDecisionPersistence = createPostgresReviewDecisionPersistence({ pool });
   const storyRejectionPersistence = createPostgresStoryRejectionPersistence({ pool });
@@ -322,7 +322,7 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
 }
 
 export function createStoryRuntimeFromEnvironment(
-  options: CreateStoryRuntimeFromEnvironmentOptions = {},
+  options: CreateStoryRuntimeFromEnvironmentOptions,
 ): StoryRuntime {
   const databaseUrl = (options.environment ?? process.env).STORYRAIL_DATABASE_URL;
 
@@ -332,7 +332,7 @@ export function createStoryRuntimeFromEnvironment(
 
   return createStoryRuntime({
     databaseUrl,
-    siteId: resolveSiteId(options.environment ?? process.env),
+    siteId: options.siteId,
     credentialKey: resolveCredentialKey(options.environment ?? process.env),
     now: options.now,
     createUuid: options.createUuid,

@@ -1,15 +1,17 @@
 // @vitest-environment node
 
+import { siteId } from "@/domain/editorial";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   createSourceEvidenceUrlClient,
-  requestSourceEvidenceUrl,
   SOURCE_EVIDENCE_UNAVAILABLE_MESSAGE,
   type RequestSourceEvidenceUrl,
   type SourceEvidenceUrlClientDependencies,
   type SourceEvidenceUrlResult,
 } from "./source-evidence-url-client";
+
+const SITE_ID = siteId("site-second");
 
 const SUBMITTED_URL = "  https://Example.com/report?utm_source=desk  ";
 const SOURCE = Object.freeze({
@@ -57,20 +59,19 @@ function jsonResponse(status: number, body: unknown): Response {
 
 function controlledClient(response: Response) {
   const fetch = vi.fn<SourceEvidenceUrlClientDependencies["fetch"]>(async () => response);
-  const dependencies: SourceEvidenceUrlClientDependencies = { fetch };
+  const dependencies: SourceEvidenceUrlClientDependencies = { siteId: SITE_ID, fetch };
   const request: RequestSourceEvidenceUrl = createSourceEvidenceUrlClient(dependencies);
 
   return { fetch, request };
 }
 
 describe("source-evidence-url-client", () => {
-  it("exposes inert public dependency, request, result, factory, and production contracts", () => {
+  it("exposes inert public dependency, request, result, and factory contracts", () => {
     const fetch = vi.fn<SourceEvidenceUrlClientDependencies["fetch"]>(async () =>
       jsonResponse(201, {}),
     );
-    const dependencies: SourceEvidenceUrlClientDependencies = { fetch };
+    const dependencies: SourceEvidenceUrlClientDependencies = { siteId: SITE_ID, fetch };
     const request: RequestSourceEvidenceUrl = createSourceEvidenceUrlClient(dependencies);
-    const production: RequestSourceEvidenceUrl = requestSourceEvidenceUrl;
     const result: SourceEvidenceUrlResult = {
       kind: "unavailable",
       message: SOURCE_EVIDENCE_UNAVAILABLE_MESSAGE,
@@ -78,7 +79,6 @@ describe("source-evidence-url-client", () => {
 
     expect(createSourceEvidenceUrlClient).toBeTypeOf("function");
     expect(request).toBeTypeOf("function");
-    expect(production).toBeTypeOf("function");
     expect(result.kind).toBe("unavailable");
     expect(fetch).not.toHaveBeenCalled();
   });
@@ -93,7 +93,7 @@ describe("source-evidence-url-client", () => {
       await controlled.request(submittedUrl);
 
       expect(controlled.fetch).toHaveBeenCalledOnce();
-      expect(controlled.fetch).toHaveBeenCalledWith("/api/source-evidence/url", {
+      expect(controlled.fetch).toHaveBeenCalledWith("/api/sites/site-second/source-evidence/url", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -265,7 +265,7 @@ describe("source-evidence-url-client", () => {
     const fetch = vi.fn<SourceEvidenceUrlClientDependencies["fetch"]>(async () => {
       throw new Error(secret);
     });
-    const request = createSourceEvidenceUrlClient({ fetch });
+    const request = createSourceEvidenceUrlClient({ siteId: SITE_ID, fetch });
 
     const result = await request(SUBMITTED_URL);
 
@@ -283,7 +283,6 @@ describe("source-evidence-url-client", () => {
     expect(Object.keys(exports).sort()).toEqual([
       "SOURCE_EVIDENCE_UNAVAILABLE_MESSAGE",
       "createSourceEvidenceUrlClient",
-      "requestSourceEvidenceUrl",
     ]);
     expect(exports).not.toHaveProperty("runtime");
     expect(exports).not.toHaveProperty("configuration");

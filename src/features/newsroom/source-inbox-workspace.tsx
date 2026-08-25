@@ -15,14 +15,14 @@ import type {
 
 import styles from "./newsroom-shell.module.css";
 import { modelFailureExplanation } from "./model-failure";
+import { useNewsroomClients } from "./newsroom-clients";
 import { SafeMarkdown } from "./safe-markdown";
 import {
-  sourceInboxClient,
   SOURCE_INBOX_UNAVAILABLE_MESSAGE,
   type SourceInboxClient,
   type SourceInboxClientError,
 } from "./source-inbox-client";
-import { storyClient, type StoryClient, type StoryClientApplicationError } from "./story-client";
+import type { StoryClient, StoryClientApplicationError } from "./story-client";
 
 type InboxState =
   | { readonly kind: "loading" }
@@ -912,12 +912,15 @@ export function SourceInboxWorkspace({
   refreshVersion,
   focusedSourceId = null,
   stories,
-  inboxRequests = sourceInboxClient,
-  storyRequests = storyClient,
+  inboxRequests: suppliedInboxRequests,
+  storyRequests: suppliedStoryRequests,
   onPendingCountChange,
   onStoryKnown,
   onStoryLoaded,
 }: SourceInboxWorkspaceProps) {
+  const clients = useNewsroomClients();
+  const inboxRequests = suppliedInboxRequests ?? clients.sourceInbox;
+  const storyRequests = suppliedStoryRequests ?? clients.stories;
   const [state, setState] = useState<InboxState>({ kind: "loading" });
   const [locallyCompletedSourceIds, setLocallyCompletedSourceIds] = useState<ReadonlySet<string>>(
     () => new Set(),

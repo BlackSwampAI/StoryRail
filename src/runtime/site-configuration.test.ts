@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_SITE_ID, resolveSiteId } from "./site-configuration";
+import { DEFAULT_SITE_ID, resolveLandingSiteId } from "./site-configuration";
 
-describe("resolveSiteId", () => {
-  it("keeps an installation that never named a Site on the one it started with", () => {
-    expect(resolveSiteId({})).toBe(DEFAULT_SITE_ID);
-    expect(resolveSiteId({ STORYRAIL_SITE_ID: "   " })).toBe(DEFAULT_SITE_ID);
+describe("resolveLandingSiteId", () => {
+  it("lands an installation that never named a Site on the one it started with", () => {
+    expect(resolveLandingSiteId({})).toBe(DEFAULT_SITE_ID);
+    expect(resolveLandingSiteId({ STORYRAIL_SITE_ID: "   " })).toBe(DEFAULT_SITE_ID);
   });
 
-  it("serves the Site the operator named", () => {
-    expect(resolveSiteId({ STORYRAIL_SITE_ID: " site-second " })).toBe("site-second");
+  it("lands on the Site the operator named", () => {
+    expect(resolveLandingSiteId({ STORYRAIL_SITE_ID: " site-second " })).toBe("site-second");
   });
 });

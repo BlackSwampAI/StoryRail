@@ -2,6 +2,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
+import { siteId } from "@/domain/editorial";
 import type { StoryRuntime } from "@/runtime";
 
 import { createStoryRuntimeProvider, type StoryRuntimeFactory } from "./story-runtime-provider";
@@ -36,36 +37,44 @@ function makeRuntime(): StoryRuntime {
 }
 
 describe("createStoryRuntimeProvider", () => {
-  it("constructs lazily once and returns the same provider-local runtime", () => {
+  const first = siteId("site-first");
+  const second = siteId("site-second");
+
+  it("constructs lazily once per Site and returns the same runtime for that Site", () => {
     const runtime = makeRuntime();
     const factory = vi.fn<StoryRuntimeFactory>(() => runtime);
     const provider = createStoryRuntimeProvider(factory);
 
     expect(factory).not.toHaveBeenCalled();
-    expect(provider.get()).toBe(runtime);
-    expect(provider.get()).toBe(runtime);
+    expect(provider.get(first)).toBe(runtime);
+    expect(provider.get(first)).toBe(runtime);
     expect(factory).toHaveBeenCalledOnce();
     expect(runtime.createStory).not.toHaveBeenCalled();
-    expect(runtime.attachSourceToStory).not.toHaveBeenCalled();
-    expect(runtime.inspectStory).not.toHaveBeenCalled();
     expect(runtime.listStories).not.toHaveBeenCalled();
-    expect(runtime.listPendingSources).not.toHaveBeenCalled();
-    expect(runtime.recordSourceTriageDecision).not.toHaveBeenCalled();
-    expect(runtime.createCustomWriterProfile).not.toHaveBeenCalled();
-    expect(runtime.listAgentProfiles).not.toHaveBeenCalled();
     expect(runtime.close).not.toHaveBeenCalled();
     expect(Object.keys(provider)).toEqual(["get"]);
   });
 
-  it("keeps separate instances in separate providers", () => {
-    const first = makeRuntime();
-    const second = makeRuntime();
-    const firstProvider = createStoryRuntimeProvider(() => first);
-    const secondProvider = createStoryRuntimeProvider(() => second);
+  it("serves two Sites from two runtimes", () => {
+    const runtimes = new Map([
+      [first, makeRuntime()],
+      [second, makeRuntime()],
+    ]);
+    const provider = createStoryRuntimeProvider((site) => runtimes.get(site)!);
 
-    expect(firstProvider.get()).toBe(first);
-    expect(secondProvider.get()).toBe(second);
-    expect(firstProvider.get()).not.toBe(secondProvider.get());
+    expect(provider.get(first)).toBe(runtimes.get(first));
+    expect(provider.get(second)).toBe(runtimes.get(second));
+    expect(provider.get(first)).not.toBe(provider.get(second));
+  });
+
+  it("keeps separate instances in separate providers", () => {
+    const one = makeRuntime();
+    const other = makeRuntime();
+    const firstProvider = createStoryRuntimeProvider(() => one);
+    const secondProvider = createStoryRuntimeProvider(() => other);
+
+    expect(firstProvider.get(first)).toBe(one);
+    expect(secondProvider.get(first)).toBe(other);
   });
 
   it("does not cache a construction failure and permits retry", () => {
@@ -79,9 +88,9 @@ describe("createStoryRuntimeProvider", () => {
       .mockImplementationOnce(() => runtime);
     const provider = createStoryRuntimeProvider(factory);
 
-    expect(() => provider.get()).toThrow(failure);
-    expect(provider.get()).toBe(runtime);
-    expect(provider.get()).toBe(runtime);
+    expect(() => provider.get(first)).toThrow(failure);
+    expect(provider.get(first)).toBe(runtime);
+    expect(provider.get(first)).toBe(runtime);
     expect(factory).toHaveBeenCalledTimes(2);
   });
 });

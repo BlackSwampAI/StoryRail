@@ -30,7 +30,6 @@ import {
   type StoryId,
 } from "@/domain/editorial";
 
-import { resolveSiteId } from "./site-configuration";
 import { createSiteStore } from "./site-store";
 import {
   loadResearcherRuntimeConfiguration,
@@ -132,17 +131,16 @@ export function createResearcherRuntime(options: {
   });
 }
 
-export function createResearcherRuntimeFromEnvironment(
-  options: {
-    readonly environment?: Readonly<Partial<NodeJS.ProcessEnv>>;
-    readonly now?: () => string;
-    readonly createUuid?: () => string;
-    readonly createPool?: (configuration: PoolConfig) => Pool;
-  } = {},
-): ResearcherRuntime {
+export function createResearcherRuntimeFromEnvironment(options: {
+  readonly siteId: SiteId;
+  readonly environment?: Readonly<Partial<NodeJS.ProcessEnv>>;
+  readonly now?: () => string;
+  readonly createUuid?: () => string;
+  readonly createPool?: (configuration: PoolConfig) => Pool;
+}): ResearcherRuntime {
   return createResearcherRuntime({
     configuration: loadResearcherRuntimeConfiguration(options.environment),
-    siteId: resolveSiteId(options.environment ?? process.env),
+    siteId: options.siteId,
     now: options.now,
     createUuid: options.createUuid,
     createPool: options.createPool,

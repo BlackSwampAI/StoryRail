@@ -6,25 +6,35 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { StoryInspection } from "@/application/story-inspection";
 import type { StoryListItem } from "@/application/story-listing";
-import { STORY_STATES, type AgentProfile, type StoryId, type StoryState } from "@/domain/editorial";
+import {
+  STORY_STATES,
+  type AgentProfile,
+  type Site,
+  type StoryId,
+  type StoryState,
+} from "@/domain/editorial";
 
 import { AccountMenu } from "./account-menu";
 import { applyTheme, readStoredTheme, type NewsroomThemeId } from "./theme";
 import { ProfileWorkspace, SettingsWorkspace } from "./account-workspace";
 import { AgentProfilesWorkspace } from "./agent-profiles-workspace";
-import { agentProfileClient, type AgentProfileClient } from "./agent-profile-client";
+import type { AgentProfileClient } from "./agent-profile-client";
+import { useNewsroomClients, useNewsroomSite } from "./newsroom-clients";
 import { STORY_STATE_LABELS } from "./newsroom-state";
 import { NewsroomStaff, WRITER_DRAG_TYPE, type StaffState } from "./newsroom-staff";
 import styles from "./newsroom-shell.module.css";
 import { ResizableNewsroomLayout } from "./resizable-newsroom-layout";
 import { SourceEvidenceWorkspace } from "./source-evidence-workspace";
 import type { RequestSourceEvidenceUrl } from "./source-evidence-url-client";
+import { SitesWorkspace } from "./sites-workspace";
+import { SiteSwitcher } from "./site-switcher";
 import { SourceInboxWorkspace } from "./source-inbox-workspace";
 import type { SourceInboxClient } from "./source-inbox-client";
 import { StoryWorkspace } from "./story-workspace";
-import { storyClient, type StoryClient } from "./story-client";
+import type { StoryClient } from "./story-client";
 
-type WorkspaceMode = "story" | "source-inbox" | "source-intake" | "agents" | "profile" | "settings";
+type WorkspaceMode =
+  "story" | "source-inbox" | "source-intake" | "agents" | "sites" | "profile" | "settings";
 
 export interface NewsroomShellProps {
   readonly requestSourceEvidence?: RequestSourceEvidenceUrl;
@@ -58,7 +68,12 @@ export function NewsroomShell({
   sourceInboxRequests,
   agentProfileRequests,
 }: NewsroomShellProps) {
-  const requests = storyRequests ?? storyClient;
+  const newsroomSite = useNewsroomSite();
+  const clients = useNewsroomClients();
+  const requests = storyRequests ?? clients.stories;
+  // Sites created in this session join the list without a reload, so the switcher tells the truth
+  // the moment a second newsroom exists.
+  const [createdSites, setCreatedSites] = useState<readonly Site[]>([]);
   // `undefined` means the operator has not chosen a queue, so the desk picks one for them.
   const [chosenQueue, setChosenQueue] = useState<StoryState | null | undefined>(undefined);
   const [listing, setListing] = useState<StoryListingState>({ kind: "loading" });
@@ -114,7 +129,7 @@ export function NewsroomShell({
   const loadStaff = useCallback(async () => {
     setStaff({ kind: "loading" });
     try {
-      const result = await (agentProfileRequests ?? agentProfileClient).listProfiles();
+      const result = await (agentProfileRequests ?? clients.agentProfiles).listProfiles();
       setStaff(
         result.kind === "completed"
           ? { kind: "loaded", profiles: result.value }
@@ -123,11 +138,11 @@ export function NewsroomShell({
     } catch {
       setStaff({ kind: "unavailable" });
     }
-  }, [agentProfileRequests]);
+  }, [agentProfileRequests, clients]);
 
   useEffect(() => {
     let active = true;
-    void (agentProfileRequests ?? agentProfileClient)
+    void (agentProfileRequests ?? clients.agentProfiles)
       .listProfiles()
       .then((result) => {
         if (!active) return;
@@ -143,9 +158,13 @@ export function NewsroomShell({
     return () => {
       active = false;
     };
-  }, [agentProfileRequests]);
+  }, [agentProfileRequests, clients]);
 
   const items = listing.kind === "loaded" ? listing.items : [];
+  const sites = useMemo(() => {
+    const known = newsroomSite?.sites ?? [];
+    return [...known, ...createdSites.filter((site) => !known.some(({ id }) => id === site.id))];
+  }, [newsroomSite, createdSites]);
 
   // Open the desk where the work actually is. Stories furthest along need an operator decision
   // soonest, so the last non-empty queue wins until the operator picks one themselves.
@@ -232,6 +251,13 @@ export function NewsroomShell({
                   preload
                 />
               </div>
+              {newsroomSite === null ? null : (
+                <SiteSwitcher
+                  site={newsroomSite.site}
+                  sites={sites}
+                  onCreateSite={() => openWorkspace("sites")}
+                />
+              )}
             </header>
 
             <nav className={styles.deskNavigation} aria-label="Newsroom navigation">
@@ -512,6 +538,19 @@ export function NewsroomShell({
             <div hidden={workspaceMode !== "settings"}>
               {workspaceMode === "settings" ? (
                 <SettingsWorkspace theme={theme} onThemeChange={setTheme} />
+              ) : null}
+            </div>
+            <div hidden={workspaceMode !== "sites"}>
+              {workspaceMode === "sites" && newsroomSite !== null ? (
+                <SitesWorkspace
+                  sites={sites}
+                  currentSiteId={newsroomSite.site.id}
+                  onSiteCreated={(site) =>
+                    setCreatedSites((current) =>
+                      current.some(({ id }) => id === site.id) ? current : [...current, site],
+                    )
+                  }
+                />
               ) : null}
             </div>
             <div hidden={workspaceMode !== "agents"}>

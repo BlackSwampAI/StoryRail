@@ -596,6 +596,7 @@ describe("createSourceEvidenceRuntimeFromEnvironment", () => {
     const createPool = vi.fn(() => controlledPool.pool);
 
     const runtime = createSourceEvidenceRuntimeFromEnvironment({
+      siteId: SITE,
       environment,
       fetch: fetchImplementation,
       now,
@@ -605,11 +606,9 @@ describe("createSourceEvidenceRuntimeFromEnvironment", () => {
 
     // Firecrawl is no longer among them: an API key is per-Site and cannot come from a
     // process-wide environment once one installation runs more than one newsroom.
-    expect(reads).toEqual([
-      "STORYRAIL_DATABASE_URL",
-      "STORYRAIL_CREDENTIAL_KEY",
-      "STORYRAIL_SITE_ID",
-    ]);
+    // Neither Firecrawl nor the Site comes from the environment any more: an API key is
+    // per-Site, and the Site itself now arrives from the request path.
+    expect(reads).toEqual(["STORYRAIL_DATABASE_URL", "STORYRAIL_CREDENTIAL_KEY"]);
     expect(createPool).toHaveBeenCalledWith({ connectionString: DATABASE_URL });
     expect(createFirecrawlSourceExtractor).toHaveBeenCalledWith({
       resolveApiKey: expect.any(Function),

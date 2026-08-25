@@ -1,25 +1,20 @@
+import type { SiteId } from "@/domain/editorial";
 import { createStoryRuntimeFromEnvironment, type StoryRuntime } from "@/runtime";
 
-export type StoryRuntimeFactory = () => StoryRuntime;
+import {
+  createSiteKeyedRuntimeProvider,
+  type SiteKeyedRuntimeProvider,
+} from "./site-keyed-runtime-provider";
 
-export interface StoryRuntimeProvider {
-  get(): StoryRuntime;
-}
+export type StoryRuntimeFactory = (site: SiteId) => StoryRuntime;
+
+export type StoryRuntimeProvider = SiteKeyedRuntimeProvider<StoryRuntime>;
 
 export function createStoryRuntimeProvider(
-  createRuntime: StoryRuntimeFactory = createStoryRuntimeFromEnvironment,
+  createRuntime: StoryRuntimeFactory = (site) =>
+    createStoryRuntimeFromEnvironment({ siteId: site }),
 ): StoryRuntimeProvider {
-  let runtime: StoryRuntime | undefined;
-
-  return Object.freeze({
-    get(): StoryRuntime {
-      if (runtime === undefined) {
-        runtime = createRuntime();
-      }
-
-      return runtime;
-    },
-  });
+  return createSiteKeyedRuntimeProvider(createRuntime);
 }
 
 export const storyRuntimeProvider: StoryRuntimeProvider = createStoryRuntimeProvider();

@@ -1,25 +1,20 @@
+import type { SiteId } from "@/domain/editorial";
 import { createSourceEvidenceRuntimeFromEnvironment, type SourceEvidenceRuntime } from "@/runtime";
 
-export type SourceEvidenceRuntimeFactory = () => SourceEvidenceRuntime;
+import {
+  createSiteKeyedRuntimeProvider,
+  type SiteKeyedRuntimeProvider,
+} from "./site-keyed-runtime-provider";
 
-export interface SourceEvidenceRuntimeProvider {
-  get(): SourceEvidenceRuntime;
-}
+export type SourceEvidenceRuntimeFactory = (site: SiteId) => SourceEvidenceRuntime;
+
+export type SourceEvidenceRuntimeProvider = SiteKeyedRuntimeProvider<SourceEvidenceRuntime>;
 
 export function createSourceEvidenceRuntimeProvider(
-  createRuntime: SourceEvidenceRuntimeFactory = createSourceEvidenceRuntimeFromEnvironment,
+  createRuntime: SourceEvidenceRuntimeFactory = (site) =>
+    createSourceEvidenceRuntimeFromEnvironment({ siteId: site }),
 ): SourceEvidenceRuntimeProvider {
-  let runtime: SourceEvidenceRuntime | undefined;
-
-  return Object.freeze({
-    get(): SourceEvidenceRuntime {
-      if (runtime === undefined) {
-        runtime = createRuntime();
-      }
-
-      return runtime;
-    },
-  });
+  return createSiteKeyedRuntimeProvider(createRuntime);
 }
 
 export const sourceEvidenceRuntimeProvider: SourceEvidenceRuntimeProvider =

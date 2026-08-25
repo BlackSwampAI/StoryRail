@@ -1,4 +1,11 @@
-import { AGENT_PROFILE_ROLES, type AgentProfile, type ModelDescriptor } from "@/domain/editorial";
+import {
+  AGENT_PROFILE_ROLES,
+  type AgentProfile,
+  type ModelDescriptor,
+  type SiteId,
+} from "@/domain/editorial";
+
+import { siteApiPath } from "./site-paths";
 
 export const AGENT_PROFILE_REQUEST_UNAVAILABLE_MESSAGE =
   "The Agent Profile request could not be completed.";
@@ -96,12 +103,14 @@ async function parse<Value>(
 }
 
 export function createAgentProfileClient(dependencies: {
+  readonly siteId: SiteId;
   readonly fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 }): AgentProfileClient {
+  const api = (suffix: string) => siteApiPath(dependencies.siteId, suffix);
   return {
     async listProfiles() {
       try {
-        const response = await dependencies.fetch("/api/agent-profiles", {
+        const response = await dependencies.fetch(api("/agent-profiles"), {
           method: "GET",
           headers: { Accept: "application/json" },
         });
@@ -118,7 +127,7 @@ export function createAgentProfileClient(dependencies: {
     },
     async createWriterProfile(configuration) {
       try {
-        const response = await dependencies.fetch("/api/agent-profiles", {
+        const response = await dependencies.fetch(api("/agent-profiles"), {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
           body: JSON.stringify(configuration),
@@ -130,7 +139,3 @@ export function createAgentProfileClient(dependencies: {
     },
   };
 }
-
-export const agentProfileClient = createAgentProfileClient({
-  fetch: (input, init) => globalThis.fetch(input, init),
-});

@@ -15,7 +15,6 @@ import {
 } from "@/application/assignment-proposals";
 import { OPENROUTER_API_KEY_SLOT, agentRunId, type SiteId } from "@/domain/editorial";
 
-import { resolveSiteId } from "./site-configuration";
 import { createSiteStore } from "./site-store";
 import {
   loadAssignmentEditorRuntimeConfiguration,
@@ -91,17 +90,16 @@ export function createAssignmentEditorRuntime(
   });
 }
 
-export function createAssignmentEditorRuntimeFromEnvironment(
-  options: {
-    readonly environment?: NodeJS.ProcessEnv;
-    readonly now?: () => string;
-    readonly createUuid?: () => string;
-    readonly createPool?: (configuration: PoolConfig) => Pool;
-  } = {},
-): AssignmentEditorRuntime {
+export function createAssignmentEditorRuntimeFromEnvironment(options: {
+  readonly siteId: SiteId;
+  readonly environment?: NodeJS.ProcessEnv;
+  readonly now?: () => string;
+  readonly createUuid?: () => string;
+  readonly createPool?: (configuration: PoolConfig) => Pool;
+}): AssignmentEditorRuntime {
   return createAssignmentEditorRuntime({
     configuration: loadAssignmentEditorRuntimeConfiguration(options.environment),
-    siteId: resolveSiteId(options.environment ?? process.env),
+    siteId: options.siteId,
     now: options.now,
     createUuid: options.createUuid,
     createPool: options.createPool,

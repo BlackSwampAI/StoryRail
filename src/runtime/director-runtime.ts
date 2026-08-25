@@ -20,7 +20,6 @@ import {
   type SiteId,
   type StoryId,
 } from "@/domain/editorial";
-import { resolveSiteId } from "./site-configuration";
 import { createSiteStore } from "./site-store";
 import {
   loadDirectorRuntimeConfiguration,
@@ -114,17 +113,16 @@ export function createDirectorRuntime(options: {
   });
 }
 
-export function createDirectorRuntimeFromEnvironment(
-  options: {
-    readonly environment?: Readonly<Partial<NodeJS.ProcessEnv>>;
-    readonly now?: () => string;
-    readonly createUuid?: () => string;
-    readonly createPool?: (configuration: PoolConfig) => Pool;
-  } = {},
-): DirectorRuntime {
+export function createDirectorRuntimeFromEnvironment(options: {
+  readonly siteId: SiteId;
+  readonly environment?: Readonly<Partial<NodeJS.ProcessEnv>>;
+  readonly now?: () => string;
+  readonly createUuid?: () => string;
+  readonly createPool?: (configuration: PoolConfig) => Pool;
+}): DirectorRuntime {
   return createDirectorRuntime({
     configuration: loadDirectorRuntimeConfiguration(options.environment),
-    siteId: resolveSiteId(options.environment ?? process.env),
+    siteId: options.siteId,
     now: options.now,
     createUuid: options.createUuid,
     createPool: options.createPool,

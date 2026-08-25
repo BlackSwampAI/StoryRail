@@ -63,6 +63,7 @@ import { createPostgresAgentToolCallRepository } from "@/adapters/agent-tool-cal
 import { createPostgresArchiveRepository } from "@/adapters/archive";
 import { createPostgresStoryDeliveryRepository } from "@/adapters/story-delivery-persistence";
 import { createPostgresSiteRepository } from "@/adapters/site-persistence";
+import { createCreateSite } from "@/application/sites";
 import { createFirecrawlSourceExtractor } from "@/adapters/source-extraction";
 import { createRunSourceExtraction } from "@/application/source-extraction";
 import { createExtractPersistedSource } from "@/application/source-evidence";
@@ -189,6 +190,10 @@ const destinationSettingsMigrationPath = resolve(
 const destinationKindMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0069-destination-kind.sql",
+);
+const siteSwitchingMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0070-site-switching.sql",
 );
 
 const DEFAULT_SITE = siteId("site-default");
@@ -422,6 +427,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let storyDeliveryMigrationSql: string;
   let destinationSettingsMigrationSql: string;
   let destinationKindMigrationSql: string;
+  let siteSwitchingMigrationSql: string;
 
   /** Every migration, in order. One list so a rebuild can never drift from the first build. */
   const orderedMigrations = (): readonly string[] => [
@@ -454,6 +460,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     storyDeliveryMigrationSql,
     destinationSettingsMigrationSql,
     destinationKindMigrationSql,
+    siteSwitchingMigrationSql,
   ];
   let destructiveSetupAllowed = false;
 
@@ -475,6 +482,29 @@ describePostgres("PostgreSQL persistence repositories", () => {
          'description', 'The other website this installation publishes.'
        ))`,
       [OTHER_SITE],
+    );
+
+  const OTHER_SITE_WRITER = agentProfileId("storyrail-general-writer-second");
+
+  /**
+   * The second newsroom is staffed, because a Site created from the product is. An Assignment now
+   * validates its Writer against the Profiles of its own Site, so a second Site with no Profiles
+   * could not assign anything at all.
+   */
+  const addSecondSiteWriter = (queryable: {
+    query: (sql: string, values: unknown[]) => Promise<unknown>;
+  }) =>
+    queryable.query(
+      `INSERT INTO storyrail.agent_profiles (profile_id, role, built_in, payload, site_id)
+       VALUES ($1, 'writer', true, jsonb_build_object(
+         'id', $1::text,
+         'role', 'writer',
+         'name', 'General Writer',
+         'instructions', 'Produce original editorial work within the assignment scope.',
+         'model', null,
+         'builtIn', true
+       ), $2)`,
+      [OTHER_SITE_WRITER, OTHER_SITE],
     );
 
   beforeAll(async () => {
@@ -507,6 +537,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     storyDeliveryMigrationSql = await readFile(storyDeliveryMigrationPath, "utf8");
     destinationSettingsMigrationSql = await readFile(destinationSettingsMigrationPath, "utf8");
     destinationKindMigrationSql = await readFile(destinationKindMigrationPath, "utf8");
+    siteSwitchingMigrationSql = await readFile(siteSwitchingMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -525,6 +556,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await client.query("DROP SCHEMA IF EXISTS storyrail CASCADE");
       for (const migration of orderedMigrations()) await client.query(migration);
       await addSecondSite(client);
+      await addSecondSiteWriter(client);
     } finally {
       client.release();
     }
@@ -538,7 +570,11 @@ describePostgres("PostgreSQL persistence repositories", () => {
     await pool.query(
       "TRUNCATE storyrail.story_deliveries, storyrail.newsroom_standards, storyrail.policy_runs, storyrail.agent_tool_calls, storyrail.review_decisions, storyrail.article_revisions, storyrail.articles, storyrail.agent_runs, storyrail.story_transition_receipts, storyrail.story_assignments, storyrail.source_evidence_preparations, storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.site_credentials, storyrail.stories RESTART IDENTITY",
     );
-    await pool.query("DELETE FROM storyrail.agent_profiles WHERE built_in = false");
+    // Contract fixtures include built-in Profiles now that a role's built-in is found by role
+    // rather than by identifier, so they have to be swept as well or they outlive their test.
+    await pool.query(
+      "DELETE FROM storyrail.agent_profiles WHERE built_in = false OR profile_id LIKE 'profile-contract-%'",
+    );
   });
 
   afterAll(async () => {
@@ -1126,17 +1162,61 @@ describePostgres("PostgreSQL persistence repositories", () => {
       return story;
     }
 
+    it("refuses a Writer that belongs to another Site", async () => {
+      const story = await persistIntake("cross-site");
+      const command = commandFor(story, "cross-site");
+
+      await expect(
+        createPostgresAssignmentPersistence({ pool, siteId: DEFAULT_SITE }).persist({
+          ...command,
+          assignment: { ...command.assignment, writerProfileId: OTHER_SITE_WRITER },
+        }),
+      ).resolves.toMatchObject({
+        ok: false,
+        error: { code: "AGENT_PROFILE_NOT_FOUND", profileId: OTHER_SITE_WRITER },
+      });
+    });
+
+    it("cannot be made to record a Writer from another Site even by writing the row directly", async () => {
+      const story = await persistIntake("cross-site-direct");
+
+      await expect(
+        pool.query(
+          `INSERT INTO storyrail.story_assignments
+             (assignment_id, story_id, writer_profile_id, writer_role, payload, site_id)
+           VALUES ($1, $2, $3, 'writer', $4::jsonb, $5)`,
+          [
+            "assignment-cross-site-direct",
+            story.id,
+            OTHER_SITE_WRITER,
+            JSON.stringify({
+              id: "assignment-cross-site-direct",
+              storyId: story.id,
+              writerProfileId: OTHER_SITE_WRITER,
+              sourceIds: [],
+              angle: "Angle",
+              brief: "Brief",
+              constraints: null,
+              assignedBy: OPERATOR,
+              assignedAt: "assigned-cross-site-direct",
+            }),
+            DEFAULT_SITE,
+          ],
+        ),
+      ).rejects.toMatchObject({ constraint: "story_assignments_writer_profile_site_fk" });
+    });
+
     it("commits the Assignment, transitioned Story, and receipt as one durable result", async () => {
       const story = await persistIntake("complete");
       const command = commandFor(story, "complete");
-      await expect(createPostgresAssignmentPersistence({ pool }).persist(command)).resolves.toEqual(
-        {
-          ok: true,
-          assignment: command.assignment,
-          story: command.story,
-          transitionReceipt: command.transitionReceipt,
-        },
-      );
+      await expect(
+        createPostgresAssignmentPersistence({ pool, siteId: DEFAULT_SITE }).persist(command),
+      ).resolves.toEqual({
+        ok: true,
+        assignment: command.assignment,
+        story: command.story,
+        transitionReceipt: command.transitionReceipt,
+      });
       const inspection = await createPostgresStoryInspectionRepository({
         pool,
         siteId: DEFAULT_SITE,
@@ -1153,7 +1233,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
     it("allows exactly one winner for concurrent double assignment", async () => {
       const story = await persistIntake("race");
-      const repository = createPostgresAssignmentPersistence({ pool });
+      const repository = createPostgresAssignmentPersistence({ pool, siteId: DEFAULT_SITE });
       const results = await Promise.all([
         repository.persist(commandFor(story, "race-a")),
         repository.persist(commandFor(story, "race-b")),
@@ -1177,7 +1257,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     it("rolls back every second-Story fact when an identity collision occurs", async () => {
       const first = await persistIntake("rollback-first");
       const second = await persistIntake("rollback-second");
-      const repository = createPostgresAssignmentPersistence({ pool });
+      const repository = createPostgresAssignmentPersistence({ pool, siteId: DEFAULT_SITE });
       const firstCommand = commandFor(first, "shared-id");
       await repository.persist(firstCommand);
       const conflicting = {
@@ -1245,9 +1325,10 @@ describePostgres("PostgreSQL persistence repositories", () => {
           revisionCycle: 0,
         },
       };
-      const assigned = await createPostgresAssignmentPersistence({ pool }).persist(
-        assignmentCommand,
-      );
+      const assigned = await createPostgresAssignmentPersistence({
+        pool,
+        siteId: DEFAULT_SITE,
+      }).persist(assignmentCommand);
       if (!assigned.ok) throw new Error("Writer draft setup Assignment must persist.");
       const runIdentity = agentRunId("run-writer-draft");
       const articleIdentity = articleId("article-writer-draft");
@@ -1567,7 +1648,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
     const assignment = {
       id: assignmentId(`assignment-${suffix}`),
       storyId: intake.id,
-      writerProfileId: agentProfileId("storyrail-general-writer-v1"),
+      writerProfileId:
+        site === DEFAULT_SITE ? agentProfileId("storyrail-general-writer-v1") : OTHER_SITE_WRITER,
       sourceIds: [source.id],
       angle: "Angle",
       brief: "Brief",
@@ -1575,7 +1657,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       assignedBy: OPERATOR,
       assignedAt: `assigned-${suffix}`,
     };
-    const assigned = await createPostgresAssignmentPersistence({ pool }).persist({
+    const assigned = await createPostgresAssignmentPersistence({ pool, siteId: site }).persist({
       expectedStory: intake,
       assignment,
       story: { ...intake, state: "assigned" as const, updatedAt: `assigned-${suffix}` },
@@ -3398,7 +3480,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           },
         ]),
       );
-      expect(columns.rows).toHaveLength(129);
+      expect(columns.rows).toHaveLength(130);
     });
 
     it("creates the required primary, unique, foreign-key, and check constraints", async () => {
@@ -4045,6 +4127,102 @@ describePostgres("PostgreSQL persistence repositories", () => {
           [sourceId("replacement-id"), source.id],
         ),
       ).rejects.toMatchObject({ code: "23001" });
+    });
+
+    it("meets a database at 0069 and leaves it able to tell two newsrooms apart", async () => {
+      // The database is put back into the state 0070 actually meets by replaying every migration
+      // before it against an empty schema, rather than by removing the things 0070 creates. A
+      // test that undoes the migration under test proves only that it can be run twice.
+      const before = orderedMigrations().slice(0, -1);
+      try {
+        await pool.query("DROP SCHEMA storyrail CASCADE");
+        for (const migration of before) await pool.query(migration);
+        await addSecondSite(pool);
+        await pool.query(
+          `INSERT INTO storyrail.sites (site_id, payload)
+           VALUES ('site-impostor', jsonb_build_object(
+             'id', 'site-impostor',
+             'name', 'Impostor Newsroom',
+             'domain', 'second.test',
+             'description', 'A newsroom that claimed a hostname already taken.'
+           ))`,
+        );
+
+        // Two Sites on one hostname is exactly what the unique index exists to prevent, and a
+        // database that reached this state before the migration must be told which rows are in
+        // the way rather than handed PostgreSQL's own wording.
+        await expect(pool.query(siteSwitchingMigrationSql)).rejects.toMatchObject({
+          message: expect.stringContaining("claim the same domain"),
+        });
+
+        await pool.query("DELETE FROM storyrail.sites WHERE site_id = 'site-impostor'");
+        await pool.query(
+          `INSERT INTO storyrail.stories (story_id, state, revision_cycle, payload, site_id)
+           VALUES ('story-migration-0070', 'intake', 0, jsonb_build_object(
+             'id', 'story-migration-0070',
+             'title', 'A Story assigned before Sites could be switched',
+             'state', 'intake',
+             'revisionCycle', 0,
+             'createdAt', 'created-0070',
+             'updatedAt', 'created-0070'
+           ), $1)`,
+          [OTHER_SITE],
+        );
+        await pool.query(
+          `INSERT INTO storyrail.agent_profiles (profile_id, role, built_in, payload, site_id)
+           VALUES ($1, 'writer', true, jsonb_build_object(
+             'id', $1::text,
+             'role', 'writer',
+             'name', 'General Writer',
+             'instructions', 'Produce original editorial work within the assignment scope.',
+             'model', null,
+             'builtIn', true
+           ), $2)`,
+          [OTHER_SITE_WRITER, OTHER_SITE],
+        );
+        await pool.query(
+          `INSERT INTO storyrail.story_assignments
+             (assignment_id, story_id, writer_profile_id, writer_role, payload)
+           VALUES ('assignment-migration-0070', 'story-migration-0070', $1, 'writer', jsonb_build_object(
+             'id', 'assignment-migration-0070',
+             'storyId', 'story-migration-0070',
+             'writerProfileId', $1::text,
+             'sourceIds', '[]'::jsonb,
+             'angle', 'Angle',
+             'brief', 'Brief',
+             'constraints', null,
+             'assignedBy', jsonb_build_object('type', 'operator', 'operatorId', 'operator-0070'),
+             'assignedAt', 'assigned-0070'
+           ))`,
+          [OTHER_SITE_WRITER],
+        );
+
+        await pool.query(siteSwitchingMigrationSql);
+
+        // An Assignment written before this migration cannot disagree with the Story it belongs
+        // to, so it is given that Story's Site rather than asked for one.
+        const { rows } = await pool.query<{ site_id: string }>(
+          "SELECT site_id FROM storyrail.story_assignments WHERE assignment_id = 'assignment-migration-0070'",
+        );
+        expect(rows[0]?.site_id).toBe(OTHER_SITE);
+
+        await expect(
+          pool.query(
+            `INSERT INTO storyrail.sites (site_id, payload)
+             VALUES ('site-late-impostor', jsonb_build_object(
+               'id', 'site-late-impostor',
+               'name', 'Late Impostor',
+               'domain', 'second.test',
+               'description', 'A newsroom claiming a hostname that is taken.'
+             ))`,
+          ),
+        ).rejects.toMatchObject({ constraint: "sites_domain_unique_index" });
+      } finally {
+        await pool.query("DROP SCHEMA storyrail CASCADE");
+        for (const migration of orderedMigrations()) await pool.query(migration);
+        await addSecondSite(pool);
+        await addSecondSiteWriter(pool);
+      }
     });
   });
 
@@ -5325,6 +5503,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         // rebuild leaves every later case running against a schema that is missing migrations.
         for (const migration of orderedMigrations()) await pool.query(migration);
         await addSecondSite(pool);
+        await addSecondSiteWriter(pool);
       }
     });
 
@@ -5661,6 +5840,62 @@ describePostgres("PostgreSQL persistence repositories", () => {
         },
       ]);
       await expect(sites.findById(siteId("site-never-created"))).resolves.toBeNull();
+    });
+
+    it("staffs a Site it creates with the four built-in Agent Profiles", async () => {
+      const sites = createPostgresSiteRepository({ pool });
+      let identifier = 0;
+      const created = await createCreateSite({
+        sites,
+        createUuid: () => {
+          identifier += 1;
+          return `created-site-fixture-${identifier}`;
+        },
+      })({
+        name: "Third Newsroom",
+        domain: "Third.Example.",
+        description: "A newsroom created from the product.",
+      });
+
+      try {
+        expect(created).toMatchObject({ ok: true, site: { domain: "third.example" } });
+        if (!created.ok) throw new Error("The created Site fixture must persist.");
+
+        const profiles = createPostgresAgentProfileRepository({
+          pool,
+          siteId: created.site.id,
+        });
+        await expect(profiles.list()).resolves.toMatchObject([
+          { role: "researcher", builtIn: true },
+          { role: "assignment_editor", builtIn: true },
+          { role: "writer", builtIn: true },
+          { role: "editor_in_chief", builtIn: true },
+        ]);
+      } finally {
+        await pool.query("DELETE FROM storyrail.agent_profiles WHERE site_id LIKE 'site-created%'");
+        await pool.query("DELETE FROM storyrail.sites WHERE site_id LIKE 'site-created%'");
+      }
+    });
+
+    it("refuses a second Site on a domain another Site already publishes", async () => {
+      const sites = createPostgresSiteRepository({ pool });
+      const create = createCreateSite({ sites, createUuid: () => `duplicate-domain-fixture` });
+
+      await expect(
+        create({
+          name: "Impostor Newsroom",
+          domain: "second.test",
+          description: "A newsroom claiming a hostname that is taken.",
+        }),
+      ).resolves.toEqual({
+        ok: false,
+        error: {
+          code: "SITE_DOMAIN_TAKEN",
+          message: "Another Site already publishes second.test.",
+          domain: "second.test",
+        },
+      });
+      await expect(sites.findById(siteId("site-duplicate-domain-fixture"))).resolves.toBeNull();
     });
   });
 

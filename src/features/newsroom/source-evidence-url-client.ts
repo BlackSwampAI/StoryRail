@@ -2,12 +2,15 @@ import type {
   ExtractPersistedSourceFailureError,
   PreserveUrlSourceFailureError,
 } from "@/application/source-evidence";
-import type { EditorialActor, SourceExtraction, UrlSource } from "@/domain/editorial";
+import type { EditorialActor, SiteId, SourceExtraction, UrlSource } from "@/domain/editorial";
+
+import { siteApiPath } from "./site-paths";
 
 export const SOURCE_EVIDENCE_UNAVAILABLE_MESSAGE =
   "The Source evidence request could not be completed.";
 
 export interface SourceEvidenceUrlClientDependencies {
+  readonly siteId: SiteId;
   readonly fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 }
 
@@ -288,9 +291,10 @@ function classifyResponse(status: number, body: unknown): SourceEvidenceUrlResul
 export function createSourceEvidenceUrlClient(
   dependencies: SourceEvidenceUrlClientDependencies,
 ): RequestSourceEvidenceUrl {
+  const api = (suffix: string) => siteApiPath(dependencies.siteId, suffix);
   return async (submittedUrl) => {
     try {
-      const response = await dependencies.fetch("/api/source-evidence/url", {
+      const response = await dependencies.fetch(api("/source-evidence/url"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -306,10 +310,3 @@ export function createSourceEvidenceUrlClient(
     }
   };
 }
-
-const productionSourceEvidenceUrlClient = createSourceEvidenceUrlClient({
-  fetch: (input, init) => globalThis.fetch(input, init),
-});
-
-export const requestSourceEvidenceUrl: RequestSourceEvidenceUrl = (submittedUrl) =>
-  productionSourceEvidenceUrlClient(submittedUrl);

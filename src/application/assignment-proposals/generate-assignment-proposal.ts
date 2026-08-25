@@ -19,7 +19,6 @@ import {
   type StoryId,
 } from "@/domain/editorial";
 
-export const ASSIGNMENT_EDITOR_PROFILE_ID = agentProfileId("storyrail-assignment-editor-v1");
 export const ASSIGNMENT_EDITOR_PROMPT = Object.freeze({
   key: "storyrail_assignment_editor",
   version: "1",
@@ -157,7 +156,7 @@ export function createGenerateAssignmentProposal(dependencies: {
       };
     }
 
-    const editor = await dependencies.profiles.findById(ASSIGNMENT_EDITOR_PROFILE_ID);
+    const editor = await dependencies.profiles.findBuiltIn("assignment_editor");
     if (!editor || editor.role !== "assignment_editor" || !editor.builtIn) {
       return {
         ok: false,

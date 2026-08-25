@@ -3281,6 +3281,120 @@
   text-transform: uppercase;
 }
 
+/* The Site switcher lives beside the account menu because it is the same idiom: a trigger that
+   names where you are, and a popover that moves you somewhere else. */
+.siteSwitcher {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.9rem;
+}
+
+.siteSwitcherTrigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  width: 100%;
+  border: 1px solid var(--tone-33);
+  border-radius: 0.7rem;
+  background: var(--tone-15);
+  padding: 0.5rem 0.75rem;
+  color: var(--tone-128);
+  cursor: pointer;
+  text-align: left;
+}
+
+.siteSwitcherTrigger:hover {
+  border-color: var(--tone-46);
+}
+
+.siteSwitcherTrigger:focus-visible {
+  outline: 2px solid var(--tone-96);
+  outline-offset: 2px;
+}
+
+.siteSwitcherText {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.25;
+  overflow: hidden;
+}
+
+.siteSwitcherText strong {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.siteSwitcherText small {
+  color: var(--tone-84);
+  font-size: 0.72rem;
+}
+
+.siteSwitcherPopover {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  border: 1px solid var(--tone-40);
+  border-radius: 0.8rem;
+  background: var(--tone-10);
+  padding: 0.5rem;
+  box-shadow: 0 1.25rem 3rem rgb(var(--veil-01) / 55%);
+}
+
+.siteSwitcherItem {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  border: 0;
+  border-radius: 0.55rem;
+  background: none;
+  padding: 0.45rem 0.6rem;
+  color: var(--tone-124);
+  cursor: pointer;
+  text-align: left;
+  text-decoration: none;
+}
+
+.siteSwitcherItem:hover {
+  background: var(--tone-20);
+}
+
+.siteSwitcherItem small {
+  color: var(--tone-84);
+  font-size: 0.72rem;
+}
+
+.siteSwitcherItem[aria-current="page"] {
+  background: var(--tone-24);
+}
+
+.siteSwitcherCreate {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px dashed var(--tone-40);
+  border-radius: 0.7rem;
+  background: none;
+  padding: 0.45rem 0.75rem;
+  color: var(--tone-110);
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+
+.siteSwitcherCreate:hover {
+  border-color: var(--tone-60);
+  color: var(--tone-128);
+}
+
 .accountMenu {
   position: relative;
 }

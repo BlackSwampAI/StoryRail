@@ -6,9 +6,12 @@ import {
   type CredentialSlot,
   type CredentialUnavailableError,
   type CredentialUnavailableReason,
+  type SiteId,
   type SiteModelIds,
   type SiteSettings,
 } from "@/domain/editorial";
+
+import { siteApiPath } from "./site-paths";
 
 export const SITE_SETTINGS_REQUEST_UNAVAILABLE_MESSAGE =
   "The settings request could not be completed.";
@@ -178,12 +181,14 @@ async function parse<Value>(
 const JSON_HEADERS = { "Content-Type": "application/json", Accept: "application/json" } as const;
 
 export function createSiteSettingsClient(dependencies: {
+  readonly siteId: SiteId;
   readonly fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 }): SiteSettingsClient {
+  const api = (suffix: string) => siteApiPath(dependencies.siteId, suffix);
   return {
     async readSettings() {
       try {
-        const response = await dependencies.fetch("/api/site-settings", {
+        const response = await dependencies.fetch(api("/site-settings"), {
           method: "GET",
           headers: { Accept: "application/json" },
         });
@@ -200,7 +205,7 @@ export function createSiteSettingsClient(dependencies: {
     },
     async saveModels(models) {
       try {
-        const response = await dependencies.fetch("/api/site-settings", {
+        const response = await dependencies.fetch(api("/site-settings"), {
           method: "PUT",
           headers: JSON_HEADERS,
           body: JSON.stringify({ models }),
@@ -213,7 +218,7 @@ export function createSiteSettingsClient(dependencies: {
     async setCredential(slot, secret) {
       try {
         const response = await dependencies.fetch(
-          `/api/site-credentials/${encodeURIComponent(slot)}`,
+          api(`/site-credentials/${encodeURIComponent(slot)}`),
           { method: "PUT", headers: JSON_HEADERS, body: JSON.stringify({ secret }) },
         );
         return await parse(response, (body) =>
@@ -226,7 +231,7 @@ export function createSiteSettingsClient(dependencies: {
     async removeCredential(slot) {
       try {
         const response = await dependencies.fetch(
-          `/api/site-credentials/${encodeURIComponent(slot)}`,
+          api(`/site-credentials/${encodeURIComponent(slot)}`),
           { method: "DELETE", headers: { Accept: "application/json" } },
         );
         return await parse(response, (body) => (isSlot(body.slot) ? body.slot : null));
@@ -236,7 +241,3 @@ export function createSiteSettingsClient(dependencies: {
     },
   };
 }
-
-export const siteSettingsClient = createSiteSettingsClient({
-  fetch: (input, init) => globalThis.fetch(input, init),
-});

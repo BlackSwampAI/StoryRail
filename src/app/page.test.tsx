@@ -1,47 +1,17 @@
-import { render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+// @vitest-environment node
 
-import HomePage from "@/app/page";
+import { describe, expect, it, vi } from "vitest";
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
+const redirect = vi.hoisted(() => vi.fn());
 
-describe("HomePage", () => {
-  it("renders the newsroom application shell", async () => {
-    const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
-      const path = String(input);
-      if (path === "/api/stories") {
-        return new Response(JSON.stringify({ ok: true, stories: [] }), { status: 200 });
-      }
-      if (path === "/api/source-inbox") {
-        return new Response(JSON.stringify({ ok: true, sources: [] }), { status: 200 });
-      }
-      if (path === "/api/agent-profiles") {
-        return new Response(JSON.stringify({ ok: true, profiles: [] }), { status: 200 });
-      }
-      throw new Error(`Unexpected HomePage request: ${path}`);
-    });
-    vi.stubGlobal("fetch", fetch);
-    render(<HomePage />);
+vi.mock("next/navigation", () => ({ redirect }));
 
-    expect(screen.getByRole("img", { name: "StoryRail" })).toBeVisible();
-    expect(screen.getByText("Alpha preview")).toBeVisible();
-    expect(screen.getByRole("navigation", { name: "Newsroom navigation" })).toBeVisible();
-    expect(screen.getByRole("main")).toBeVisible();
-    expect(await screen.findByRole("button", { name: "Intake, 0 stories" })).toBeVisible();
-    expect(fetch).toHaveBeenCalledTimes(3);
-    expect(fetch).toHaveBeenCalledWith("/api/stories", {
-      method: "GET",
-      headers: { Accept: "application/json" },
-    });
-    expect(fetch).toHaveBeenCalledWith("/api/source-inbox", {
-      method: "GET",
-      headers: { Accept: "application/json" },
-    });
-    expect(fetch).toHaveBeenCalledWith("/api/agent-profiles", {
-      method: "GET",
-      headers: { Accept: "application/json" },
-    });
+describe("the newsroom landing page", () => {
+  it("sends a bookmark of the bare root to the Site this installation lands on", async () => {
+    const { default: HomePage } = await import("@/app/page");
+
+    HomePage();
+
+    expect(redirect).toHaveBeenCalledWith("/s/site-default");
   });
 });

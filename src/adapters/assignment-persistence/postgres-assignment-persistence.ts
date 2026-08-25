@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { Pool, QueryResultRow } from "pg";
 
 import type { AssignmentPersistence } from "@/application/assignments";
-import type { Story, StoryState } from "@/domain/editorial";
+import type { SiteId, Story, StoryState } from "@/domain/editorial";
 import { STORY_STATES } from "@/domain/editorial";
 
 import {
@@ -61,6 +61,7 @@ function conflict(storyId: Story["id"]) {
 
 export function createPostgresAssignmentPersistence(options: {
   readonly pool: Pool;
+  readonly siteId: SiteId;
 }): AssignmentPersistence {
   return {
     async persist(command) {
@@ -92,8 +93,10 @@ export function createPostgresAssignmentPersistence(options: {
         }
 
         const profile = await client.query<QueryResultRow & { readonly role: unknown }>(
-          `SELECT role FROM storyrail.agent_profiles WHERE profile_id = $1`,
-          [command.assignment.writerProfileId],
+          // A Profile belonging to another Site is not merely the wrong one to use here; it is
+          // not visible from this newsroom at all, so it reads as missing rather than as refused.
+          `SELECT role FROM storyrail.agent_profiles WHERE profile_id = $1 AND site_id = $2`,
+          [command.assignment.writerProfileId, options.siteId],
         );
         if (!profile.rows[0]) {
           await client.query("ROLLBACK");
@@ -143,14 +146,15 @@ export function createPostgresAssignmentPersistence(options: {
 
         const assignmentResult = await client.query(
           `INSERT INTO storyrail.story_assignments
-             (assignment_id, story_id, writer_profile_id, writer_role, payload)
-           VALUES ($1, $2, $3, 'writer', $4::jsonb)
+             (assignment_id, story_id, writer_profile_id, writer_role, payload, site_id)
+           VALUES ($1, $2, $3, 'writer', $4::jsonb, $5)
            RETURNING assignment_id, story_id, writer_profile_id, writer_role, payload`,
           [
             command.assignment.id,
             command.assignment.storyId,
             command.assignment.writerProfileId,
             JSON.stringify(command.assignment),
+            options.siteId,
           ],
         );
         const storyUpdate = await client.query<StoryRow>(
