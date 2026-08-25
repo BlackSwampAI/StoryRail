@@ -6,6 +6,7 @@ import {
   type CredentialSlot,
   type CredentialUnavailableError,
   type CredentialUnavailableReason,
+  type SiteDestinationSettings,
   type SiteId,
   type SiteModelIds,
   type SiteSettings,
@@ -49,6 +50,14 @@ export type SiteSettingsClientResult<Value> =
 export interface SiteSettingsClient {
   readonly readSettings: () => Promise<SiteSettingsClientResult<SiteSettingsSnapshot>>;
   readonly saveModels: (models: SiteModelIds) => Promise<SiteSettingsClientResult<SiteSettings>>;
+  /**
+   * The store validates and writes settings whole, so the models it already holds travel with the
+   * destination. Sending the destination alone would be read as a submission naming no models.
+   */
+  readonly saveDestination: (
+    models: SiteModelIds,
+    destination: SiteDestinationSettings | null,
+  ) => Promise<SiteSettingsClientResult<SiteSettings>>;
   readonly setCredential: (
     slot: CredentialSlot,
     secret: string,
@@ -71,8 +80,9 @@ function isModelId(value: unknown): value is string {
 }
 
 /**
- * The destination is read but never shown. This screen has no field for it, so the check exists
- * only so that a newsroom which has one configured does not read as an unreadable response.
+ * A destination is one of two closed shapes or nothing at all. The keys are checked exactly so a
+ * response carrying a StudioCMS renderer package on a WordPress destination is treated as an
+ * unreadable answer rather than rendered into a form that would then save it back.
  */
 function isDestination(value: unknown): boolean {
   if (value === null) return true;
@@ -209,6 +219,18 @@ export function createSiteSettingsClient(dependencies: {
           method: "PUT",
           headers: JSON_HEADERS,
           body: JSON.stringify({ models }),
+        });
+        return await parse(response, (body) => (isSettings(body.settings) ? body.settings : null));
+      } catch {
+        return unavailable();
+      }
+    },
+    async saveDestination(models, destination) {
+      try {
+        const response = await dependencies.fetch(api("/site-settings"), {
+          method: "PUT",
+          headers: JSON_HEADERS,
+          body: JSON.stringify({ models, destination }),
         });
         return await parse(response, (body) => (isSettings(body.settings) ? body.settings : null));
       } catch {

@@ -3845,6 +3845,89 @@
   grid-column: 1 / -1;
 }
 
+/* The destination form sits under the same section furniture as the connector rows above, and
+   borrows their confirmation block, so it is laid out here rather than in a namespace of its own. */
+.destinationForm {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.8rem 1.2rem;
+}
+
+.destinationForm div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.destinationForm label {
+  color: var(--tone-79);
+  font-size: 0.72rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.destinationForm select,
+.destinationForm input[type="text"],
+.destinationForm input:not([type]) {
+  border: 1px solid var(--tone-33);
+  border-radius: 0.55rem;
+  background: var(--tone-05);
+  padding: 0.55rem 0.7rem;
+  color: var(--tone-140);
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.destinationKindChoice {
+  grid-column: 1 / -1;
+}
+
+/* The base URL rule differs between the two kinds, so its guidance has to be readable rather than
+   a label-sized whisper: a wrong one fails at the far end as a 404 that names nothing. */
+.destinationHint {
+  color: var(--tone-104);
+  font-size: 0.72rem;
+  text-transform: none;
+  letter-spacing: normal;
+  line-height: 1.5;
+}
+
+.destinationDraftChoice {
+  grid-column: 1 / -1;
+}
+
+.destinationDraftChoice label {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.45rem;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--tone-135);
+  font-size: 0.85rem;
+}
+
+.destinationActions {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  grid-column: 1 / -1;
+}
+
+/* The confirmation block is shared with the credential rows, where it lays out in a row. The
+   field-wrapper rule above would otherwise stack its buttons under its sentence. */
+.destinationForm .credentialConfirm {
+  flex-direction: row;
+  align-items: center;
+}
+
+.destinationForm > p {
+  margin: 0;
+  color: var(--tone-104);
+  font-size: 0.8rem;
+  grid-column: 1 / -1;
+}
+
+.destinationForm[aria-busy="true"] button:disabled,
 .agentModelsForm[aria-busy="true"] button:disabled,
 .storedConnectorRow[aria-busy="true"] button:disabled {
   /* Genuinely working, unlike the inert connectors above, which keep the not-allowed cursor. */

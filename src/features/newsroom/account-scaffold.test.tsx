@@ -12,6 +12,7 @@ import type { SiteSettingsClient } from "./site-settings-client";
 const inertClient: SiteSettingsClient = {
   readSettings: () => new Promise(() => {}),
   saveModels: () => new Promise(() => {}),
+  saveDestination: () => new Promise(() => {}),
   setCredential: () => new Promise(() => {}),
   removeCredential: () => new Promise(() => {}),
 };
@@ -103,7 +104,8 @@ describe("account scaffolding", () => {
     );
 
     const notice = screen.getAllByRole("note")[0];
-    expect(notice).toHaveTextContent(/OpenRouter key/);
+    expect(notice).toHaveTextContent(/OpenRouter and Firecrawl keys/);
+    expect(notice).toHaveTextContent(/where a published Story is delivered/);
     expect(notice).toHaveTextContent(/Every other row is layout/);
     expect(notice).not.toHaveTextContent(/None of these controls do anything yet/);
   });

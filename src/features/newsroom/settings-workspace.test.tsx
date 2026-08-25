@@ -1,7 +1,13 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { OPENROUTER_API_KEY_SLOT, type SiteModelIds } from "@/domain/editorial";
+import {
+  OPENROUTER_API_KEY_SLOT,
+  STUDIOCMS_API_TOKEN_SLOT,
+  WORDPRESS_APPLICATION_PASSWORD_SLOT,
+  type SiteDestinationSettings,
+  type SiteModelIds,
+} from "@/domain/editorial";
 
 import { SettingsWorkspace } from "./account-workspace";
 import type { ModelCatalogClient } from "./model-catalog-client";
@@ -43,6 +49,7 @@ function client(overrides: Partial<SiteSettingsClient> = {}): SiteSettingsClient
         completed({ settings: { models: MODELS, destination: null }, credentials: [] }),
       ),
     saveModels: (models) => Promise.resolve(completed({ models, destination: null })),
+    saveDestination: (models, destination) => Promise.resolve(completed({ models, destination })),
     setCredential: (slot, secret) => Promise.resolve(completed({ slot, hint: secret.slice(-4) })),
     removeCredential: (slot) => Promise.resolve(completed(slot)),
     ...overrides,
@@ -348,5 +355,192 @@ describe("settings workspace", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/stored settings could not be read/);
     expect(screen.getByText("The agent models could not be read.")).toBeVisible();
+  });
+});
+
+const WORDPRESS_DESTINATION: SiteDestinationSettings = {
+  kind: "wordpress",
+  baseUrl: "https://blog.example.com",
+  username: "editor",
+  draft: true,
+};
+
+const STUDIOCMS_DESTINATION: SiteDestinationSettings = {
+  kind: "studiocms",
+  baseUrl: "https://blog.example.com/studiocms_api/rest/v1",
+  package: "@studiocms/markdown-remark",
+  draft: true,
+};
+
+function withDestination(
+  destination: SiteDestinationSettings | null,
+  overrides: Partial<SiteSettingsClient> = {},
+): SiteSettingsClient {
+  return client({
+    readSettings: () =>
+      Promise.resolve(
+        completed({
+          settings: { models: MODELS, destination },
+          credentials: [
+            {
+              slot: STUDIOCMS_API_TOKEN_SLOT,
+              hint: "9f21",
+              updatedAt: "2026-08-24T10:00:00.000Z",
+            },
+            {
+              slot: WORDPRESS_APPLICATION_PASSWORD_SLOT,
+              hint: "wxyz",
+              updatedAt: "2026-08-25T10:00:00.000Z",
+            },
+          ],
+        }),
+      ),
+    ...overrides,
+  });
+}
+
+function destinationsSection(): HTMLElement {
+  return screen.getByRole("region", { name: "Publishing destinations" });
+}
+
+describe("publishing destination settings", () => {
+  it("no longer claims publishing records a decision without delivering it", async () => {
+    renderSettings(withDestination(null));
+    await screen.findByLabelText("Base URL");
+
+    const section = destinationsSection();
+    expect(section).not.toHaveTextContent(/it does not deliver/);
+    expect(section).not.toHaveTextContent(/Publish through the StudioCMS API/);
+    expect(section).not.toHaveTextContent(/Publish through the WordPress REST API/);
+    // Ghost and Webhook really are unbuilt, so they are the only rows still marked planned.
+    expect(within(section).getAllByText("Planned")).toHaveLength(2);
+  });
+
+  it("shows the WordPress fields and none of the StudioCMS ones", async () => {
+    renderSettings(withDestination(WORDPRESS_DESTINATION));
+
+    expect(await screen.findByLabelText("Base URL")).toHaveValue("https://blog.example.com");
+    expect(screen.getByLabelText("WordPress user")).toHaveValue("editor");
+    expect(screen.queryByLabelText("Renderer package")).toBeNull();
+    expect(destinationsSection()).toHaveTextContent(/StoryRail appends \/wp-json\/wp\/v2\/posts/);
+  });
+
+  it("shows the StudioCMS fields and asks for the API path in the base URL", async () => {
+    renderSettings(withDestination(STUDIOCMS_DESTINATION));
+
+    expect(await screen.findByLabelText("Renderer package")).toHaveValue(
+      "@studiocms/markdown-remark",
+    );
+    expect(screen.queryByLabelText("WordPress user")).toBeNull();
+    expect(destinationsSection()).toHaveTextContent(/Include the API path/);
+  });
+
+  it("stores a WordPress destination with a username and no renderer package", async () => {
+    const saveDestination = vi.fn(client().saveDestination);
+    renderSettings(withDestination(null, { saveDestination }));
+
+    fireEvent.change(await screen.findByLabelText("Base URL"), {
+      target: { value: "https://blog.example.com" },
+    });
+    fireEvent.change(screen.getByLabelText("WordPress user"), { target: { value: "editor" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save destination" }));
+
+    await waitFor(() =>
+      expect(saveDestination).toHaveBeenCalledWith(MODELS, WORDPRESS_DESTINATION),
+    );
+    expect(await screen.findByText("Destination saved.")).toBeVisible();
+  });
+
+  it("replaces a destination when the kind changes rather than merging the two shapes", async () => {
+    const saveDestination = vi.fn(client().saveDestination);
+    renderSettings(withDestination(WORDPRESS_DESTINATION, { saveDestination }));
+
+    fireEvent.change(await screen.findByLabelText("Destination"), {
+      target: { value: "studiocms" },
+    });
+    fireEvent.change(screen.getByLabelText("Base URL"), {
+      target: { value: STUDIOCMS_DESTINATION.baseUrl },
+    });
+    fireEvent.change(screen.getByLabelText("Renderer package"), {
+      target: { value: "@studiocms/markdown-remark" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save destination" }));
+
+    await waitFor(() =>
+      expect(saveDestination).toHaveBeenCalledWith(MODELS, STUDIOCMS_DESTINATION),
+    );
+  });
+
+  it("keeps a WordPress base URL out of a StudioCMS submission while a kind is being tried", async () => {
+    renderSettings(withDestination(WORDPRESS_DESTINATION));
+
+    fireEvent.change(await screen.findByLabelText("Destination"), {
+      target: { value: "studiocms" },
+    });
+    expect(screen.getByLabelText("Base URL")).toHaveValue("");
+
+    fireEvent.change(screen.getByLabelText("Destination"), { target: { value: "wordpress" } });
+    expect(screen.getByLabelText("Base URL")).toHaveValue("https://blog.example.com");
+  });
+
+  it("leaves both stored credentials alone when the kind changes", async () => {
+    const setCredential = vi.fn(client().setCredential);
+    const removeCredential = vi.fn(client().removeCredential);
+    renderSettings(withDestination(WORDPRESS_DESTINATION, { setCredential, removeCredential }));
+
+    fireEvent.change(await screen.findByLabelText("Destination"), {
+      target: { value: "studiocms" },
+    });
+
+    const section = within(destinationsSection());
+    expect(section.getByText(/Configured · ending 9f21/)).toBeVisible();
+    expect(section.getByText(/Configured · ending wxyz/)).toBeVisible();
+    expect(removeCredential).not.toHaveBeenCalled();
+    expect(setCredential).not.toHaveBeenCalled();
+  });
+
+  it("clears the destination to null and says nothing is delivered until one is set", async () => {
+    const saveDestination = vi.fn(() =>
+      Promise.resolve(completed({ models: MODELS, destination: null })),
+    );
+    renderSettings(withDestination(WORDPRESS_DESTINATION, { saveDestination }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Remove destination" }));
+    const confirmation = within(screen.getByRole("group", { name: "Remove the destination" }));
+    fireEvent.click(confirmation.getByRole("button", { name: "Remove destination" }));
+
+    await waitFor(() => expect(saveDestination).toHaveBeenCalledWith(MODELS, null));
+    expect(await screen.findByText(/no longer delivers it anywhere/)).toBeVisible();
+  });
+
+  it("refuses to save a destination with nothing in the base URL", async () => {
+    const saveDestination = vi.fn(client().saveDestination);
+    renderSettings(withDestination(null, { saveDestination }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Save destination" }));
+
+    expect(await screen.findByText("Enter the WordPress site URL.")).toBeVisible();
+    expect(saveDestination).not.toHaveBeenCalled();
+  });
+
+  it("renders an entered application password nowhere, only the hint the store returns", async () => {
+    const setCredential = vi.fn(client().setCredential);
+    renderSettings(withDestination(WORDPRESS_DESTINATION, { setCredential }));
+
+    const field = await screen.findByLabelText("WordPress application password");
+    fireEvent.change(field, { target: { value: "abcd efgh ijkl mnop" } });
+    fireEvent.click(
+      within(field.closest("li") as HTMLElement).getByRole("button", { name: "Replace key" }),
+    );
+
+    await waitFor(() =>
+      expect(setCredential).toHaveBeenCalledWith(
+        WORDPRESS_APPLICATION_PASSWORD_SLOT,
+        "abcd efgh ijkl mnop",
+      ),
+    );
+    expect(document.body.textContent).not.toContain("abcd efgh ijkl mnop");
+    expect(field).toHaveValue("");
+    expect(await screen.findByText(/ending mnop/)).toBeVisible();
   });
 });

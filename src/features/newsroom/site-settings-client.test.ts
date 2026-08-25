@@ -91,6 +91,64 @@ describe("site-settings-client", () => {
     });
   });
 
+  it("sends the stored models with a destination so a whole settings document is written", async () => {
+    const destination = {
+      kind: "wordpress",
+      baseUrl: "https://blog.example.com",
+      username: "editor",
+      draft: true,
+    } as const;
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(response(200, { ok: true, settings: { models: MODELS, destination } }));
+
+    const result = await createSiteSettingsClient({ siteId: SITE_ID, fetch }).saveDestination(
+      MODELS,
+      destination,
+    );
+
+    expect(result).toEqual({ kind: "completed", value: { models: MODELS, destination } });
+    expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual({
+      models: MODELS,
+      destination,
+    });
+  });
+
+  it("clears a destination with an explicit null rather than by omitting it", async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(
+        response(200, { ok: true, settings: { models: MODELS, destination: null } }),
+      );
+
+    await createSiteSettingsClient({ siteId: SITE_ID, fetch }).saveDestination(MODELS, null);
+
+    const body = JSON.parse(String(fetch.mock.calls[0][1]?.body)) as Record<string, unknown>;
+    expect("destination" in body).toBe(true);
+    expect(body.destination).toBeNull();
+  });
+
+  it("refuses a saved destination carrying the other kind's field", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
+      response(200, {
+        ok: true,
+        settings: {
+          models: MODELS,
+          destination: {
+            kind: "wordpress",
+            baseUrl: "https://blog.example.com",
+            package: "@studiocms/markdown-remark",
+            draft: true,
+          },
+        },
+      }),
+    );
+
+    expect(
+      await createSiteSettingsClient({ siteId: SITE_ID, fetch }).saveDestination(MODELS, null),
+    ).toEqual({ kind: "unavailable", message: SITE_SETTINGS_REQUEST_UNAVAILABLE_MESSAGE });
+  });
+
   it("sends a secret to its slot and keeps only the hint that comes back", async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()
