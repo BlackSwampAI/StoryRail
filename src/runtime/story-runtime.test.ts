@@ -233,6 +233,8 @@ describe("createStoryRuntime", () => {
       "assignStory",
       "rejectStory",
       "publishStory",
+      "deliverStory",
+      "listStoryDeliveries",
       "submitStoryReview",
       "readSiteSettings",
       "updateSiteSettings",

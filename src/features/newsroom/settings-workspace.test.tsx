@@ -39,8 +39,10 @@ function completed<Value>(value: Value): SiteSettingsClientResult<Value> {
 function client(overrides: Partial<SiteSettingsClient> = {}): SiteSettingsClient {
   return {
     readSettings: () =>
-      Promise.resolve(completed({ settings: { models: MODELS }, credentials: [] })),
-    saveModels: (models) => Promise.resolve(completed({ models })),
+      Promise.resolve(
+        completed({ settings: { models: MODELS, destination: null }, credentials: [] }),
+      ),
+    saveModels: (models) => Promise.resolve(completed({ models, destination: null })),
     setCredential: (slot, secret) => Promise.resolve(completed({ slot, hint: secret.slice(-4) })),
     removeCredential: (slot) => Promise.resolve(completed(slot)),
     ...overrides,
@@ -110,7 +112,7 @@ describe("settings workspace", () => {
         readSettings: () =>
           Promise.resolve(
             completed({
-              settings: { models: MODELS },
+              settings: { models: MODELS, destination: null },
               credentials: [
                 {
                   slot: OPENROUTER_API_KEY_SLOT,
@@ -261,7 +263,10 @@ describe("settings workspace", () => {
         readSettings: () =>
           Promise.resolve(
             completed({
-              settings: { models: { ...MODELS, writer: "vendor/retired-model" } },
+              settings: {
+                models: { ...MODELS, writer: "vendor/retired-model" },
+                destination: null,
+              },
               credentials: [],
             }),
           ),

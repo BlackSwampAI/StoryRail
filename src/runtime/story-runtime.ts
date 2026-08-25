@@ -18,6 +18,8 @@ import {
 import { createPostgresStoryListingRepository } from "@/adapters/story-listing";
 import { createPostgresStoryRepository } from "@/adapters/story-persistence";
 import { createPostgresStoryPublicationPersistence } from "@/adapters/story-publication-persistence";
+import { createPostgresStoryDeliveryRepository } from "@/adapters/story-delivery-persistence";
+import { createSiteDeliveryDestinationDirectory } from "@/adapters/story-delivery";
 import { createPostgresStoryRejectionPersistence } from "@/adapters/story-rejection-persistence";
 import { createPostgresStorySourceAttachmentRepository } from "@/adapters/story-source-persistence";
 import { createAesGcmCredentialCipher } from "@/adapters/credential-cipher";
@@ -46,6 +48,11 @@ import {
 } from "@/application/source-triage";
 import { createCreateStory, type CreateStoryWorkflow } from "@/application/story-creation";
 import { createPublishStory, type PublishStoryWorkflow } from "@/application/story-publications";
+import {
+  createDeliverStory,
+  type DeliverStoryWorkflow,
+  type StoryDeliveryRepository,
+} from "@/application/story-deliveries";
 import { createRejectStory, type RejectStoryWorkflow } from "@/application/story-rejections";
 import {
   createSubmitStoryReview,
@@ -65,6 +72,7 @@ import {
   agentProfileId,
   assignmentId,
   reviewDecisionId,
+  storyDeliveryId,
   storyId,
   transitionId,
   type AgentRunId,
@@ -76,7 +84,7 @@ import {
 
 import { resolveCredentialKey } from "./credential-configuration";
 import { resolveSiteId } from "./site-configuration";
-import { DEFAULT_SITE_MODEL_IDS } from "./site-store";
+import { createSiteStore, DEFAULT_SITE_MODEL_IDS } from "./site-store";
 
 export interface StoryRuntime {
   readonly listNewsroomStandards: import("@/application/newsroom-standards").NewsroomStandardsRepository["list"];
@@ -98,6 +106,8 @@ export interface StoryRuntime {
   readonly assignStory: AssignStoryWorkflow;
   readonly rejectStory: RejectStoryWorkflow;
   readonly publishStory: PublishStoryWorkflow;
+  readonly deliverStory: DeliverStoryWorkflow;
+  readonly listStoryDeliveries: StoryDeliveryRepository["listByStoryId"];
   readonly submitStoryReview: (command: {
     readonly storyId: import("@/domain/editorial").StoryId;
     readonly submittedBy: OperatorActor;
@@ -240,6 +250,22 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
   });
   const siteCredentials = createPostgresSiteCredentialRepository({ pool, siteId: site });
   const siteSettings = createPostgresSiteSettingsRepository({ pool, siteId: site });
+  const siteStore = createSiteStore({
+    pool,
+    siteId: site,
+    credentialKey: options.credentialKey ?? null,
+  });
+  const storyDeliveries = createPostgresStoryDeliveryRepository({ pool });
+  const deliverStory = createDeliverStory({
+    inspections: inspectionRepository,
+    deliveries: storyDeliveries,
+    destinations: createSiteDeliveryDestinationDirectory({
+      settings: siteSettings,
+      resolveApiKey: siteStore.resolveApiKey,
+    }),
+    createDeliveryId: () => storyDeliveryId(createUuid()),
+    now,
+  });
   const setSiteCredential = createSetSiteCredential({
     credentials: siteCredentials,
     siteId: site,
@@ -267,6 +293,9 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
     assignStory,
     rejectStory,
     publishStory,
+    deliverStory,
+    listStoryDeliveries: (identity: import("@/domain/editorial").StoryId) =>
+      storyDeliveries.listByStoryId(identity),
     submitStoryReview,
     // Settings and the list of configured credentials are read together because they are one
     // screen. The credentials half carries hints and never ciphertext, which is a property of
@@ -276,7 +305,10 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
         siteSettings.find(),
         siteCredentials.listConfigured(),
       ]);
-      return { settings: stored ?? { models: DEFAULT_SITE_MODEL_IDS }, credentials };
+      return {
+        settings: stored ?? { models: DEFAULT_SITE_MODEL_IDS, destination: null },
+        credentials,
+      };
     },
     updateSiteSettings,
     setSiteCredential,

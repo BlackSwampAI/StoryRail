@@ -61,6 +61,7 @@ import { createPostgresAgentProfileRepository } from "../agent-profile-persisten
 import { createPostgresAssignmentPersistence } from "../assignment-persistence/postgres-assignment-persistence";
 import { createPostgresAgentToolCallRepository } from "@/adapters/agent-tool-call-persistence";
 import { createPostgresArchiveRepository } from "@/adapters/archive";
+import { createPostgresStoryDeliveryRepository } from "@/adapters/story-delivery-persistence";
 import { createPostgresSiteRepository } from "@/adapters/site-persistence";
 import { createFirecrawlSourceExtractor } from "@/adapters/source-extraction";
 import { createRunSourceExtraction } from "@/application/source-extraction";
@@ -176,6 +177,14 @@ const siteTenancyMigrationPath = resolve(
 const siteCredentialsMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0066-site-credentials.sql",
+);
+const storyDeliveryMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0067-story-deliveries.sql",
+);
+const destinationSettingsMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0068-destination-settings.sql",
 );
 
 const DEFAULT_SITE = siteId("site-default");
@@ -406,6 +415,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let archiveSearchMigrationSql: string;
   let siteTenancyMigrationSql: string;
   let siteCredentialsMigrationSql: string;
+  let storyDeliveryMigrationSql: string;
+  let destinationSettingsMigrationSql: string;
 
   /** Every migration, in order. One list so a rebuild can never drift from the first build. */
   const orderedMigrations = (): readonly string[] => [
@@ -435,6 +446,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
     archiveSearchMigrationSql,
     siteTenancyMigrationSql,
     siteCredentialsMigrationSql,
+    storyDeliveryMigrationSql,
+    destinationSettingsMigrationSql,
   ];
   let destructiveSetupAllowed = false;
 
@@ -485,6 +498,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
     archiveSearchMigrationSql = await readFile(archiveSearchMigrationPath, "utf8");
     siteTenancyMigrationSql = await readFile(siteTenancyMigrationPath, "utf8");
     siteCredentialsMigrationSql = await readFile(siteCredentialsMigrationPath, "utf8");
+    storyDeliveryMigrationSql = await readFile(storyDeliveryMigrationPath, "utf8");
+    destinationSettingsMigrationSql = await readFile(destinationSettingsMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -514,7 +529,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     }
 
     await pool.query(
-      "TRUNCATE storyrail.newsroom_standards, storyrail.policy_runs, storyrail.agent_tool_calls, storyrail.review_decisions, storyrail.article_revisions, storyrail.articles, storyrail.agent_runs, storyrail.story_transition_receipts, storyrail.story_assignments, storyrail.source_evidence_preparations, storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.site_credentials, storyrail.stories RESTART IDENTITY",
+      "TRUNCATE storyrail.story_deliveries, storyrail.newsroom_standards, storyrail.policy_runs, storyrail.agent_tool_calls, storyrail.review_decisions, storyrail.article_revisions, storyrail.articles, storyrail.agent_runs, storyrail.story_transition_receipts, storyrail.story_assignments, storyrail.source_evidence_preparations, storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.site_credentials, storyrail.stories RESTART IDENTITY",
     );
     await pool.query("DELETE FROM storyrail.agent_profiles WHERE built_in = false");
   });
@@ -1524,168 +1539,168 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
   });
 
-  describe("the newsroom's own archive", () => {
-    /**
-     * A published Story with one Article Revision behind it. The read side is what is under
-     * test, so the approval chain that a Story really walks is stood in for by the two durable
-     * facts an archive lookup actually depends on: the Story is published, and a receipt says
-     * when. Both are covered against the real transitions elsewhere in this suite.
-     */
-    async function publishReport(
-      suffix: string,
-      report: { readonly headline: string; readonly body: string; readonly publishedAt: string },
-      site: SiteId = DEFAULT_SITE,
-    ) {
-      const intake = makeStory(suffix);
-      const source = makeSource(suffix, OPERATOR, `https://example.com/archive/${suffix}`);
-      await createPostgresStoryRepository({ pool, siteId: site }).persist({ story: intake });
-      await createPostgresSourceRepositories({ pool, siteId: site }).sources.persist({ source });
-      await createPostgresStorySourceAttachmentRepository({ pool, siteId: site }).attach({
-        attachment: makeAttachment(suffix, { storyId: intake.id, sourceId: source.id }),
-      });
-      const assignment = {
-        id: assignmentId(`assignment-${suffix}`),
+  /**
+   * A published Story with one Article Revision behind it. The read side is what is under
+   * test, so the approval chain that a Story really walks is stood in for by the two durable
+   * facts an archive lookup actually depends on: the Story is published, and a receipt says
+   * when. Both are covered against the real transitions elsewhere in this suite.
+   */
+  async function publishReport(
+    suffix: string,
+    report: { readonly headline: string; readonly body: string; readonly publishedAt: string },
+    site: SiteId = DEFAULT_SITE,
+  ) {
+    const intake = makeStory(suffix);
+    const source = makeSource(suffix, OPERATOR, `https://example.com/archive/${suffix}`);
+    await createPostgresStoryRepository({ pool, siteId: site }).persist({ story: intake });
+    await createPostgresSourceRepositories({ pool, siteId: site }).sources.persist({ source });
+    await createPostgresStorySourceAttachmentRepository({ pool, siteId: site }).attach({
+      attachment: makeAttachment(suffix, { storyId: intake.id, sourceId: source.id }),
+    });
+    const assignment = {
+      id: assignmentId(`assignment-${suffix}`),
+      storyId: intake.id,
+      writerProfileId: agentProfileId("storyrail-general-writer-v1"),
+      sourceIds: [source.id],
+      angle: "Angle",
+      brief: "Brief",
+      constraints: null,
+      assignedBy: OPERATOR,
+      assignedAt: `assigned-${suffix}`,
+    };
+    const assigned = await createPostgresAssignmentPersistence({ pool }).persist({
+      expectedStory: intake,
+      assignment,
+      story: { ...intake, state: "assigned" as const, updatedAt: `assigned-${suffix}` },
+      transitionReceipt: {
+        transitionId: transitionId(`transition-assigned-${suffix}`),
         storyId: intake.id,
-        writerProfileId: agentProfileId("storyrail-general-writer-v1"),
-        sourceIds: [source.id],
-        angle: "Angle",
-        brief: "Brief",
-        constraints: null,
-        assignedBy: OPERATOR,
-        assignedAt: `assigned-${suffix}`,
-      };
-      const assigned = await createPostgresAssignmentPersistence({ pool }).persist({
-        expectedStory: intake,
-        assignment,
-        story: { ...intake, state: "assigned" as const, updatedAt: `assigned-${suffix}` },
-        transitionReceipt: {
-          transitionId: transitionId(`transition-assigned-${suffix}`),
-          storyId: intake.id,
-          previousState: "intake" as const,
-          nextState: "assigned" as const,
-          actor: OPERATOR,
-          reason: "Assign.",
-          occurredAt: `assigned-${suffix}`,
+        previousState: "intake" as const,
+        nextState: "assigned" as const,
+        actor: OPERATOR,
+        reason: "Assign.",
+        occurredAt: `assigned-${suffix}`,
+        revisionCycle: 0,
+      },
+    });
+    if (!assigned.ok) throw new Error("The archive fixture Assignment must persist.");
+
+    const runIdentity = agentRunId(`run-${suffix}`);
+    const actor = { type: "agent" as const, role: "writer" as const, runId: runIdentity };
+    const identity = {
+      id: runIdentity,
+      storyId: intake.id,
+      profileId: assignment.writerProfileId,
+      role: "writer" as const,
+      operation: "article_draft" as const,
+      model: { provider: "openrouter", model: "writer-model" },
+      prompt: { key: "storyrail_writer_draft", version: "1" },
+      requestedBy: OPERATOR,
+      startedAt: `started-${suffix}`,
+      input: {
+        story: {
+          id: intake.id,
+          title: intake.title,
+          state: "assigned" as const,
           revisionCycle: 0,
         },
-      });
-      if (!assigned.ok) throw new Error("The archive fixture Assignment must persist.");
-
-      const runIdentity = agentRunId(`run-${suffix}`);
-      const actor = { type: "agent" as const, role: "writer" as const, runId: runIdentity };
-      const identity = {
-        id: runIdentity,
-        storyId: intake.id,
-        profileId: assignment.writerProfileId,
-        role: "writer" as const,
-        operation: "article_draft" as const,
-        model: { provider: "openrouter", model: "writer-model" },
-        prompt: { key: "storyrail_writer_draft", version: "1" },
-        requestedBy: OPERATOR,
-        startedAt: `started-${suffix}`,
-        input: {
-          story: {
-            id: intake.id,
-            title: intake.title,
-            state: "assigned" as const,
-            revisionCycle: 0,
-          },
-          assignment: {
-            id: assignment.id,
-            storyId: intake.id,
-            writerProfileId: assignment.writerProfileId,
-            sourceIds: [source.id],
-            angle: "Angle",
-            brief: "Brief",
-            constraints: null,
-          },
-          evidence: [
-            {
-              sourceId: source.id,
-              relevance: `Relevant evidence ${suffix}`,
-              evidenceKind: "raw" as const,
-              evidenceId: sourceExtractionId(`evidence-${suffix}`),
-            },
-          ],
-          unavailableSourceIds: [],
-        },
-      };
-      await createPostgresAgentRunRepository({ pool }).append({
-        ...identity,
-        completedAt: null,
-        outcome: "running",
-      } as unknown as AgentRun);
-      const article = {
-        id: articleId(`article-${suffix}`),
-        storyId: intake.id,
-        assignmentId: assignment.id,
-        createdAt: `completed-${suffix}`,
-      };
-      const revision = {
-        id: articleRevisionId(`revision-${suffix}`),
-        articleId: article.id,
-        revisionNumber: 1 as const,
-        writerProfileId: assignment.writerProfileId,
-        agentRunId: runIdentity,
-        headline: report.headline,
-        dek: null,
-        blocks: [{ kind: "context" as const, markdown: report.body, citations: [] }],
-        createdBy: actor,
-        createdAt: `completed-${suffix}`,
-      };
-      const drafted = await createPostgresWriterDraftPersistence({ pool }).persist({
-        expectedStory: assigned.story,
-        run: {
-          ...identity,
-          completedAt: `completed-${suffix}`,
-          outcome: "succeeded",
-          articleId: article.id,
-          revisionId: revision.id,
-        } as never,
-        article,
-        revision,
-        story: { ...assigned.story, state: "in_progress" as const, updatedAt: `drafted-${suffix}` },
-        transitionReceipt: {
-          transitionId: transitionId(`transition-drafted-${suffix}`),
+        assignment: {
+          id: assignment.id,
           storyId: intake.id,
-          previousState: "assigned" as const,
-          nextState: "in_progress" as const,
-          actor,
-          reason: "Writer created the initial Article draft.",
-          occurredAt: `drafted-${suffix}`,
-          revisionCycle: 0,
+          writerProfileId: assignment.writerProfileId,
+          sourceIds: [source.id],
+          angle: "Angle",
+          brief: "Brief",
+          constraints: null,
         },
-      });
-      if (!drafted.ok) throw new Error("The archive fixture draft must persist.");
-
-      await pool.query(
-        `UPDATE storyrail.stories
-         SET state='published', payload=jsonb_set(payload,'{state}','"published"')
-         WHERE story_id=$1`,
-        [intake.id],
-      );
-      await pool.query(
-        `INSERT INTO storyrail.story_transition_receipts
-           (transition_id, story_id, previous_state, next_state, revision_cycle, payload)
-         VALUES ($1,$2,'approved','published',0,$3::jsonb)`,
-        [
-          `transition-published-${suffix}`,
-          intake.id,
-          JSON.stringify({
-            transitionId: `transition-published-${suffix}`,
-            storyId: intake.id,
-            previousState: "approved",
-            nextState: "published",
-            actor: OPERATOR,
-            reason: "Cleared for release.",
-            occurredAt: report.publishedAt,
-            revisionCycle: 0,
-          }),
+        evidence: [
+          {
+            sourceId: source.id,
+            relevance: `Relevant evidence ${suffix}`,
+            evidenceKind: "raw" as const,
+            evidenceId: sourceExtractionId(`evidence-${suffix}`),
+          },
         ],
-      );
-      return { storyId: intake.id, source };
-    }
+        unavailableSourceIds: [],
+      },
+    };
+    await createPostgresAgentRunRepository({ pool }).append({
+      ...identity,
+      completedAt: null,
+      outcome: "running",
+    } as unknown as AgentRun);
+    const article = {
+      id: articleId(`article-${suffix}`),
+      storyId: intake.id,
+      assignmentId: assignment.id,
+      createdAt: `completed-${suffix}`,
+    };
+    const revision = {
+      id: articleRevisionId(`revision-${suffix}`),
+      articleId: article.id,
+      revisionNumber: 1 as const,
+      writerProfileId: assignment.writerProfileId,
+      agentRunId: runIdentity,
+      headline: report.headline,
+      dek: null,
+      blocks: [{ kind: "context" as const, markdown: report.body, citations: [] }],
+      createdBy: actor,
+      createdAt: `completed-${suffix}`,
+    };
+    const drafted = await createPostgresWriterDraftPersistence({ pool }).persist({
+      expectedStory: assigned.story,
+      run: {
+        ...identity,
+        completedAt: `completed-${suffix}`,
+        outcome: "succeeded",
+        articleId: article.id,
+        revisionId: revision.id,
+      } as never,
+      article,
+      revision,
+      story: { ...assigned.story, state: "in_progress" as const, updatedAt: `drafted-${suffix}` },
+      transitionReceipt: {
+        transitionId: transitionId(`transition-drafted-${suffix}`),
+        storyId: intake.id,
+        previousState: "assigned" as const,
+        nextState: "in_progress" as const,
+        actor,
+        reason: "Writer created the initial Article draft.",
+        occurredAt: `drafted-${suffix}`,
+        revisionCycle: 0,
+      },
+    });
+    if (!drafted.ok) throw new Error("The archive fixture draft must persist.");
 
+    await pool.query(
+      `UPDATE storyrail.stories
+       SET state='published', payload=jsonb_set(payload,'{state}','"published"')
+       WHERE story_id=$1`,
+      [intake.id],
+    );
+    await pool.query(
+      `INSERT INTO storyrail.story_transition_receipts
+         (transition_id, story_id, previous_state, next_state, revision_cycle, payload)
+       VALUES ($1,$2,'approved','published',0,$3::jsonb)`,
+      [
+        `transition-published-${suffix}`,
+        intake.id,
+        JSON.stringify({
+          transitionId: `transition-published-${suffix}`,
+          storyId: intake.id,
+          previousState: "approved",
+          nextState: "published",
+          actor: OPERATOR,
+          reason: "Cleared for release.",
+          occurredAt: report.publishedAt,
+          revisionCycle: 0,
+        }),
+      ],
+    );
+    return { storyId: intake.id, source };
+  }
+
+  describe("the newsroom's own archive", () => {
     it("does not return another Site's published Revision", async () => {
       await publishReport(
         "archive-other-site",
@@ -1801,6 +1816,369 @@ describePostgres("PostgreSQL persistence repositories", () => {
       ).resolves.toEqual([]);
     });
   });
+  describe("delivering a published Story outside the system", () => {
+    const intent = (options: {
+      readonly id: string;
+      readonly storyId: string;
+      readonly revisionId: string;
+      readonly remoteId: string | null;
+      readonly operation?: "create" | "update";
+    }) =>
+      ({
+        id: options.id,
+        storyId: options.storyId,
+        revisionId: options.revisionId,
+        destination: "studiocms",
+        remoteId: options.remoteId,
+        request: {
+          operation: options.operation ?? "create",
+          slug: "a-delivered-headline",
+          draft: true,
+          bodyCharacters: 64,
+        },
+        startedAt: "2026-08-24T10:00:00.000Z",
+        completedAt: null,
+        outcome: "running",
+      }) as never;
+
+    // The row exists while the delivery is still an intention, so a process that died having
+    // already made a page on a website leaves something an operator can find. It cannot name the
+    // page — the destination mints that identifier — so what it carries is the slug it chose.
+    it("records the address it is about to write to before any response exists", async () => {
+      const published = await publishReport("delivery-running", {
+        headline: "A delivered headline",
+        body: "The body of a delivered report.",
+        publishedAt: "2026-08-24T09:00:00.000Z",
+      });
+      const repository = createPostgresStoryDeliveryRepository({ pool });
+
+      await expect(
+        repository.append(
+          intent({
+            id: "delivery-running",
+            storyId: published.storyId,
+            revisionId: "revision-delivery-running",
+            remoteId: null,
+          }),
+        ),
+      ).resolves.toMatchObject({ ok: true });
+
+      await expect(
+        pool.query(
+          `SELECT remote_id, outcome, completed_at, payload -> 'request' ->> 'slug' AS slug
+           FROM storyrail.story_deliveries WHERE delivery_id = $1`,
+          ["delivery-running"],
+        ),
+      ).resolves.toMatchObject({
+        rows: [
+          {
+            remote_id: null,
+            outcome: "running",
+            completed_at: null,
+            slug: "a-delivered-headline",
+          },
+        ],
+      });
+    });
+
+    it("refuses to call a delivery accepted when it cannot name the page it wrote", async () => {
+      const published = await publishReport("delivery-nameless", {
+        headline: "A delivered headline",
+        body: "The body of a delivered report.",
+        publishedAt: "2026-08-24T09:00:00.000Z",
+      });
+
+      await expect(
+        pool.query(
+          `INSERT INTO storyrail.story_deliveries
+             (delivery_id, story_id, revision_id, destination, remote_id, outcome, started_at, completed_at, payload)
+           VALUES ('delivery-nameless', $1, $2, 'studiocms', NULL, 'succeeded', $3, $3, $4::jsonb)`,
+          [
+            published.storyId,
+            "revision-delivery-nameless",
+            "2026-08-24T10:00:00.000Z",
+            JSON.stringify({
+              id: "delivery-nameless",
+              storyId: published.storyId,
+              revisionId: "revision-delivery-nameless",
+              destination: "studiocms",
+              remoteId: null,
+              request: {
+                operation: "create",
+                slug: "a-delivered-headline",
+                draft: true,
+                bodyCharacters: 64,
+              },
+              startedAt: "2026-08-24T10:00:00.000Z",
+              completedAt: "2026-08-24T10:00:01.000Z",
+              outcome: "succeeded",
+              result: { status: 200, message: "Page created" },
+            }),
+          ],
+        ),
+      ).rejects.toMatchObject({ constraint: "story_deliveries_succeeded_remote_id_check" });
+    });
+
+    it("learns the page it made on completion and never renames one it already knew", async () => {
+      const published = await publishReport("delivery-learns", {
+        headline: "A delivered headline",
+        body: "The body of a delivered report.",
+        publishedAt: "2026-08-24T09:00:00.000Z",
+      });
+      const repository = createPostgresStoryDeliveryRepository({ pool });
+      const created = intent({
+        id: "delivery-learns",
+        storyId: published.storyId,
+        revisionId: "revision-delivery-learns",
+        remoteId: null,
+      });
+      await repository.append(created);
+
+      // The one moment remote_id may change: from naming nothing to naming what came back.
+      await expect(
+        repository.complete({
+          ...(created as unknown as Record<string, unknown>),
+          remoteId: "page-minted-elsewhere",
+          completedAt: "2026-08-24T10:00:01.000Z",
+          outcome: "succeeded",
+          result: { status: 200, message: "Page created" },
+        } as never),
+      ).resolves.toMatchObject({ ok: true });
+
+      const updating = intent({
+        id: "delivery-knew",
+        storyId: published.storyId,
+        revisionId: "revision-delivery-learns",
+        remoteId: "page-minted-elsewhere",
+        operation: "update",
+      });
+      await repository.append(updating);
+      // A page StoryRail was already updating cannot become a different page on the way back.
+      await expect(
+        pool.query(
+          "UPDATE storyrail.story_deliveries SET remote_id = 'some-other-page', outcome = 'succeeded', completed_at = $2 WHERE delivery_id = $1",
+          ["delivery-knew", "2026-08-24T10:00:02.000Z"],
+        ),
+      ).rejects.toMatchObject({ message: expect.stringContaining("cannot change what it sent") });
+    });
+
+    it("completes a delivery once and refuses to reopen it", async () => {
+      const published = await publishReport("delivery-once", {
+        headline: "A delivered headline",
+        body: "The body of a delivered report.",
+        publishedAt: "2026-08-24T09:00:00.000Z",
+      });
+      const repository = createPostgresStoryDeliveryRepository({ pool });
+      const running = intent({
+        id: "delivery-once",
+        storyId: published.storyId,
+        revisionId: "revision-delivery-once",
+        remoteId: null,
+      });
+      await repository.append(running);
+
+      const failed = {
+        ...(running as unknown as Record<string, unknown>),
+        completedAt: "2026-08-24T10:00:01.000Z",
+        outcome: "failed",
+        failure: { code: "DESTINATION_REJECTED", message: "That slug is taken." },
+      } as never;
+      await expect(repository.complete(failed)).resolves.toMatchObject({ ok: true });
+      // A failed delivery stays failed. Nothing re-attempts it, so nothing may rewrite it.
+      await expect(repository.complete(failed)).resolves.toMatchObject({
+        ok: false,
+        error: { code: "STORY_DELIVERY_NOT_RUNNING" },
+      });
+      await expect(
+        pool.query(
+          "UPDATE storyrail.story_deliveries SET outcome = 'succeeded' WHERE delivery_id = $1",
+          ["delivery-once"],
+        ),
+      ).rejects.toMatchObject({ message: expect.stringContaining("already complete") });
+    });
+
+    it("finds the page a later Revision must update rather than making a second one", async () => {
+      const published = await publishReport("delivery-prior", {
+        headline: "A delivered headline",
+        body: "The body of a delivered report.",
+        publishedAt: "2026-08-24T09:00:00.000Z",
+      });
+      const repository = createPostgresStoryDeliveryRepository({ pool });
+      const first = intent({
+        id: "delivery-prior-1",
+        storyId: published.storyId,
+        revisionId: "revision-delivery-prior",
+        remoteId: null,
+      });
+      await repository.append(first);
+      await repository.complete({
+        ...(first as unknown as Record<string, unknown>),
+        remoteId: "page-prior",
+        completedAt: "2026-08-24T10:00:01.000Z",
+        outcome: "succeeded",
+        result: { status: 200, message: "Page created" },
+      } as never);
+      const refused = intent({
+        id: "delivery-prior-2",
+        storyId: published.storyId,
+        revisionId: "revision-delivery-prior",
+        remoteId: null,
+      });
+      await repository.append(refused);
+      await repository.complete({
+        ...(refused as unknown as Record<string, unknown>),
+        completedAt: "2026-08-24T10:00:02.000Z",
+        outcome: "failed",
+        failure: { code: "DESTINATION_UNREACHABLE", message: "No answer." },
+      } as never);
+
+      await expect(
+        repository.findLatestSucceeded({
+          storyId: published.storyId,
+          destination: "studiocms",
+        }),
+      ).resolves.toMatchObject({ remoteId: "page-prior" });
+      // A refusal never becomes the page a later Revision is written over.
+      await expect(
+        repository.findLatestSucceeded({
+          storyId: published.storyId,
+          destination: "somebody_elses_cms",
+        }),
+      ).resolves.toBeNull();
+    });
+
+    it("refuses a delivery that has finished without saying when", async () => {
+      const published = await publishReport("delivery-half-finished", {
+        headline: "A delivered headline",
+        body: "The body of a delivered report.",
+        publishedAt: "2026-08-24T09:00:00.000Z",
+      });
+
+      await expect(
+        pool.query(
+          `INSERT INTO storyrail.story_deliveries
+             (delivery_id, story_id, revision_id, destination, remote_id, outcome, started_at, completed_at, payload)
+           VALUES ('delivery-half', $1, $2, 'studiocms', 'page-half', 'succeeded', $3, NULL, $4::jsonb)`,
+          [
+            published.storyId,
+            "revision-delivery-half-finished",
+            "2026-08-24T10:00:00.000Z",
+            JSON.stringify({
+              id: "delivery-half",
+              storyId: published.storyId,
+              revisionId: "revision-delivery-half-finished",
+              destination: "studiocms",
+              remoteId: "page-half",
+              request: {
+                operation: "create",
+                slug: "a-delivered-headline",
+                draft: true,
+                bodyCharacters: 64,
+              },
+              startedAt: "2026-08-24T10:00:00.000Z",
+              completedAt: null,
+              outcome: "succeeded",
+              result: { status: 200, message: "Page created" },
+            }),
+          ],
+        ),
+      ).rejects.toMatchObject({ constraint: "story_deliveries_completed_check" });
+    });
+
+    it("refuses a record large enough to be a copy of the Article it delivered", async () => {
+      const published = await publishReport("delivery-oversized", {
+        headline: "A delivered headline",
+        body: "The body of a delivered report.",
+        publishedAt: "2026-08-24T09:00:00.000Z",
+      });
+
+      await expect(
+        pool.query(
+          `INSERT INTO storyrail.story_deliveries
+             (delivery_id, story_id, revision_id, destination, remote_id, outcome, started_at, completed_at, payload)
+           VALUES ('delivery-oversized', $1, $2, 'studiocms', 'page-oversized', 'succeeded', $3, $3, $4::jsonb)`,
+          [
+            published.storyId,
+            "revision-delivery-oversized",
+            "2026-08-24T10:00:00.000Z",
+            JSON.stringify({
+              id: "delivery-oversized",
+              storyId: published.storyId,
+              revisionId: "revision-delivery-oversized",
+              destination: "studiocms",
+              remoteId: "page-oversized",
+              request: {
+                operation: "create",
+                slug: "a-delivered-headline",
+                draft: true,
+                bodyCharacters: 64,
+              },
+              startedAt: "2026-08-24T10:00:00.000Z",
+              completedAt: "2026-08-24T10:00:01.000Z",
+              outcome: "succeeded",
+              result: { status: 200, message: "x".repeat(4_001) },
+            }),
+          ],
+        ),
+      ).rejects.toMatchObject({ constraint: "story_deliveries_payload_shape_check" });
+    });
+
+    it("refuses a failure code the newsroom does not name", async () => {
+      const published = await publishReport("delivery-unnamed-failure", {
+        headline: "A delivered headline",
+        body: "The body of a delivered report.",
+        publishedAt: "2026-08-24T09:00:00.000Z",
+      });
+
+      await expect(
+        pool.query(
+          `INSERT INTO storyrail.story_deliveries
+             (delivery_id, story_id, revision_id, destination, remote_id, outcome, started_at, completed_at, payload)
+           VALUES ('delivery-unnamed', $1, $2, 'studiocms', 'page-unnamed', 'failed', $3, $3, $4::jsonb)`,
+          [
+            published.storyId,
+            "revision-delivery-unnamed-failure",
+            "2026-08-24T10:00:00.000Z",
+            JSON.stringify({
+              id: "delivery-unnamed",
+              storyId: published.storyId,
+              revisionId: "revision-delivery-unnamed-failure",
+              destination: "studiocms",
+              remoteId: "page-unnamed",
+              request: {
+                operation: "create",
+                slug: "a-delivered-headline",
+                draft: true,
+                bodyCharacters: 64,
+              },
+              startedAt: "2026-08-24T10:00:00.000Z",
+              completedAt: "2026-08-24T10:00:01.000Z",
+              outcome: "failed",
+              failure: { code: "DESTINATION_HAD_A_BAD_DAY", message: null },
+            }),
+          ],
+        ),
+      ).rejects.toMatchObject({ constraint: "story_deliveries_failure_check" });
+    });
+
+    it("refuses a destination that is not a name a record can carry", async () => {
+      const published = await publishReport("delivery-unnamed-destination", {
+        headline: "A delivered headline",
+        body: "The body of a delivered report.",
+        publishedAt: "2026-08-24T09:00:00.000Z",
+      });
+
+      await expect(
+        pool.query(
+          `INSERT INTO storyrail.story_deliveries
+             (delivery_id, story_id, revision_id, destination, remote_id, outcome, started_at, completed_at, payload)
+           VALUES ('delivery-blank', $1, $2, '  ', 'page-blank', 'running', $3, NULL, '{}'::jsonb)`,
+          [published.storyId, "revision-delivery-unnamed-destination", "2026-08-24T10:00:00.000Z"],
+        ),
+      ).rejects.toMatchObject({ constraint: "story_deliveries_destination_format_check" });
+    });
+  });
+
   describe("Article block grounding constraints", () => {
     // The rule that a claim must say where it came from is enforced by the database, not only
     // by the domain, so no write path can record an unverifiable assertion.
@@ -2441,6 +2819,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         "source_triage_decisions",
         "stories",
         "story_assignments",
+        "story_deliveries",
         "story_source_attachments",
         "story_transition_receipts",
         "url_sources",
@@ -2926,6 +3305,70 @@ describePostgres("PostgreSQL persistence repositories", () => {
             is_identity: "NO",
           },
           {
+            table_name: "story_deliveries",
+            column_name: "delivery_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "story_deliveries",
+            column_name: "story_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "story_deliveries",
+            column_name: "revision_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "story_deliveries",
+            column_name: "destination",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "story_deliveries",
+            column_name: "remote_id",
+            data_type: "text",
+            // Null until the destination says which page it made.
+            is_nullable: "YES",
+            is_identity: "NO",
+          },
+          {
+            table_name: "story_deliveries",
+            column_name: "outcome",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "story_deliveries",
+            column_name: "started_at",
+            data_type: "timestamp with time zone",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "story_deliveries",
+            column_name: "completed_at",
+            data_type: "timestamp with time zone",
+            is_nullable: "YES",
+            is_identity: "NO",
+          },
+          {
+            table_name: "story_deliveries",
+            column_name: "payload",
+            data_type: "jsonb",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
             table_name: "url_sources",
             column_name: "source_id",
             data_type: "text",
@@ -2948,7 +3391,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           },
         ]),
       );
-      expect(columns.rows).toHaveLength(120);
+      expect(columns.rows).toHaveLength(129);
     });
 
     it("creates the required primary, unique, foreign-key, and check constraints", async () => {
@@ -5411,7 +5854,49 @@ describePostgres("PostgreSQL persistence repositories", () => {
           director: "google/gemini-3.7-flash",
           researcher: "google/gemini-3.7-flash",
         },
+        // Nowhere to deliver, because no migration can invent an address for a newsroom.
+        destination: null,
       });
+    });
+
+    it("stores where a newsroom delivers and refuses a half-configured destination", async () => {
+      const before = await settings(DEFAULT_SITE).find();
+      if (!before) throw new Error("The settings fixture must exist.");
+      const configured = {
+        ...before,
+        destination: {
+          baseUrl: "https://newsroom.test/studiocms_api/rest/v1",
+          package: "studiocms/markdown",
+          draft: true,
+        },
+      };
+
+      try {
+        await settings(DEFAULT_SITE).update({
+          settings: configured,
+          updatedAt: "2026-08-24T00:00:00.000Z",
+        });
+
+        await expect(settings(DEFAULT_SITE).find()).resolves.toEqual(configured);
+        // A destination missing what a delivery needs is refused by the database, not stored and
+        // discovered while a page is half made.
+        await expect(
+          pool.query(
+            `UPDATE storyrail.site_settings
+             SET payload = jsonb_set(payload, '{destination}', $2::jsonb)
+             WHERE site_id = $1`,
+            [
+              DEFAULT_SITE,
+              JSON.stringify({ baseUrl: "https://newsroom.test", package: "studiocms/markdown" }),
+            ],
+          ),
+        ).rejects.toMatchObject({ constraint: "site_settings_destination_shape_check" });
+      } finally {
+        await settings(DEFAULT_SITE).update({
+          settings: before,
+          updatedAt: "2026-08-24T00:00:00.000Z",
+        });
+      }
     });
 
     it("keeps one Site's chosen models away from another's", async () => {
@@ -5424,6 +5909,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           director: "chosen/four",
           researcher: "chosen/five",
         },
+        destination: null,
       };
 
       try {

@@ -25,12 +25,15 @@ const MODELS = {
 function runtimeWith(overrides: Partial<StoryRuntime>): StoryRuntime {
   return {
     readSiteSettings: vi.fn(async () => ({
-      settings: { models: MODELS },
+      settings: { models: MODELS, destination: null },
       credentials: [
         { slot: OPENROUTER_API_KEY_SLOT, hint: "7f3a", updatedAt: "2026-08-23T00:00:00.000Z" },
       ],
     })),
-    updateSiteSettings: vi.fn(async () => ({ ok: true as const, settings: { models: MODELS } })),
+    updateSiteSettings: vi.fn(async () => ({
+      ok: true as const,
+      settings: { models: MODELS, destination: null },
+    })),
     setSiteCredential: vi.fn(async () => ({
       ok: true as const,
       slot: OPENROUTER_API_KEY_SLOT,
@@ -61,7 +64,7 @@ describe("reading the settings a newsroom runs on", () => {
     expect(response.status).toBe(200);
     expect(JSON.parse(body)).toEqual({
       ok: true,
-      settings: { models: MODELS },
+      settings: { models: MODELS, destination: null },
       credentials: [
         { slot: "openrouter_api_key", hint: "7f3a", updatedAt: "2026-08-23T00:00:00.000Z" },
       ],
@@ -83,14 +86,17 @@ describe("changing the settings a newsroom runs on", () => {
   it("stores the models an operator chose and reflects them back", async () => {
     const updateSiteSettings = vi.fn(async () => ({
       ok: true as const,
-      settings: { models: MODELS },
+      settings: { models: MODELS, destination: null },
     }));
     const response = await createUpdateSiteSettingsHttpHandler({
       getRuntime: () => runtimeWith({ updateSiteSettings }),
     })(jsonRequest({ models: MODELS }));
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true, settings: { models: MODELS } });
+    expect(await response.json()).toEqual({
+      ok: true,
+      settings: { models: MODELS, destination: null },
+    });
     expect(updateSiteSettings).toHaveBeenCalledWith({ models: MODELS });
   });
 

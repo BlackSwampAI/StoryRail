@@ -51,7 +51,7 @@ describe("per-Site settings", () => {
   it("accepts a model for every role and trims what it stores", () => {
     expect(recordSiteSettings({ models: { ...models, writer: "  provider/three  " } })).toEqual({
       ok: true,
-      settings: { models },
+      settings: { models, destination: null },
     });
   });
 
@@ -77,6 +77,74 @@ describe("per-Site settings", () => {
     expect(
       recordSiteSettings({ models: { ...models, openRouterApiKey: "sk-or-v1-smuggled" } }),
     ).toMatchObject({ ok: false, error: { code: "SITE_SETTINGS_MODELS_INVALID" } });
+  });
+
+  it("accepts a destination and normalises the address it will deliver to", () => {
+    expect(
+      recordSiteSettings({
+        models,
+        destination: {
+          baseUrl: "  https://newsroom.test/studiocms_api/rest/v1/  ",
+          package: "studiocms/markdown",
+          draft: true,
+        },
+      }),
+    ).toEqual({
+      ok: true,
+      settings: {
+        models,
+        destination: {
+          baseUrl: "https://newsroom.test/studiocms_api/rest/v1",
+          package: "studiocms/markdown",
+          draft: true,
+        },
+      },
+    });
+  });
+
+  it("refuses a destination missing anything a delivery would need", () => {
+    expect(
+      recordSiteSettings({
+        models,
+        destination: { baseUrl: "https://newsroom.test", draft: true },
+      }),
+    ).toMatchObject({ ok: false, error: { code: "SITE_SETTINGS_DESTINATION_INVALID" } });
+  });
+
+  it("refuses a destination carrying an author the destination would ignore", () => {
+    // Pages are attributed to whoever owns the token. A stored author would be a setting an
+    // operator could fill in and watch do nothing.
+    expect(
+      recordSiteSettings({
+        models,
+        destination: {
+          baseUrl: "https://newsroom.test",
+          authorId: "author-1",
+          package: "studiocms/markdown",
+          draft: true,
+        },
+      }),
+    ).toMatchObject({ ok: false, error: { code: "SITE_SETTINGS_DESTINATION_INVALID" } });
+  });
+
+  it("refuses an address that is not absolute, so nothing resolves it against this process", () => {
+    expect(
+      recordSiteSettings({
+        models,
+        destination: {
+          baseUrl: "/studiocms_api/rest/v1",
+          package: "studiocms/markdown",
+          draft: true,
+        },
+      }),
+    ).toMatchObject({ ok: false, error: { code: "SITE_SETTINGS_DESTINATION_INVALID" } });
+  });
+
+  it("treats a newsroom with nowhere to deliver as configured rather than broken", () => {
+    expect(recordSiteSettings({ models, destination: null })).toMatchObject({
+      ok: true,
+      settings: { destination: null },
+    });
   });
 
   it.each([null, undefined, "models", 7, [], { models: [] }])(

@@ -16,11 +16,21 @@ export function createUpdateSiteSettings(dependencies: {
   return async (candidate: unknown): Promise<UpdateSiteSettingsResult> => {
     const validated = recordSiteSettings(candidate);
     if (!validated.ok) return validated;
-    await dependencies.settings.update({
-      settings: validated.settings,
-      updatedAt: dependencies.now(),
-    });
-    return { ok: true, settings: validated.settings };
+
+    // A submission that says nothing about the destination leaves the stored one alone, and only
+    // an explicit null clears it. The settings screen sends models and no destination field, so
+    // without this a newsroom would lose where it delivers the next time anybody changed a model.
+    const mentionsDestination =
+      typeof candidate === "object" && candidate !== null && "destination" in candidate;
+    const settings: SiteSettings = mentionsDestination
+      ? validated.settings
+      : {
+          ...validated.settings,
+          destination: (await dependencies.settings.find())?.destination ?? null,
+        };
+
+    await dependencies.settings.update({ settings, updatedAt: dependencies.now() });
+    return { ok: true, settings };
   };
 }
 
