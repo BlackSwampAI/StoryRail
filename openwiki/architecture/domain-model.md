@@ -222,6 +222,16 @@ The decision is persisted atomically with the Story transition and receipt: `app
 
 Revision 1 is created by the [Writer draft workflow](application-workflows.md#writer-draft-workflow); Revisions 2 and 3 are appended by the [Writer revision workflow](application-workflows.md#writer-revision-workflow) after an operator requests changes.
 
+## Story Deliveries
+
+`story-delivery-types.ts` and `story-delivery.ts` model the delivery of a published Story's Article Revision to an external destination (e.g., StudioCMS). Delivery is an outbound write and is tracked as an explicit audit record:
+
+- A delivery record describes what was sent (`StoryDeliveryRequest`: `operation` ("create" | "update"), `slug`, `draft` boolean, `bodyCharacters`) and what came back (`outcome`: "running" | "succeeded" | "failed"), never storing the Article body itself.
+- `DELIVERY_FAILURE_CODES`: `DESTINATION_UNREACHABLE`, `DESTINATION_REJECTED`, `DESTINATION_UNAUTHORIZED`, `DESTINATION_RESPONSE_INVALID`.
+- Durability pattern: Following `agent_tool_calls`, a delivery row is written as `running` before the HTTP request leaves the newsroom process, ensuring no write to the outside world occurs unrecorded. When the response arrives, the row is updated in place to `succeeded` or `failed`.
+- Slug generation: `storyDeliverySlug(headline)` derives a URL-safe slug (max 96 chars) deterministically from the headline.
+- Remote ID tracking: For `create`, StudioCMS returns a prose message containing the created page ID, which StoryRail parses and stores in `remoteId`. Subsequent deliveries of newer revisions update the existing page via `PATCH` using this `remoteId`.
+
 ## Re-export barrel
 
-`src/domain/editorial/index.ts` re-exports every module in the domain — Source intake/extraction/triage/preparation, Story creation and attachment, the state machine, Agent Profiles, Assignments, Assignment Proposals, AgentRuns, Director review, ReviewDecisions, and Articles — and `src/application/index.ts` re-exports the application layer's domain-facing types so callers import from a single barrel, including the writer-revisions module.
+`src/domain/editorial/index.ts` re-exports every module in the domain — Source intake/extraction/triage/preparation, Story creation and attachment, the state machine, Agent Profiles, Assignments, Assignment Proposals, AgentRuns, Director review, ReviewDecisions, Articles, and Story Deliveries — and `src/application/index.ts` re-exports the application layer's domain-facing types so callers import from a single barrel, including the writer-revisions, story-deliveries, and model-catalog modules.

@@ -233,6 +233,22 @@ It alters the `storyrail.agent_tool_calls` table to:
 
 `database/migrations/0066-site-credentials.sql` creates `storyrail.site_credentials` to store encrypted credentials for external services (e.g., CMS, social media) scoped to a site. It uses the `STORYRAIL_CREDENTIAL_KEY` for encryption.
 
+## Migration 0067 — story deliveries
+
+`database/migrations/0067-story-deliveries.sql` creates `storyrail.story_deliveries` to record outbound publishing deliveries to external destinations:
+- `delivery_id` (text PK), `story_id` (FK → `stories`), `revision_id` (FK → `article_revisions`), `destination` (text, non-empty lower-snake format), `remote_id` (text, nullable), `outcome` (text, `CHECK in ('running', 'succeeded', 'failed')`), `started_at` (timestamptz), `completed_at` (timestamptz), `payload` (jsonb).
+- Enforces durability invariants: a `running` delivery has `completed_at IS NULL`; a `succeeded` or `failed` delivery has `completed_at IS NOT NULL`.
+- An accepted (`succeeded`) delivery must have a non-null `remote_id` (`story_deliveries_succeeded_remote_id_check`).
+- Trigger `storyrail.story_delivery_completes_once()` ensures a delivery transitions from `running` to terminal exactly once and cannot be reopened.
+- Note: A delivery does not have a `site_id` column because it inherits tenancy through its parent `story_id`.
+
+## Migration 0068 — destination settings
+
+`database/migrations/0068-destination-settings.sql` extends `storyrail.site_settings` to support optional per-site destination configuration:
+- Updates `site_settings_payload_exact_shape_check` to allow an optional `destination` object alongside `models`.
+- Adds `site_settings_destination_shape_check` requiring `baseUrl` (http/https URL), `package` (non-empty string), and `draft` (boolean).
+- API tokens are kept in encrypted `site_credentials` under slot `studiocms_api_token` rather than in plain settings.
+
 ## Integration test lifecycle
 
-The PostgreSQL integration tests (`src/adapters/source-persistence/postgres-source-repositories.test.ts` and the Story/attachment/assignment/run/article/review/writer-revision/story-rejection suites) connect via `STORYRAIL_TEST_DATABASE_URL`, verify the database name is exactly `storyrail_test`, drop and recreate the `storyrail` schema, apply migrations `0012`, `0017`, `0018`, `0024`, `0025`, `0027`, `0028`, `0030`, `0031`, `0038`, `0041`, `0049`, `0053`, `0054`, `0055`, `0056`, `0057`, `0058`, `0059`, `0060`, `0061`, `0062`, `0063`, `0064`, `0065`, and `0066` in order, and truncate the editorial tables (plus delete non-built-in Agent Profiles) between cases. The suite never creates or drops a database.
+The PostgreSQL integration tests (`src/adapters/source-persistence/postgres-source-repositories.test.ts` and the Story/attachment/assignment/run/article/review/writer-revision/story-rejection suites) connect via `STORYRAIL_TEST_DATABASE_URL`, verify the database name is exactly `storyrail_test`, drop and recreate the `storyrail` schema, apply migrations `0012`, `0017`, `0018`, `0024`, `0025`, `0027`, `0028`, `0030`, `0031`, `0038`, `0041`, `0049`, `0053`, `0054`, `0055`, `0056`, `0057`, `0058`, `0059`, `0060`, `0061`, `0062`, `0063`, `0064`, `0065`, `0066`, `0067`, and `0068` in order, and truncate the editorial tables (plus delete non-built-in Agent Profiles) between cases. The suite never creates or drops a database.

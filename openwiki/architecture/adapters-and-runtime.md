@@ -68,6 +68,24 @@ All PostgreSQL adapters share a defensive pattern: they serialize the domain obj
 | `postgres-archive-repository.ts`                       | `storyrail.archive`                                                  | `ArchiveRepository`                                   |
 | `postgres-site-credential-persistence.ts`              | `storyrail.site_credentials`                                         | `SiteCredentialRepository`                            |
 | `postgres-site-settings-persistence.ts`                | `storyrail.site_settings`                                            | `SiteSettingsRepository`                              |
+| `postgres-story-delivery-repository.ts`                | `storyrail.story_deliveries`                                         | `StoryDeliveryRepository`                             |
+
+### Model catalog: OpenRouter
+
+`src/adapters/model-catalog/openrouter-model-catalog.ts` implements `ModelCatalog` against `https://openrouter.ai/api/v1/models`:
+- Fetches all available models and filters them to those that support `structured_outputs`.
+- Caches the successful model catalog in memory for 15 minutes (`ttlMs: 15 * 60 * 1000`). Failures are never cached.
+- Returns models sorted by display name.
+- The catalog is never stored in Postgres to avoid state drift with upstream providers.
+
+### Story delivery destinations: StudioCMS
+
+`src/adapters/story-delivery/studiocms-destination.ts` implements `DeliveryDestination` for StudioCMS:
+- Generates `POST /pages` (for initial creation) and `PATCH /pages/:id` (for revision updates) requests.
+- Maps HTTP status codes to domain `DeliveryFailureCode`s (`401`/`403` → `DESTINATION_UNAUTHORIZED`, `5xx`/`408`/`429` → `DESTINATION_UNREACHABLE`, other → `DESTINATION_REJECTED`).
+- Parses the created page ID from the success message (`"Page created successfully with id: <id>"`) to track `remoteId`.
+- Encodes boolean flags as numbers (`wireBoolean(draft)`: 1 or 0).
+- `site-delivery-destination-directory.ts` provides a `DeliveryDestinationDirectory` that resolves site settings and credentials (token in slot `studiocms_api_token`) to construct destination instances.
 
 `postgres-source-extraction-decoder.ts` decodes a persisted extraction row back into the `SuccessfulSourceExtraction` / `FailedSourceExtraction` union and is shared by the inspection and inbox adapters. `postgres-assignment-decoder.ts`, `postgres-agent-run-decoder.ts`, `postgres-article-decoder.ts`, and `postgres-review-decision-decoder.ts` perform the same strict-shape decoding for their respective payloads; the AgentRun decoder must handle the discriminated `assignment_proposal` / `article_draft` / `article_revision` / `article_review` union and its succeeded/failed variants, and the review-decision decoder re-validates the payload through the domain `createReviewDecision`. The review persistence adapters are transactional: both lock and recheck the expected Story under `FOR UPDATE` before persisting the transition, and the decision adapter verifies the current Article Revision matches and that no decision exists for that revision before inserting. The Story rejection persistence adapter (`postgres-story-rejection-persistence.ts`) follows the same transactional pattern: it pre-validates that the expected Story is in one of the rejectable states (`intake`, `assigned`, `in_progress`, `in_review`, `changes_requested`), the next state is `rejected`, and the receipt's actor is an `operator`, then `BEGIN`s, selects the Story `FOR UPDATE`, deep-compares the decoded row against the expected Story (`isDeepStrictEqual`), `UPDATE`s the Story, inserts the transition receipt, and verifies the durable result is byte-for-byte equal to the command before `COMMIT`. A changed Story returns `STORY_REJECTION_CONFLICT`; a unique/foreign-key violation (`23505`/`23503`) is also treated as a conflict. It reuses the existing `stories` and `story_transition_receipts` tables and the shared `decodePostgresTransitionReceipt` — no new migration is required. The Writer revision persistence adapter is similarly transactional: it locks and deep-compares the expected Story and current Article Revision under `FOR UPDATE`, takes a `FOR SHARE` lock on the matching ReviewDecision and its Director `AgentRun`, verifies they are byte-for-byte consistent with the run's input snapshot, then inserts the Writer revision `AgentRun`, the next `article_revisions` row, the updated Story, and the transition receipt in one transaction, returning `WRITER_REVISION_CONFLICT` if any expected row changed or a unique/foreign-key violation occurs.
 
@@ -93,8 +111,8 @@ All PostgreSQL adapters share a defensive pattern: they serialize the domain obj
 `src/runtime/story-runtime.ts`:
 
 - Requires only `STORYRAIL_DATABASE_URL`; throws `StoryRuntimeConfigurationError` (`STORYRAIL_DATABASE_URL_REQUIRED`) when missing/blank.
-- `createStoryRuntime(options)` builds one `pg.Pool` and constructs the story, attachment, inspection, listing, source-inbox, source-triage, agent-profile, assignment-persistence, review-submission-persistence, review-decision-persistence, and story-rejection-persistence repositories. It wires `createStory`, `attachSourceToStory`, `inspectStory`, `listStories`, `listPendingSources`, `recordSourceTriageDecision`, `createCustomWriterProfile`, `listAgentProfiles`, `assignStory`, `rejectStory`, `submitStoryReview`, and `recordStoryReviewDecision`.
-- Returns a frozen `StoryRuntime` exposing those twelve operations plus an idempotent `close()`.
+- `createStoryRuntime(options)` builds one `pg.Pool` and constructs the story, attachment, inspection, listing, source-inbox, source-triage, agent-profile, assignment-persistence, review-submission-persistence, review-decision-persistence, story-rejection-persistence, and story-delivery repositories. It wires `createStory`, `attachSourceToStory`, `inspectStory`, `listStories`, `listPendingSources`, `recordSourceTriageDecision`, `createCustomWriterProfile`, `listAgentProfiles`, `assignStory`, `rejectStory`, `submitStoryReview`, `recordStoryReviewDecision`, and `deliverStory`.
+- Returns a frozen `StoryRuntime` exposing those operations plus an idempotent `close()`.
 - `createStoryRuntimeFromEnvironment(options)` reads `STORYRAIL_DATABASE_URL` from `process.env` (or an injected environment).
 
 ### Assignment-editor runtime
@@ -115,4 +133,4 @@ All six runtimes accept optional `createPool`, `createUuid`, and `now` overrides
 
 ## Server providers (`src/server`)
 
-`src/server/*-runtime-provider.ts` are lazy singletons: `get()` builds the runtime from environment on first call and caches it. Next.js route handlers receive `getRuntime: provider.get`, so the pool is created only when a request first needs it. Providers exist for the Source-evidence, evidence-preparation, Story, Assignment-editor (`assignment-editor-runtime-provider.ts`), Writer (`writer-runtime-provider.ts`), and Director (`director-runtime-provider.ts`) runtimes.
+`src/server/*-runtime-provider.ts` are lazy singletons: `get()` builds the runtime from environment on first call and caches it. Next.js route handlers receive `getRuntime: provider.get`, so the pool is created only when a request first needs it. Providers exist for the Source-evidence, evidence-preparation, Story, Assignment-editor (`assignment-editor-runtime-provider.ts`), Writer (`writer-runtime-provider.ts`), Director (`director-runtime-provider.ts`), and Model-catalog (`model-catalog-provider.ts`) runtimes.

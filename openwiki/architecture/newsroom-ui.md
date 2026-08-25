@@ -10,8 +10,9 @@ tags: [ui, react, newsroom, nextjs]
 The newsroom is a single-page React client rendered by the Next.js home route. `src/app/page.tsx` renders `<NewsroomShell />`, and `src/app/layout.tsx` sets the document title/metadata. The shell is a client component (`"use client"`) in `src/features/newsroom/`.
 
 The UI includes a settings workspace (accessible via the account menu) where operators can configure:
-- API keys for external services (OpenRouter, Firecrawl) stored in a per-site encrypted credential store
-- Model identifiers for each supervised agent role (Assignment Editor, Writer, Director, Evidence Preparation, Researcher)
+- API keys for external services (OpenRouter, Firecrawl, StudioCMS token) stored in a per-site encrypted credential store
+- Model identifiers for each supervised agent role (Assignment Editor, Writer, Director, Evidence Preparation, Researcher), populated dynamically via the Model Catalog client (`model-catalog-client.ts`) which filters OpenRouter models to those supporting structured outputs
+- Publishing destination settings (base URL, package, draft default) for external delivery
 - These settings are persisted per newsroom/site and enable the corresponding agent runtimes to function
 
 ## NewsroomShell

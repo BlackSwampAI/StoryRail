@@ -298,6 +298,36 @@ Always returns 200 on success or 500 on internal failure.
 | 415/400| Media type / JSON / shape errors                                                                           |
 | 500    | Missing `STORYRAIL_OPERATOR_ID` or internal error                                                          |
 
+## POST /api/stories/[storyId]/deliveries — deliver a published Story
+
+- Route: `src/app/api/stories/[storyId]/deliveries/route.ts`
+- Handler: `src/interfaces/http/deliver-story-handler.ts`
+- Provider: `storyRuntimeProvider`
+- Body: `{}` (empty object).
+- Workflow: `deliverStory`. Validates that the Story is published and has an Article Revision, resolves the external delivery destination and credentials, records a `running` delivery row before the external request, dispatches to the destination (StudioCMS POST or PATCH), and updates the row to `succeeded` or `failed`.
+
+| Status | Condition |
+| ------ | --------- |
+| 200    | Delivery attempt finished (`succeeded` or `failed` outcome recorded) |
+| 404    | `STORY_NOT_FOUND` |
+| 409    | `STORY_NOT_PUBLISHED`, `STORY_HAS_NO_ARTICLE`, `STORY_DELIVERY_NOT_RECORDED` |
+| 422    | `DESTINATION_NOT_CONFIGURED`, `CREDENTIAL_UNAVAILABLE` |
+| 415/400| Media type / JSON / shape errors |
+| 500    | Internal error |
+
+## GET /api/model-catalog — list compatible LLM models
+
+- Route: `src/app/api/model-catalog/route.ts`
+- Handler: `src/interfaces/http/model-catalog-handlers.ts`
+- Provider: `modelCatalogProvider`
+- Workflow: Fetches models supporting structured outputs from OpenRouter, caching results in memory for 15 minutes.
+
+| Status | Condition |
+| ------ | --------- |
+| 200    | `{ ok: true, models: CatalogModel[] }` |
+| 503    | Model catalog unreachable or failed |
+| 500    | Internal error |
+
 ## Handler conventions
 
 - `statusFor*` functions map the discriminated workflow result `error.code` to an HTTP status, so domain error codes are the source of truth for HTTP semantics.

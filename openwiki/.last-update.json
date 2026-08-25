@@ -1,8 +1,8 @@
 {
-  "updatedAt": "2026-08-24T10:28:28.052Z",
+  "updatedAt": "2026-08-25T13:09:53.123Z",
   "command": "update",
-  "gitHead": "3eb41b38d7848dbcca0582dd974da29973d575b5",
-  "model": "nvidia/nemotron-3-super-120b-a12b:free",
+  "gitHead": "8d68f9467806db207f2eca04949e84dec9a5e884",
+  "model": "google/gemini-3.7-flash",
   "status": "complete",
   "language": "en"
 }
