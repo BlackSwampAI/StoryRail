@@ -46,6 +46,9 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `director-review-types.ts`, `director-review.ts` — `createDirectorReview` (advisory recommendation validation)
 - `review-decision-types.ts`, `review-decision.ts` — `createReviewDecision` (operator decision validation)
 - `article-types.ts`, `article.ts` — `createArticle`, `createFirstArticleRevision`, `createArticleRevision`
+- `story-delivery-types.ts`, `story-delivery.ts` — `recordStoryDelivery`, `storyDeliverySlug`
+- `site-settings-types.ts`, `site-settings.ts` — site model configuration and destination settings
+- `site-credential-types.ts`, `site-credential.ts` — encrypted credential storage
 - `index.ts` — barrel re-export
 
 ### `src/application` — use-case workflows + repository ports
@@ -53,6 +56,7 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `source-evidence/` — `preserve-url-source.ts`, `extract-persisted-source.ts`, `preserve-and-extract-url-source.ts`
 - `source-evidence-preparation/` — explicit model-backed preparation workflow and persistence port
 - `model/` — provider-neutral structured-model port
+- `model-catalog/` — `model-catalog.ts` port for listing structured-output compatible models
 - `source-extraction/` — `run-source-extraction.ts`
 - `source-persistence/` — `source-repositories.ts` (ports), `source-repositories.contract.ts` (contract harness)
 - `source-inbox/` — `source-inbox-repository.ts` (port)
@@ -73,6 +77,8 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `director-reviews/` — `run-director-review.ts`
 - `review-decisions/` — `record-story-review-decision.ts`, `review-decision-persistence.ts`
 - `story-rejections/` — `reject-story.ts`, `story-rejection-persistence.ts`
+- `story-deliveries/` — `deliver-story.ts`, `delivery-destination.ts`, `story-delivery-repository.ts`
+- `site-settings/` — `update-site-settings.ts`, `site-settings-repository.ts`
 - `index.ts` — barrel re-export
 
 ### `src/adapters` — PostgreSQL + Firecrawl implementations
@@ -83,6 +89,7 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `source-triage-persistence/` — `postgres-source-triage-decision-repository.ts`
 - `source-evidence-preparation-persistence/` — append-only PostgreSQL preparation repository and decoder
 - `model/` — LangChain-backed OpenRouter structured-model adapter
+- `model-catalog/` — `openrouter-model-catalog.ts`
 - `agent-profile-persistence/` — `postgres-agent-profile-repository.ts`, `postgres-agent-profile-decoder.ts`
 - `assignment-persistence/` — `postgres-assignment-persistence.ts`, `postgres-assignment-decoder.ts`
 - `agent-run-persistence/` — `postgres-agent-run-repository.ts`, `postgres-agent-run-decoder.ts`
@@ -93,6 +100,10 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `story-inspection/` — `postgres-story-inspection-repository.ts`
 - `story-listing/` — `postgres-story-listing-repository.ts`, `.test.ts`
 - `story-rejection-persistence/` — `postgres-story-rejection-persistence.ts`, `.test.ts`
+- `story-delivery-persistence/` — `postgres-story-delivery-repository.ts`
+- `story-delivery/` — `studiocms-destination.ts`, `site-delivery-destination-directory.ts`
+- `site-settings-persistence/` — `postgres-site-settings-repository.ts`
+- `site-credential-persistence/` — `postgres-site-credential-repository.ts`
 - `index.ts` — barrel re-export
 
 ### `src/runtime` — composed runtimes
@@ -114,6 +125,7 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `assignment-editor-runtime-provider.ts`
 - `writer-runtime-provider.ts`
 - `director-runtime-provider.ts`
+- `model-catalog-provider.ts`
 
 ### `src/interfaces/http` — HTTP handlers
 
@@ -133,6 +145,9 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `run-director-review-handler.ts`
 - `record-story-review-decision-handler.ts`
 - `reject-story-handler.ts`
+- `deliver-story-handler.ts`
+- `model-catalog-handlers.ts`
+- `site-settings-handlers.ts`
 
 ### `src/app` — Next.js routes
 

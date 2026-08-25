@@ -148,6 +148,24 @@ The operator may override the Director's recommendation (e.g., approve despite a
 
 Rejection is terminal and does not contact a model. It preserves all existing work: Sources, attachments, the Assignment, Articles and their revisions, `AgentRun`s, `ReviewDecision`s, and prior transition receipts are untouched — the rejection only appends one new Story row and one new `story_transition_receipts` row. The reason is stored on the durable transition receipt (not a denormalized Story field), so the newsroom reads it from the authoritative transition history after a reload. Rejection is a separate operator-owned Story transition; it is not a `ReviewDecision` and introduces no new domain entity. See the [domain model](domain-model.md#story-and-the-state-machine) for the state machine, the [HTTP API](http-api.md) for the rejection endpoint, and the [newsroom UI](newsroom-ui.md) for the operator rejection controls.
 
+## Story delivery workflow
+
+`src/application/story-deliveries/deliver-story.ts` — `createDeliverStory` sends the latest Article Revision of an approved/published Story to a configured external publishing destination (e.g. StudioCMS).
+
+1. Inspects the Story (`STORY_NOT_FOUND`).
+2. Validates that `story.state === "published"` (`STORY_NOT_PUBLISHED`). Only published Stories are delivered.
+3. Finds the latest Article Revision (`STORY_HAS_NO_ARTICLE`).
+4. Resolves the destination directory (`DeliveryDestinationDirectory`) to construct the destination instance with site settings and credentials.
+5. Derives the slug via `storyDeliverySlug(revision.headline)`.
+6. Checks previous deliveries for that Story to decide whether this is a `create` (first delivery) or `update` (patching an existing remote page using its prior `remoteId`).
+7. **Durability first**: Records the delivery row as `outcome: "running"` with `StoryDeliveryRepository.record` before making the external HTTP call.
+8. Invokes `destination.deliver(...)`.
+9. Updates the delivery record to `succeeded` with `remoteId` (parsed from the provider response) or `failed` with failure details. Failed deliveries are never retried silently.
+
+## Model catalog workflow
+
+`src/application/model-catalog/model-catalog.ts` provides a filtered model catalog interface (`ModelCatalog`) returning models that support `structured_outputs`. It is used by the settings workspace to populate model selectors for supervised roles without persisting third-party catalog state in the database.
+
 ## Repository ports
 
 Persistence contracts are expressed as interfaces in the application layer and implemented by PostgreSQL adapters:
@@ -169,5 +187,7 @@ Persistence contracts are expressed as interfaces in the application layer and i
 | `ReviewSubmissionPersistence`                         | `src/application/review-submissions/review-submission-persistence.ts`             | `src/adapters/review-persistence/postgres-review-submission-persistence.ts`            |
 | `ReviewDecisionPersistence`                           | `src/application/review-decisions/review-decision-persistence.ts`                 | `src/adapters/review-persistence/postgres-review-decision-persistence.ts`              |
 | `StoryRejectionPersistence`                           | `src/application/story-rejections/story-rejection-persistence.ts`                  | `src/adapters/story-rejection-persistence/postgres-story-rejection-persistence.ts`      |
+| `StoryDeliveryRepository`                             | `src/application/story-deliveries/story-delivery-repository.ts`                   | `src/adapters/story-delivery-persistence/postgres-story-delivery-repository.ts`        |
+| `SiteSettingsRepository`                              | `src/application/site-settings/site-settings-repository.ts`                       | `src/adapters/site-settings-persistence/postgres-site-settings-repository.ts`          |
 
 The `*.contract.ts` files alongside several ports (`source-repositories.contract.ts`, `story-inspection-repository.contract.ts`, `agent-run-repository.contract.ts`, etc.) are shared harnesses that verify any repository implementation satisfies the same behavior contract. The PostgreSQL adapter tests run these contracts against real PostgreSQL in the integration suite.
