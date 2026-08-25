@@ -110,7 +110,12 @@ export function recordStoryDelivery(candidate: StoryDelivery): RecordStoryDelive
       typeof result !== "object" ||
       result === null ||
       !Number.isInteger(result.status) ||
-      (result.message !== null && !nonEmpty(result.message))
+      (result.message !== null && !nonEmpty(result.message)) ||
+      // Half of the pair says a slug changed without saying what it changed to, or what it
+      // changed from. Either alone would leave an operator unable to find the page.
+      (result.requestedSlug === undefined) !== (result.assignedSlug === undefined) ||
+      (result.requestedSlug !== undefined && !nonEmpty(result.requestedSlug)) ||
+      (result.assignedSlug !== undefined && !nonEmpty(result.assignedSlug))
     )
       return invalid(
         "STORY_DELIVERY_OUTCOME_INVALID",

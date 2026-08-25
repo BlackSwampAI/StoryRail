@@ -44,7 +44,16 @@ const deliverySchema = z
       z.object({
         outcome: z.literal("succeeded"),
         completedAt: nonEmpty,
-        result: z.object({ status: z.number().int(), message: nonEmpty.nullable() }).strict(),
+        result: z
+          .object({
+            status: z.number().int(),
+            message: nonEmpty.nullable(),
+            // Present only on a delivery whose destination renamed the page, so both are
+            // optional and the domain refuses one without the other.
+            requestedSlug: nonEmpty.optional(),
+            assignedSlug: nonEmpty.optional(),
+          })
+          .strict(),
       }),
       z.object({
         outcome: z.literal("failed"),

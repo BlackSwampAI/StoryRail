@@ -17,31 +17,43 @@ function trimmedString(value: unknown): value is string {
  * half exists somewhere; discovered here it costs them a corrected field. The URL must be
  * absolute for the same reason: a relative address would be resolved against whatever process
  * happened to send the request.
+ *
+ * The kind is read first and everything else is checked against it, so a StudioCMS renderer
+ * package cannot be stored on a WordPress destination that would silently ignore it.
  */
 function readDestination(
   value: unknown,
 ): { readonly ok: true; readonly destination: SiteDestinationSettings } | { readonly ok: false } {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return { ok: false };
   const candidate = value as Record<string, unknown>;
-  const allowed = ["baseUrl", "package", "draft"];
+  const kind = candidate.kind;
+  if (kind !== "studiocms" && kind !== "wordpress") return { ok: false };
+
+  const allowed =
+    kind === "studiocms"
+      ? ["kind", "baseUrl", "package", "draft"]
+      : ["kind", "baseUrl", "username", "draft"];
   if (Object.keys(candidate).length !== allowed.length) return { ok: false };
-  if (
-    !trimmedString(candidate.baseUrl) ||
-    !trimmedString(candidate.package) ||
-    typeof candidate.draft !== "boolean"
-  )
+  if (!trimmedString(candidate.baseUrl) || typeof candidate.draft !== "boolean")
     return { ok: false };
 
   const baseUrl = candidate.baseUrl.trim().replace(/\/+$/, "");
   if (!/^https?:\/\/[^\s]+$/.test(baseUrl)) return { ok: false };
 
+  if (kind === "studiocms") {
+    if (!trimmedString(candidate.package)) return { ok: false };
+    return {
+      ok: true,
+      destination: { kind, baseUrl, package: candidate.package.trim(), draft: candidate.draft },
+    };
+  }
+
+  // A WordPress username may not be trimmed away to nothing, because the Basic header it forms
+  // half of would then authenticate as nobody and every delivery would come back a 401.
+  if (!trimmedString(candidate.username)) return { ok: false };
   return {
     ok: true,
-    destination: {
-      baseUrl,
-      package: candidate.package.trim(),
-      draft: candidate.draft,
-    },
+    destination: { kind, baseUrl, username: candidate.username.trim(), draft: candidate.draft },
   };
 }
 
@@ -84,7 +96,7 @@ export function recordSiteSettings(candidate: unknown): RecordSiteSettingsResult
       error: {
         code: "SITE_SETTINGS_DESTINATION_INVALID",
         message:
-          "A destination names an absolute base URL, a content package, and whether pages arrive as drafts.",
+          "A destination names its kind, an absolute base URL, that kind's own field, and whether pages arrive as drafts.",
       },
     };
 

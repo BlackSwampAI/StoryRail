@@ -4,6 +4,7 @@ import type { SiteSettingsRepository } from "@/application/site-settings";
 import {
   credentialUnavailable,
   STUDIOCMS_API_TOKEN_SLOT,
+  WORDPRESS_APPLICATION_PASSWORD_SLOT,
   type ApiKeyResolution,
   type SiteSettings,
 } from "@/domain/editorial";
@@ -25,13 +26,59 @@ function settings(value: SiteSettings | null): SiteSettingsRepository {
 const CONFIGURED: SiteSettings = {
   models: MODELS,
   destination: {
+    kind: "studiocms",
     baseUrl: "https://newsroom.test/studiocms_api/rest/v1",
     package: "studiocms/markdown",
     draft: true,
   },
 };
 
+const WORDPRESS: SiteSettings = {
+  models: MODELS,
+  destination: {
+    kind: "wordpress",
+    baseUrl: "https://newsroom.test",
+    username: "storyrail",
+    draft: false,
+  },
+};
+
 describe("resolving the destination a newsroom delivers to", () => {
+  it("reads the slot belonging to the kind of website the newsroom delivers to", async () => {
+    const reads: string[] = [];
+    const directory = createSiteDeliveryDestinationDirectory({
+      settings: settings(WORDPRESS),
+      resolveApiKey: async (slot): Promise<ApiKeyResolution> => {
+        reads.push(slot);
+        return { ok: true, apiKey: "password-1" };
+      },
+    });
+
+    await expect(directory.resolve()).resolves.toMatchObject({
+      ok: true,
+      destination: { name: "wordpress", draft: false },
+    });
+    expect(reads).toEqual([WORDPRESS_APPLICATION_PASSWORD_SLOT]);
+  });
+
+  it("names the missing application password rather than offering a WordPress destination", async () => {
+    const directory = createSiteDeliveryDestinationDirectory({
+      settings: settings(WORDPRESS),
+      resolveApiKey: async (slot) => ({
+        ok: false,
+        error: credentialUnavailable(slot, "CREDENTIAL_NOT_CONFIGURED", "Nothing is stored."),
+      }),
+    });
+
+    await expect(directory.resolve()).resolves.toMatchObject({
+      ok: false,
+      error: {
+        reason: "CREDENTIAL_NOT_CONFIGURED",
+        slot: WORDPRESS_APPLICATION_PASSWORD_SLOT,
+      },
+    });
+  });
+
   it("reads the token when a delivery is asked for, not when the runtime is built", async () => {
     const reads: string[] = [];
     const directory = createSiteDeliveryDestinationDirectory({

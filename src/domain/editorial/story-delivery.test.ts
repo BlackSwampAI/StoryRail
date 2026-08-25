@@ -54,6 +54,29 @@ describe("recording what was delivered outside the system", () => {
     });
   });
 
+  it("records the address a destination used when it was not the one asked for", () => {
+    expect(
+      recordStoryDelivery(
+        succeeded({
+          result: {
+            status: 201,
+            message: null,
+            requestedSlug: "a-headline",
+            assignedSlug: "a-headline-2",
+          },
+        }),
+      ),
+    ).toMatchObject({ ok: true, delivery: { result: { assignedSlug: "a-headline-2" } } });
+  });
+
+  it("refuses a delivery that says a slug changed without saying what it changed to", () => {
+    expect(
+      recordStoryDelivery(
+        succeeded({ result: { status: 201, message: null, requestedSlug: "a-headline" } }),
+      ),
+    ).toMatchObject({ ok: false, error: { code: "STORY_DELIVERY_OUTCOME_INVALID" } });
+  });
+
   it("accepts a delivery to any named destination", () => {
     // Which destinations exist is an operator's decision, so the record describes rather than
     // constrains what may be delivered to.

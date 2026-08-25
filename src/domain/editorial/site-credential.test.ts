@@ -84,6 +84,7 @@ describe("per-Site settings", () => {
       recordSiteSettings({
         models,
         destination: {
+          kind: "studiocms",
           baseUrl: "  https://newsroom.test/studiocms_api/rest/v1/  ",
           package: "studiocms/markdown",
           draft: true,
@@ -94,6 +95,7 @@ describe("per-Site settings", () => {
       settings: {
         models,
         destination: {
+          kind: "studiocms",
           baseUrl: "https://newsroom.test/studiocms_api/rest/v1",
           package: "studiocms/markdown",
           draft: true,
@@ -102,11 +104,65 @@ describe("per-Site settings", () => {
     });
   });
 
+  it("accepts a WordPress destination and keeps its user out of the credential store", () => {
+    expect(
+      recordSiteSettings({
+        models,
+        destination: {
+          kind: "wordpress",
+          baseUrl: "https://newsroom.test/",
+          username: "  storyrail  ",
+          draft: false,
+        },
+      }),
+    ).toEqual({
+      ok: true,
+      settings: {
+        models,
+        destination: {
+          kind: "wordpress",
+          baseUrl: "https://newsroom.test",
+          username: "storyrail",
+          draft: false,
+        },
+      },
+    });
+  });
+
+  it("refuses a destination wearing the fields of a kind it is not", () => {
+    // A renderer package means nothing to WordPress, so storing one would be a setting an
+    // operator could fill in and watch do nothing.
+    expect(
+      recordSiteSettings({
+        models,
+        destination: {
+          kind: "wordpress",
+          baseUrl: "https://newsroom.test",
+          package: "studiocms/markdown",
+          draft: true,
+        },
+      }),
+    ).toMatchObject({ ok: false, error: { code: "SITE_SETTINGS_DESTINATION_INVALID" } });
+  });
+
+  it("refuses a destination that does not say which kind of website it is", () => {
+    expect(
+      recordSiteSettings({
+        models,
+        destination: {
+          baseUrl: "https://newsroom.test",
+          package: "studiocms/markdown",
+          draft: true,
+        },
+      }),
+    ).toMatchObject({ ok: false, error: { code: "SITE_SETTINGS_DESTINATION_INVALID" } });
+  });
+
   it("refuses a destination missing anything a delivery would need", () => {
     expect(
       recordSiteSettings({
         models,
-        destination: { baseUrl: "https://newsroom.test", draft: true },
+        destination: { kind: "studiocms", baseUrl: "https://newsroom.test", draft: true },
       }),
     ).toMatchObject({ ok: false, error: { code: "SITE_SETTINGS_DESTINATION_INVALID" } });
   });
@@ -118,6 +174,7 @@ describe("per-Site settings", () => {
       recordSiteSettings({
         models,
         destination: {
+          kind: "studiocms",
           baseUrl: "https://newsroom.test",
           authorId: "author-1",
           package: "studiocms/markdown",
@@ -132,6 +189,7 @@ describe("per-Site settings", () => {
       recordSiteSettings({
         models,
         destination: {
+          kind: "studiocms",
           baseUrl: "/studiocms_api/rest/v1",
           package: "studiocms/markdown",
           draft: true,

@@ -1,7 +1,9 @@
 import type {
+  ArticleBlock,
   ArticleRevisionId,
   CredentialUnavailableError,
   DeliveryFailureCode,
+  StoryDeliveryOutcomeResult,
   StoryId,
 } from "@/domain/editorial";
 
@@ -14,6 +16,13 @@ interface DeliveryRequestCommon {
   readonly dek: string | null;
   /** Derived from the Revision's blocks at the moment of delivery, never stored a second time. */
   readonly bodyMarkdown: string;
+  /**
+   * The Revision's blocks as they were written. A destination whose body format keeps structure
+   * — WordPress stores separate editor blocks — serialises from these rather than parsing the
+   * markdown back apart, because re-deriving a structure that was never lost is how the two
+   * copies come to disagree.
+   */
+  readonly blocks: readonly ArticleBlock[];
   readonly draft: boolean;
 }
 
@@ -38,7 +47,7 @@ export type DeliveryAttemptResult =
        * the identifier it was sent — if any — is not the one the page ended up with.
        */
       readonly remoteId: string;
-      readonly result: { readonly status: number; readonly message: string | null };
+      readonly result: StoryDeliveryOutcomeResult;
     }
   | {
       readonly ok: false;
