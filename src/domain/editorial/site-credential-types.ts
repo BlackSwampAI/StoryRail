@@ -14,6 +14,11 @@ export type CredentialSlot = string & { readonly [credentialSlotBrand]: "Credent
 export const OPENROUTER_API_KEY_SLOT = "openrouter_api_key" as CredentialSlot;
 export const FIRECRAWL_API_KEY_SLOT = "firecrawl_api_key" as CredentialSlot;
 export const STUDIOCMS_API_TOKEN_SLOT = "studiocms_api_token" as CredentialSlot;
+// WordPress Application Passwords have been core since 5.6, so no plugin is involved. One is
+// revocable on its own without disturbing the operator's login, which is why this is the slot
+// rather than an account password.
+export const WORDPRESS_APPLICATION_PASSWORD_SLOT =
+  "wordpress_application_password" as CredentialSlot;
 
 export const MAXIMUM_CREDENTIAL_SLOT_LENGTH = 64;
 export const MAXIMUM_CREDENTIAL_SECRET_LENGTH = 4_096;

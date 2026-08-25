@@ -38,6 +38,22 @@ export interface StoryDeliveryRequest {
   readonly bodyCharacters: number;
 }
 
+/**
+ * What the destination said, and — when it did not keep the address it was asked for — which
+ * address it used instead.
+ *
+ * WordPress silently uniquifies a colliding slug, so a delivery that asked for `great-black-swamp`
+ * can create `great-black-swamp-2` and report success. Both are recorded because the post plainly
+ * exists: calling that `failed` would leave a record unable to say what happened to a page that
+ * is on a website. The pair is present only when the two differ, so its presence is the fact.
+ */
+export interface StoryDeliveryOutcomeResult {
+  readonly status: number;
+  readonly message: string | null;
+  readonly requestedSlug?: string;
+  readonly assignedSlug?: string;
+}
+
 interface StoryDeliveryCommon {
   readonly id: StoryDeliveryId;
   readonly storyId: StoryId;
@@ -72,7 +88,7 @@ export type StoryDelivery = StoryDeliveryCommon &
         readonly completedAt: string;
         /** An accepted delivery always knows which page it wrote, so this narrows to a string. */
         readonly remoteId: string;
-        readonly result: { readonly status: number; readonly message: string | null };
+        readonly result: StoryDeliveryOutcomeResult;
       }
     | {
         readonly outcome: "failed";

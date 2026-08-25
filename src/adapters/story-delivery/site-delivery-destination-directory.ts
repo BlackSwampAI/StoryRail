@@ -3,9 +3,15 @@ import type {
   ResolveDeliveryDestinationResult,
 } from "@/application/story-deliveries";
 import type { SiteSettingsRepository } from "@/application/site-settings";
-import { STUDIOCMS_API_TOKEN_SLOT, type ApiKeyResolution } from "@/domain/editorial";
+import {
+  STUDIOCMS_API_TOKEN_SLOT,
+  WORDPRESS_APPLICATION_PASSWORD_SLOT,
+  type ApiKeyResolution,
+  type CredentialSlot,
+} from "@/domain/editorial";
 
 import { createStudioCmsDestination } from "./studiocms-destination";
+import { createWordPressDestination } from "./wordpress-destination";
 
 /**
  * The Site's configured destination, read at the moment a delivery is asked for.
@@ -20,7 +26,7 @@ import { createStudioCmsDestination } from "./studiocms-destination";
  */
 export function createSiteDeliveryDestinationDirectory(dependencies: {
   readonly settings: SiteSettingsRepository;
-  readonly resolveApiKey: (slot: typeof STUDIOCMS_API_TOKEN_SLOT) => Promise<ApiKeyResolution>;
+  readonly resolveApiKey: (slot: CredentialSlot) => Promise<ApiKeyResolution>;
   readonly fetch?: typeof globalThis.fetch;
 }): DeliveryDestinationDirectory {
   return {
@@ -36,16 +42,29 @@ export function createSiteDeliveryDestinationDirectory(dependencies: {
           },
         };
 
-      const token = await dependencies.resolveApiKey(STUDIOCMS_API_TOKEN_SLOT);
-      if (!token.ok) return { ok: false, error: token.error };
+      // The kind decides which slot is read, so a newsroom that switched destinations cannot be
+      // handed the other kind's secret and be told by the far end that its credential is wrong.
+      const secret = await dependencies.resolveApiKey(
+        destination.kind === "studiocms"
+          ? STUDIOCMS_API_TOKEN_SLOT
+          : WORDPRESS_APPLICATION_PASSWORD_SLOT,
+      );
+      if (!secret.ok) return { ok: false, error: secret.error };
 
       return {
         ok: true,
-        destination: createStudioCmsDestination({
-          settings: destination,
-          apiToken: token.apiKey,
-          fetch: dependencies.fetch,
-        }),
+        destination:
+          destination.kind === "studiocms"
+            ? createStudioCmsDestination({
+                settings: destination,
+                apiToken: secret.apiKey,
+                fetch: dependencies.fetch,
+              })
+            : createWordPressDestination({
+                settings: destination,
+                applicationPassword: secret.apiKey,
+                fetch: dependencies.fetch,
+              }),
       };
     },
   };

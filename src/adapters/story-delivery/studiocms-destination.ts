@@ -3,7 +3,9 @@ import type {
   DeliveryDestination,
   DeliveryRequest,
 } from "@/application/story-deliveries";
-import type { DeliveryFailureCode, SiteDestinationSettings } from "@/domain/editorial";
+import type { SiteDestinationSettings } from "@/domain/editorial";
+
+import { bounded, failureCodeFor, isRecord, readJsonBody } from "./destination-response";
 
 /** The name every delivery through this connector is recorded against. */
 export const STUDIOCMS_DESTINATION_NAME = "studiocms";
@@ -14,12 +16,6 @@ export const STUDIOCMS_DESTINATION_NAME = "studiocms";
  * page nothing renders.
  */
 export const STUDIOCMS_CONTENT_LANGUAGE = "default";
-
-/**
- * What the destination said, kept short. The record is an audit fact about the exchange, not a
- * place to keep a page of HTML an error handler happened to return.
- */
-export const MAXIMUM_DESTINATION_MESSAGE_CHARACTERS = 500;
 
 /**
  * The only place the identifier of a created page can be read.
@@ -38,28 +34,9 @@ const CREATED_PAGE_ID = /^Page created successfully with id: ([0-9a-zA-Z-]+)$/;
 const wireBoolean = (value: boolean): number => (value ? 1 : 0);
 
 export interface StudioCmsDestinationOptions {
-  readonly settings: SiteDestinationSettings;
+  readonly settings: Extract<SiteDestinationSettings, { kind: "studiocms" }>;
   readonly apiToken: string;
   readonly fetch?: typeof globalThis.fetch;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function bounded(message: string): string | null {
-  const trimmed = message.trim().slice(0, MAXIMUM_DESTINATION_MESSAGE_CHARACTERS).trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-// A refusal and an inability to answer are different facts for an operator: the first is fixed
-// by changing what was sent, the second by waiting or by fixing the far end. So a status the
-// destination chose deliberately reads as rejection, and one that means it could not answer at
-// all reads as unreachable.
-function failureCodeFor(status: number): DeliveryFailureCode {
-  if (status === 401 || status === 403) return "DESTINATION_UNAUTHORIZED";
-  if (status >= 500 || status === 408 || status === 429) return "DESTINATION_UNREACHABLE";
-  return "DESTINATION_REJECTED";
 }
 
 /**
@@ -131,14 +108,10 @@ export function createStudioCmsDestination(
         };
       }
 
-      let body: unknown;
-      let text: string;
-      try {
-        text = await response.text();
-        body = text.trim().length > 0 ? JSON.parse(text) : null;
-      } catch {
-        // An unreadable body on a successful status is still an outcome nothing can vouch for,
-        // so it is recorded as an invalid response rather than as a delivery that worked.
+      const read = await readJsonBody(response);
+      // An unreadable body on a successful status is still an outcome nothing can vouch for,
+      // so it is recorded as an invalid response rather than as a delivery that worked.
+      if (!read.ok)
         return {
           ok: false,
           failure: {
@@ -146,7 +119,7 @@ export function createStudioCmsDestination(
             message: `The destination answered ${response.status} with a body that is not JSON.`,
           },
         };
-      }
+      const body = read.body;
 
       const message =
         isRecord(body) && typeof body.message === "string" ? bounded(body.message) : null;

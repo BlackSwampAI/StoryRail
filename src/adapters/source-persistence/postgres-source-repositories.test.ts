@@ -186,6 +186,10 @@ const destinationSettingsMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0068-destination-settings.sql",
 );
+const destinationKindMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0069-destination-kind.sql",
+);
 
 const DEFAULT_SITE = siteId("site-default");
 const OTHER_SITE = siteId("site-other");
@@ -417,6 +421,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let siteCredentialsMigrationSql: string;
   let storyDeliveryMigrationSql: string;
   let destinationSettingsMigrationSql: string;
+  let destinationKindMigrationSql: string;
 
   /** Every migration, in order. One list so a rebuild can never drift from the first build. */
   const orderedMigrations = (): readonly string[] => [
@@ -448,6 +453,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     siteCredentialsMigrationSql,
     storyDeliveryMigrationSql,
     destinationSettingsMigrationSql,
+    destinationKindMigrationSql,
   ];
   let destructiveSetupAllowed = false;
 
@@ -500,6 +506,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     siteCredentialsMigrationSql = await readFile(siteCredentialsMigrationPath, "utf8");
     storyDeliveryMigrationSql = await readFile(storyDeliveryMigrationPath, "utf8");
     destinationSettingsMigrationSql = await readFile(destinationSettingsMigrationPath, "utf8");
+    destinationKindMigrationSql = await readFile(destinationKindMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -5865,6 +5872,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       const configured = {
         ...before,
         destination: {
+          kind: "studiocms" as const,
           baseUrl: "https://newsroom.test/studiocms_api/rest/v1",
           package: "studiocms/markdown",
           draft: true,
@@ -5887,7 +5895,11 @@ describePostgres("PostgreSQL persistence repositories", () => {
              WHERE site_id = $1`,
             [
               DEFAULT_SITE,
-              JSON.stringify({ baseUrl: "https://newsroom.test", package: "studiocms/markdown" }),
+              JSON.stringify({
+                kind: "studiocms",
+                baseUrl: "https://newsroom.test",
+                package: "studiocms/markdown",
+              }),
             ],
           ),
         ).rejects.toMatchObject({ constraint: "site_settings_destination_shape_check" });
@@ -5896,6 +5908,101 @@ describePostgres("PostgreSQL persistence repositories", () => {
           settings: before,
           updatedAt: "2026-08-24T00:00:00.000Z",
         });
+      }
+    });
+
+    it("stores a WordPress destination and refuses one wearing the other kind's fields", async () => {
+      const before = await settings(DEFAULT_SITE).find();
+      if (!before) throw new Error("The settings fixture must exist.");
+      const configured = {
+        ...before,
+        destination: {
+          kind: "wordpress" as const,
+          baseUrl: "https://newsroom.test",
+          username: "storyrail",
+          draft: true,
+        },
+      };
+
+      try {
+        await settings(DEFAULT_SITE).update({
+          settings: configured,
+          updatedAt: "2026-08-24T00:00:00.000Z",
+        });
+        await expect(settings(DEFAULT_SITE).find()).resolves.toEqual(configured);
+
+        // A renderer package means nothing to WordPress, so a destination carrying one is a
+        // setting an operator could fill in and watch do nothing. The database refuses it here.
+        await expect(
+          pool.query(
+            `UPDATE storyrail.site_settings
+             SET payload = jsonb_set(payload, '{destination}', $2::jsonb)
+             WHERE site_id = $1`,
+            [
+              DEFAULT_SITE,
+              JSON.stringify({
+                kind: "wordpress",
+                baseUrl: "https://newsroom.test",
+                username: "storyrail",
+                package: "studiocms/markdown",
+                draft: true,
+              }),
+            ],
+          ),
+        ).rejects.toMatchObject({ constraint: "site_settings_destination_shape_check" });
+      } finally {
+        await settings(DEFAULT_SITE).update({
+          settings: before,
+          updatedAt: "2026-08-24T00:00:00.000Z",
+        });
+      }
+    });
+
+    it("gives a destination stored before the kind existed the kind it has always been", async () => {
+      // Every destination stored before 0069 was a StudioCMS one, so the migration says so rather
+      // than leaving the discriminant to be guessed from which fields are present later.
+      const client = await pool.connect();
+      const withoutTransaction = (sql: string) =>
+        sql.replace(/^BEGIN;/m, "").replace(/^COMMIT;/m, "");
+      try {
+        await client.query("BEGIN");
+        // The database is put back into the state 0069 actually meets: 0068's constraint in force,
+        // which pins a destination to exactly baseUrl, package and draft. Merely dropping the
+        // current constraint would leave nothing to refuse the backfill, and the migration would
+        // pass here while failing on every real database that has ever configured a destination.
+        await client.query(
+          "ALTER TABLE storyrail.site_settings DROP CONSTRAINT site_settings_destination_shape_check",
+        );
+        await client.query(withoutTransaction(destinationSettingsMigrationSql));
+        await client.query(
+          `UPDATE storyrail.site_settings
+           SET payload = jsonb_set(payload, '{destination}', $2::jsonb)
+           WHERE site_id = $1`,
+          [
+            DEFAULT_SITE,
+            JSON.stringify({
+              baseUrl: "https://newsroom.test/studiocms_api/rest/v1",
+              package: "studiocms/markdown",
+              draft: true,
+            }),
+          ],
+        );
+
+        await client.query(withoutTransaction(destinationKindMigrationSql));
+
+        const { rows } = await client.query<{ destination: unknown }>(
+          "SELECT payload -> 'destination' AS destination FROM storyrail.site_settings WHERE site_id = $1",
+          [DEFAULT_SITE],
+        );
+        expect(rows[0]?.destination).toEqual({
+          kind: "studiocms",
+          baseUrl: "https://newsroom.test/studiocms_api/rest/v1",
+          package: "studiocms/markdown",
+          draft: true,
+        });
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
       }
     });
 

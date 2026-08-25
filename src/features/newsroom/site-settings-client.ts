@@ -72,14 +72,14 @@ function isModelId(value: unknown): value is string {
  * only so that a newsroom which has one configured does not read as an unreadable response.
  */
 function isDestination(value: unknown): boolean {
-  return (
-    value === null ||
-    (isRecord(value) &&
-      exact(value, ["baseUrl", "package", "draft"]) &&
-      isModelId(value.baseUrl) &&
-      isModelId(value.package) &&
-      typeof value.draft === "boolean")
-  );
+  if (value === null) return true;
+  if (!isRecord(value) || !isModelId(value.baseUrl) || typeof value.draft !== "boolean")
+    return false;
+  return value.kind === "studiocms"
+    ? exact(value, ["kind", "baseUrl", "package", "draft"]) && isModelId(value.package)
+    : value.kind === "wordpress" &&
+        exact(value, ["kind", "baseUrl", "username", "draft"]) &&
+        isModelId(value.username);
 }
 
 function isSettings(value: unknown): value is SiteSettings {

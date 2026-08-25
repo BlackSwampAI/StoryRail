@@ -14,10 +14,11 @@ const MODELS = {
 };
 
 const DESTINATION = {
+  kind: "studiocms",
   baseUrl: "https://newsroom.test/studiocms_api/rest/v1",
   package: "studiocms/markdown",
   draft: true,
-};
+} as const;
 
 function store(initial: SiteSettings | null) {
   let stored = initial;

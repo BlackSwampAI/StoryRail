@@ -23,18 +23,17 @@ export const SITE_MODEL_ROLES = [
 
 export type SiteModelRole = (typeof SITE_MODEL_ROLES)[number];
 
+export const SITE_DESTINATION_KINDS = ["studiocms", "wordpress"] as const;
+
 /**
- * Where a newsroom delivers a published Story.
- *
- * The API token is deliberately absent: it is a secret and lives in the encrypted credential
- * store, so nothing that reads settings can serialise it by accident. There is no author either
- * — the destination attributes every page to whoever owns the token that created it and ignores
- * any author sent with the request, so a setting for one would do nothing but look like it did.
+ * Which kind of website a newsroom delivers to. It is stored rather than inferred from the shape
+ * of the rest of the settings: a discriminant worked out from which fields happen to be present
+ * is a second source of truth that disagrees with the first as soon as two kinds share a field.
  */
-export interface SiteDestinationSettings {
+export type SiteDestinationKind = (typeof SITE_DESTINATION_KINDS)[number];
+
+interface SiteDestinationCommon {
   readonly baseUrl: string;
-  /** The renderer the destination stores content under, such as `studiocms/markdown`. */
-  readonly package: string;
   /**
    * Whether pages arrive unpublished. It defaults to true, because StoryRail's first write to
    * the outside world should not be able to put a bad run in front of readers: the system makes
@@ -42,6 +41,33 @@ export interface SiteDestinationSettings {
    */
   readonly draft: boolean;
 }
+
+/**
+ * Where a newsroom delivers a published Story, and which kind of software is at the other end.
+ *
+ * The secret is deliberately absent from every member: it lives in the encrypted credential
+ * store, so nothing that reads settings can serialise it by accident.
+ *
+ * `package` and `username` stay on the member that needs them rather than being hoisted into
+ * the common half for symmetry. A renderer package means nothing to WordPress and a WordPress
+ * user means nothing to StudioCMS, so a shared field would be one an operator could fill in for
+ * a destination that ignores it.
+ */
+export type SiteDestinationSettings =
+  | (SiteDestinationCommon & {
+      readonly kind: "studiocms";
+      /** The renderer the destination stores content under, such as `studiocms/markdown`. */
+      readonly package: string;
+    })
+  | (SiteDestinationCommon & {
+      readonly kind: "wordpress";
+      /**
+       * The WordPress user the Application Password belongs to. It is not a secret — it is half
+       * of an HTTP Basic header and appears on every published post — so it is a setting rather
+       * than a credential, and the password it pairs with is neither stored nor returned here.
+       */
+      readonly username: string;
+    });
 
 export const DEFAULT_DESTINATION_DRAFT = true;
 

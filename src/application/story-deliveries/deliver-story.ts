@@ -151,6 +151,7 @@ export function createDeliverStory(dependencies: {
       headline: revision.headline,
       dek: revision.dek,
       bodyMarkdown,
+      blocks: revision.blocks,
       draft: running.delivery.request.draft,
       ...(remoteId === null
         ? { operation: "create" as const, remoteId: null }

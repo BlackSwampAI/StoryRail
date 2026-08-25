@@ -5,7 +5,8 @@ import { articleRevisionId, storyId, type SiteDestinationSettings } from "@/doma
 
 import { createStudioCmsDestination } from "./studiocms-destination";
 
-const SETTINGS: SiteDestinationSettings = {
+const SETTINGS: Extract<SiteDestinationSettings, { kind: "studiocms" }> = {
+  kind: "studiocms",
   baseUrl: "https://newsroom.test/studiocms_api/rest/v1",
   package: "studiocms/markdown",
   draft: true,
@@ -22,6 +23,10 @@ const REQUEST: DeliveryRequest = {
   headline: "Council Approves the Harbour Plan",
   dek: "After two years of hearings.",
   bodyMarkdown: "## Council Approves the Harbour Plan\n\nThe vote was unanimous.",
+  blocks: [
+    { kind: "heading", markdown: "Council Approves the Harbour Plan", citations: [] },
+    { kind: "context", markdown: "The vote was unanimous.", citations: [] },
+  ],
   draft: true,
 };
 
@@ -152,7 +157,9 @@ describe("delivering to a StudioCMS install", () => {
       [403, "DESTINATION_UNAUTHORIZED"],
       [409, "DESTINATION_REJECTED"],
       [422, "DESTINATION_REJECTED"],
-      [500, "DESTINATION_UNREACHABLE"],
+      // An install that answered 500 answered. Recording that as "unreachable" sent an operator
+      // looking at the network for a fault the far end had already reported.
+      [500, "DESTINATION_REJECTED"],
       [429, "DESTINATION_UNREACHABLE"],
     ] as const) {
       const { fetchImplementation } = fixture(json(status, { message: "No." }));
