@@ -9,6 +9,17 @@ import type {
   RecordAgentRunResult,
 } from "./agent-run-types";
 
+/**
+ * The failures that refuse work for the evidence behind it, and so can carry the findings that
+ * say which passages were not supported. Both are grounding refusals: one is a draft whose
+ * citations did not hold, the other a draft whose citations did not hold and whose one correction
+ * turn rewrote work nobody had objected to.
+ */
+const GROUNDING_REFUSAL_CODES: readonly string[] = [
+  "MODEL_OUTPUT_UNGROUNDED",
+  "MODEL_CORRECTION_OUT_OF_SCOPE",
+];
+
 function invalid(code: AgentRunValidationCode, message: string): RecordAgentRunResult {
   return { ok: false, error: { code, message } };
 }
@@ -252,8 +263,12 @@ export function recordAgentRun(candidate: AgentRun): RecordAgentRunResult {
     !(MODEL_FAILURE_CODES as readonly string[]).includes(candidate.failure.code) ||
     typeof candidate.failure.retryable !== "boolean" ||
     // Findings explain a grounding refusal and mean nothing attached to any other failure.
+    // MODEL_CORRECTION_OUT_OF_SCOPE is one: the draft is refused for its original citations, and
+    // the code only names the correction as the reason it could not be rescued. Without the
+    // findings an operator is told a correction went out of scope and never what it was asked to
+    // fix, which is the half that says why the work was refused.
     (candidate.failure.findings !== undefined &&
-      (candidate.failure.code !== "MODEL_OUTPUT_UNGROUNDED" ||
+      (!GROUNDING_REFUSAL_CODES.includes(candidate.failure.code) ||
         !Array.isArray(candidate.failure.findings) ||
         candidate.failure.findings.length === 0)) ||
     (candidate.failure.unsupportedChecks !== undefined &&

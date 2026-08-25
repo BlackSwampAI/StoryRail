@@ -204,6 +204,56 @@ describe("AgentRun", () => {
     ).toMatchObject({ ok: true, run: { outcome: "failed" } });
   });
 
+  it("lets a correction that went out of scope say what it was asked to fix", () => {
+    // The draft is refused for its original citations and the code only names the correction as
+    // the reason it could not be rescued, so the findings are the half that says why the work was
+    // refused. Rejecting them left the application unable to record its own failure at all: the
+    // candidate was invalid, recording threw, and the in-flight run was orphaned as `running`
+    // where it read as a hang rather than as the refusal it was.
+    const { proposal: _proposal, ...common } = successful;
+    void _proposal;
+    const findings = [
+      {
+        blockIndex: 0,
+        code: "CITATION_QUOTE_UNSUPPORTED" as const,
+        citationIndex: 0,
+        quote: "a passage the evidence does not carry",
+        evidenceId: "evidence-1",
+      },
+    ];
+    expect(
+      recordAgentRun({
+        ...common,
+        outcome: "failed",
+        failure: { code: "MODEL_CORRECTION_OUT_OF_SCOPE", retryable: true, findings },
+      }),
+    ).toMatchObject({ ok: true, run: { failure: { findings } } });
+  });
+
+  it("still refuses findings attached to a failure that is not about grounding", () => {
+    const { proposal: _proposal, ...common } = successful;
+    void _proposal;
+    expect(
+      recordAgentRun({
+        ...common,
+        outcome: "failed",
+        failure: {
+          code: "MODEL_REQUEST_TIMED_OUT",
+          retryable: true,
+          findings: [
+            {
+              blockIndex: 0,
+              code: "CITATION_QUOTE_UNSUPPORTED" as const,
+              citationIndex: 0,
+              quote: "a passage the evidence does not carry",
+              evidenceId: "evidence-1",
+            },
+          ],
+        },
+      }),
+    ).toMatchObject({ ok: false, error: { code: "AGENT_RUN_OUTCOME_INVALID" } });
+  });
+
   it("rejects unsupported role/operation combinations and blank descriptors", () => {
     expect(
       recordAgentRun({ ...successful, operation: "other" } as unknown as AgentRun),
