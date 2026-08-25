@@ -4,13 +4,9 @@ import { useEffect, useState } from "react";
 
 import { MAXIMUM_STANDARDS_CHARACTERS } from "@/domain/editorial";
 
+import { useNewsroomClients } from "./newsroom-clients";
+import type { NewsroomStandardsClient, StandardsRevision } from "./newsroom-standards-client";
 import styles from "./newsroom-shell.module.css";
-
-interface StandardsRevision {
-  readonly revisionNumber: number;
-  readonly text: string;
-  readonly updatedAt: string;
-}
 
 /**
  * One document every agent works under.
@@ -20,8 +16,10 @@ interface StandardsRevision {
  * written last month can still be explained by the standards that were in force then.
  */
 export function NewsroomStandardsEditor({
-  fetchImplementation = fetch,
-}: Readonly<{ fetchImplementation?: typeof fetch }>) {
+  requests: suppliedRequests,
+}: Readonly<{ requests?: NewsroomStandardsClient }> = {}) {
+  const clients = useNewsroomClients();
+  const requests = suppliedRequests ?? clients.newsroomStandards;
   const [history, setHistory] = useState<readonly StandardsRevision[] | null>(null);
   const [text, setText] = useState("");
   const [status, setStatus] = useState<string | null>(null);
@@ -30,42 +28,32 @@ export function NewsroomStandardsEditor({
   useEffect(() => {
     let active = true;
     void (async () => {
-      try {
-        const response = await fetchImplementation("/api/newsroom-standards");
-        const body: unknown = await response.json();
-        if (!active || !response.ok) return;
-        const revisions = (body as { standards?: readonly StandardsRevision[] }).standards ?? [];
-        setHistory(revisions);
-        setText(revisions.at(-1)?.text ?? "");
-      } catch {
-        if (active) setStatus("The newsroom standards could not be read.");
+      const result = await requests.listRevisions();
+      if (!active) return;
+      if (result.kind === "unavailable") {
+        setStatus("The newsroom standards could not be read.");
+        return;
       }
+      setHistory(result.revisions);
+      setText(result.revisions.at(-1)?.text ?? "");
     })();
     return () => {
       active = false;
     };
-  }, [fetchImplementation]);
+  }, [requests]);
 
   async function save(): Promise<void> {
     if (saving || text.trim().length === 0) return;
     setSaving(true);
     setStatus(null);
     try {
-      const response = await fetchImplementation("/api/newsroom-standards", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
-      const body: unknown = await response.json();
-      if (response.status !== 201) {
+      const result = await requests.saveRevision(text);
+      if (result.kind === "unavailable") {
         setStatus("The newsroom standards could not be saved.");
         return;
       }
-      const saved = (body as { standards: StandardsRevision }).standards;
-      setHistory([...(history ?? []), saved]);
-      setStatus(`Saved as revision ${saved.revisionNumber}. It applies to the next run.`);
-    } catch {
-      setStatus("The newsroom standards could not be saved.");
+      setHistory([...(history ?? []), result.revision]);
+      setStatus(`Saved as revision ${result.revision.revisionNumber}. It applies to the next run.`);
     } finally {
       setSaving(false);
     }
