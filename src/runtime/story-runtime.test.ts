@@ -134,6 +134,7 @@ function makeRepositories() {
   };
   const agentProfileRepository: AgentProfileRepository = {
     findById: vi.fn<AgentProfileRepository["findById"]>(async () => null),
+    findBuiltIn: vi.fn<AgentProfileRepository["findBuiltIn"]>(async () => null),
     append: vi.fn<AgentProfileRepository["append"]>(async (profile) => ({ ok: true, profile })),
     list: vi.fn<AgentProfileRepository["list"]>(async () => []),
   };
@@ -212,7 +213,10 @@ describe("createStoryRuntime", () => {
       pool: controlledPool.pool,
       siteId: SITE,
     });
-    expect(createPostgresAssignmentPersistence).toHaveBeenCalledWith({ pool: controlledPool.pool });
+    expect(createPostgresAssignmentPersistence).toHaveBeenCalledWith({
+      pool: controlledPool.pool,
+      siteId: SITE,
+    });
     expect(controlledPool.query).not.toHaveBeenCalled();
     expect(createUuid).not.toHaveBeenCalled();
     expect(now).not.toHaveBeenCalled();
@@ -333,6 +337,7 @@ describe("createStoryRuntime", () => {
     const createPool = vi.fn(() => controlledPool.pool);
 
     const runtime = createStoryRuntimeFromEnvironment({
+      siteId: SITE,
       environment: { NODE_ENV: "test", STORYRAIL_DATABASE_URL: DATABASE_URL },
       createPool,
     });
@@ -342,12 +347,14 @@ describe("createStoryRuntime", () => {
     expect(controlledPool.query).not.toHaveBeenCalled();
     expect(() =>
       createStoryRuntimeFromEnvironment({
+        siteId: SITE,
         environment: { NODE_ENV: "test" },
         createPool,
       }),
     ).toThrowError(StoryRuntimeConfigurationError);
     expect(() =>
       createStoryRuntimeFromEnvironment({
+        siteId: SITE,
         environment: { NODE_ENV: "test", STORYRAIL_DATABASE_URL: "  " },
         createPool,
       }),

@@ -4,7 +4,8 @@ import { useEffect, useState, type FormEvent } from "react";
 
 import type { AgentProfile } from "@/domain/editorial";
 
-import { agentProfileClient, type AgentProfileClient } from "./agent-profile-client";
+import type { AgentProfileClient } from "./agent-profile-client";
+import { useNewsroomClients } from "./newsroom-clients";
 import { NewsroomStandardsEditor } from "./newsroom-standards-editor";
 import styles from "./newsroom-shell.module.css";
 
@@ -38,12 +39,14 @@ function roleLabel(profile: AgentProfile): string {
 }
 
 export function AgentProfilesWorkspace({
-  requests = agentProfileClient,
+  requests: suppliedRequests,
   onProfileCreated,
 }: {
   readonly requests?: AgentProfileClient;
   readonly onProfileCreated?: (profile: AgentProfile) => void;
 }) {
+  const clients = useNewsroomClients();
+  const requests = suppliedRequests ?? clients.agentProfiles;
   const [state, setState] = useState<ProfileState>({ kind: "loading" });
   const [name, setName] = useState("");
   const [instructions, setInstructions] = useState("");

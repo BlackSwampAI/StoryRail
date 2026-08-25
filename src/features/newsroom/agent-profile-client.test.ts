@@ -1,8 +1,11 @@
 // @vitest-environment node
 
+import { siteId } from "@/domain/editorial";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { agentProfileClient, createAgentProfileClient } from "./agent-profile-client";
+import { createAgentProfileClient } from "./agent-profile-client";
+
+const SITE_ID = siteId("site-second");
 
 const profile = {
   id: "profile-client-0027",
@@ -60,7 +63,9 @@ describe("agent-profile-client", () => {
       .mockResolvedValue(response(200, BUILT_IN_PROFILES_RESPONSE));
     vi.stubGlobal("fetch", fetch);
 
-    await expect(agentProfileClient.listProfiles()).resolves.toEqual({
+    await expect(
+      createAgentProfileClient({ siteId: SITE_ID, fetch: globalThis.fetch }).listProfiles(),
+    ).resolves.toEqual({
       kind: "completed",
       value: BUILT_IN_PROFILES_RESPONSE.profiles,
     });
@@ -71,7 +76,7 @@ describe("agent-profile-client", () => {
     ]);
     expect(BUILT_IN_PROFILES_RESPONSE.profiles.every(({ model }) => model === null)).toBe(true);
     expect(BUILT_IN_PROFILES_RESPONSE.profiles.every(({ builtIn }) => builtIn)).toBe(true);
-    expect(fetch).toHaveBeenCalledWith("/api/agent-profiles", {
+    expect(fetch).toHaveBeenCalledWith("/api/sites/site-second/agent-profiles", {
       method: "GET",
       headers: { Accept: "application/json" },
     });
@@ -87,11 +92,13 @@ describe("agent-profile-client", () => {
       .fn()
       .mockResolvedValue(response(200, { ok: true, profiles: [profile, configured] }));
 
-    await expect(createAgentProfileClient({ fetch }).listProfiles()).resolves.toEqual({
+    await expect(
+      createAgentProfileClient({ siteId: SITE_ID, fetch }).listProfiles(),
+    ).resolves.toEqual({
       kind: "completed",
       value: [profile, configured],
     });
-    expect(fetch).toHaveBeenCalledWith("/api/agent-profiles", {
+    expect(fetch).toHaveBeenCalledWith("/api/sites/site-second/agent-profiles", {
       method: "GET",
       headers: { Accept: "application/json" },
     });
@@ -106,7 +113,7 @@ describe("agent-profile-client", () => {
     };
 
     await expect(
-      createAgentProfileClient({ fetch }).createWriterProfile(configuration),
+      createAgentProfileClient({ siteId: SITE_ID, fetch }).createWriterProfile(configuration),
     ).resolves.toEqual({
       kind: "completed",
       value: profile,
@@ -123,7 +130,9 @@ describe("agent-profile-client", () => {
     { ...profile, unexpected: true },
   ])("fails closed for malformed durable profile %#", async (malformed) => {
     const fetch = vi.fn().mockResolvedValue(response(200, { ok: true, profiles: [malformed] }));
-    await expect(createAgentProfileClient({ fetch }).listProfiles()).resolves.toMatchObject({
+    await expect(
+      createAgentProfileClient({ siteId: SITE_ID, fetch }).listProfiles(),
+    ).resolves.toMatchObject({
       kind: "unavailable",
     });
   });
@@ -131,7 +140,7 @@ describe("agent-profile-client", () => {
   it("does not invent persistence when create fails", async () => {
     const fetch = vi.fn().mockRejectedValue(new Error("offline"));
     await expect(
-      createAgentProfileClient({ fetch }).createWriterProfile({
+      createAgentProfileClient({ siteId: SITE_ID, fetch }).createWriterProfile({
         name: profile.name,
         instructions: profile.instructions,
         model: null,

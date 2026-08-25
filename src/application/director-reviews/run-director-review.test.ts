@@ -206,7 +206,12 @@ describe("run Director review", () => {
       inspections: {
         inspect: vi.fn(async () => ({ ok: true as const, inspection: facts.inspection })),
       },
-      profiles: { findById: vi.fn(async () => facts.director), list: vi.fn(), append: vi.fn() },
+      profiles: {
+        findById: vi.fn(async () => facts.director),
+        findBuiltIn: vi.fn(async () => facts.director),
+        list: vi.fn(),
+        append: vi.fn(),
+      },
       runs: {
         append: vi.fn(async (run) => {
           appended.push(run);
@@ -270,7 +275,12 @@ describe("run Director review", () => {
       inspections: {
         inspect: vi.fn(async () => ({ ok: true as const, inspection: facts.inspection })),
       },
-      profiles: { findById: vi.fn(async () => facts.director), list: vi.fn(), append: vi.fn() },
+      profiles: {
+        findById: vi.fn(async () => facts.director),
+        findBuiltIn: vi.fn(async () => facts.director),
+        list: vi.fn(),
+        append: vi.fn(),
+      },
       runs: {
         append: vi.fn(async (run) => ({ ok: true as const, run })),
         complete: vi.fn(async (run) => ({ ok: true as const, run })),
@@ -327,7 +337,12 @@ describe("run Director review", () => {
       inspections: {
         inspect: vi.fn(async () => ({ ok: true as const, inspection: facts.inspection })),
       },
-      profiles: { findById: vi.fn(async () => facts.director), list: vi.fn(), append: vi.fn() },
+      profiles: {
+        findById: vi.fn(async () => facts.director),
+        findBuiltIn: vi.fn(async () => facts.director),
+        list: vi.fn(),
+        append: vi.fn(),
+      },
       runs: {
         append: vi.fn(async (run) => ({ ok: true as const, run })),
         complete: vi.fn(async (run) => ({ ok: true as const, run })),
@@ -363,7 +378,12 @@ describe("run Director review", () => {
       inspections: {
         inspect: vi.fn(async () => ({ ok: true as const, inspection: facts.inspection })),
       },
-      profiles: { findById: vi.fn(async () => facts.director), list: vi.fn(), append: vi.fn() },
+      profiles: {
+        findById: vi.fn(async () => facts.director),
+        findBuiltIn: vi.fn(async () => facts.director),
+        list: vi.fn(),
+        append: vi.fn(),
+      },
       runs: {
         append: vi.fn(async (run) => ({ ok: true as const, run })),
         complete: vi.fn(async (run) => ({ ok: true as const, run })),
@@ -402,7 +422,12 @@ describe("run Director review", () => {
     };
     const workflow = createRunDirectorReview({
       inspections: { inspect: vi.fn(async () => ({ ok: true as const, inspection })) },
-      profiles: { findById: vi.fn(async () => facts.director), list: vi.fn(), append: vi.fn() },
+      profiles: {
+        findById: vi.fn(async () => facts.director),
+        findBuiltIn: vi.fn(async () => facts.director),
+        list: vi.fn(),
+        append: vi.fn(),
+      },
       runs: { append: vi.fn(), complete: vi.fn(), listByStoryId: vi.fn() },
       resolveModel: async () => ({
         ok: true,
@@ -454,7 +479,12 @@ describe("run Director review", () => {
       inspections: {
         inspect: vi.fn(async () => ({ ok: true as const, inspection: facts.inspection })),
       },
-      profiles: { findById: vi.fn(async () => facts.director), list: vi.fn(), append: vi.fn() },
+      profiles: {
+        findById: vi.fn(async () => facts.director),
+        findBuiltIn: vi.fn(async () => facts.director),
+        list: vi.fn(),
+        append: vi.fn(),
+      },
       runs: {
         append: vi.fn(async (run) => {
           appended.push(run);

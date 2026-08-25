@@ -10,15 +10,14 @@ import type {
 } from "@/domain/editorial";
 
 import styles from "./newsroom-shell.module.css";
+import { useNewsroomClients } from "./newsroom-clients";
 import { SafeMarkdown } from "./safe-markdown";
 import {
-  sourceInboxClient,
   SOURCE_INBOX_UNAVAILABLE_MESSAGE,
   type SourceInboxClient,
   type SourceInboxClientError,
 } from "./source-inbox-client";
 import {
-  requestSourceEvidenceUrl,
   SOURCE_EVIDENCE_UNAVAILABLE_MESSAGE,
   type RequestSourceEvidenceUrl,
   type SourceEvidenceApplicationError,
@@ -443,11 +442,14 @@ function retryableSource(state: IntakeState): UrlSource | null {
 }
 
 export function SourceEvidenceWorkspace({
-  requestSourceEvidence = requestSourceEvidenceUrl,
-  inboxRequests = sourceInboxClient,
+  requestSourceEvidence: suppliedRequestSourceEvidence,
+  inboxRequests: suppliedInboxRequests,
   onSourceAvailable,
   onReviewInInbox,
 }: SourceEvidenceWorkspaceProps) {
+  const clients = useNewsroomClients();
+  const requestSourceEvidence = suppliedRequestSourceEvidence ?? clients.requestSourceEvidenceUrl;
+  const inboxRequests = suppliedInboxRequests ?? clients.sourceInbox;
   const [submittedUrl, setSubmittedUrl] = useState("");
   const [state, setState] = useState<IntakeState>({ kind: "idle" });
   const pendingRef = useRef(false);

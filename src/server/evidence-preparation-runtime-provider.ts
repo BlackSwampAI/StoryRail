@@ -1,20 +1,25 @@
+import type { SiteId } from "@/domain/editorial";
 import {
   createEvidencePreparationRuntimeFromEnvironment,
   type EvidencePreparationRuntime,
 } from "@/runtime";
 
-export type EvidencePreparationRuntimeFactory = () => EvidencePreparationRuntime;
+import {
+  createSiteKeyedRuntimeProvider,
+  type SiteKeyedRuntimeProvider,
+} from "./site-keyed-runtime-provider";
+
+export type EvidencePreparationRuntimeFactory = (site: SiteId) => EvidencePreparationRuntime;
+
+export type EvidencePreparationRuntimeProvider =
+  SiteKeyedRuntimeProvider<EvidencePreparationRuntime>;
 
 export function createEvidencePreparationRuntimeProvider(
-  createRuntime: EvidencePreparationRuntimeFactory = createEvidencePreparationRuntimeFromEnvironment,
-) {
-  let runtime: EvidencePreparationRuntime | undefined;
-  return Object.freeze({
-    get(): EvidencePreparationRuntime {
-      runtime ??= createRuntime();
-      return runtime;
-    },
-  });
+  createRuntime: EvidencePreparationRuntimeFactory = (site) =>
+    createEvidencePreparationRuntimeFromEnvironment({ siteId: site }),
+): EvidencePreparationRuntimeProvider {
+  return createSiteKeyedRuntimeProvider(createRuntime);
 }
 
-export const evidencePreparationRuntimeProvider = createEvidencePreparationRuntimeProvider();
+export const evidencePreparationRuntimeProvider: EvidencePreparationRuntimeProvider =
+  createEvidencePreparationRuntimeProvider();

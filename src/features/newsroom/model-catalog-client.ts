@@ -1,4 +1,7 @@
 import type { CatalogModel } from "@/application/model-catalog";
+import type { SiteId } from "@/domain/editorial";
+
+import { siteApiPath } from "./site-paths";
 
 export const MODEL_CATALOG_UNAVAILABLE_MESSAGE =
   "The model catalog is unavailable, so the current models are shown as stored.";
@@ -33,12 +36,14 @@ const unavailable = (): ModelCatalogClientResult => ({
 });
 
 export function createModelCatalogClient(dependencies: {
+  readonly siteId: SiteId;
   readonly fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 }): ModelCatalogClient {
+  const api = (suffix: string) => siteApiPath(dependencies.siteId, suffix);
   return {
     async readCatalog() {
       try {
-        const response = await dependencies.fetch("/api/model-catalog", {
+        const response = await dependencies.fetch(api("/model-catalog"), {
           method: "GET",
           headers: { Accept: "application/json" },
         });
@@ -54,7 +59,3 @@ export function createModelCatalogClient(dependencies: {
     },
   };
 }
-
-export const modelCatalogClient = createModelCatalogClient({
-  fetch: (input, init) => globalThis.fetch(input, init),
-});

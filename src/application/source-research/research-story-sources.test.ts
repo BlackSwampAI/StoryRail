@@ -112,7 +112,12 @@ function workflow(options: {
     inspections: {
       inspect: vi.fn(async () => ({ ok: true as const, inspection: inspection(options.state) })),
     },
-    profiles: { findById: vi.fn(async () => researcher), list: vi.fn(), append: vi.fn() },
+    profiles: {
+      findById: vi.fn(async () => researcher),
+      findBuiltIn: vi.fn(async () => researcher),
+      list: vi.fn(),
+      append: vi.fn(),
+    },
     runs: {
       append: vi.fn(async (value) => ({ ok: true as const, run: value })),
       complete: vi.fn(async (value) => {

@@ -15,7 +15,6 @@ import {
   type SiteId,
 } from "@/domain/editorial";
 
-import { resolveSiteId } from "./site-configuration";
 import { createSiteStore } from "./site-store";
 import {
   loadEvidencePreparationRuntimeConfiguration,
@@ -81,17 +80,16 @@ export function createEvidencePreparationRuntime(
   });
 }
 
-export function createEvidencePreparationRuntimeFromEnvironment(
-  options: {
-    readonly environment?: NodeJS.ProcessEnv;
-    readonly now?: () => string;
-    readonly createUuid?: () => string;
-    readonly createPool?: (configuration: PoolConfig) => Pool;
-  } = {},
-): EvidencePreparationRuntime {
+export function createEvidencePreparationRuntimeFromEnvironment(options: {
+  readonly siteId: SiteId;
+  readonly environment?: NodeJS.ProcessEnv;
+  readonly now?: () => string;
+  readonly createUuid?: () => string;
+  readonly createPool?: (configuration: PoolConfig) => Pool;
+}): EvidencePreparationRuntime {
   return createEvidencePreparationRuntime({
     configuration: loadEvidencePreparationRuntimeConfiguration(options.environment),
-    siteId: resolveSiteId(options.environment ?? process.env),
+    siteId: options.siteId,
     now: options.now,
     createUuid: options.createUuid,
     createPool: options.createPool,

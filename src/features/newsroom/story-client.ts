@@ -17,14 +17,18 @@ import {
   type Story,
   type StoryTransitionReceipt,
   type StorySourceAttachment,
+  type SiteId,
   type UrlSource,
 } from "@/domain/editorial";
 import type { StoryInspection } from "@/application/story-inspection";
 import type { StoryListItem } from "@/application/story-listing";
 
+import { siteApiPath } from "./site-paths";
+
 export const STORY_REQUEST_UNAVAILABLE_MESSAGE = "The Story request could not be completed.";
 
 export interface StoryClientDependencies {
+  readonly siteId: SiteId;
   readonly fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   /** Injectable so following a started run is deterministic under test. */
   readonly now?: () => number;
@@ -1206,7 +1210,9 @@ async function request<Value>(
 }
 
 export function createStoryClient(dependencies: StoryClientDependencies): StoryClient {
+  const api = (suffix: string) => siteApiPath(dependencies.siteId, suffix);
   const resolved: Required<StoryClientDependencies> = {
+    siteId: dependencies.siteId,
     fetch: dependencies.fetch,
     now: dependencies.now ?? (() => Date.now()),
     wait:
@@ -1217,7 +1223,7 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
     listStories: () =>
       request(
         dependencies.fetch,
-        "/api/stories",
+        api("/stories"),
         { method: "GET", headers: { Accept: "application/json" } },
         200,
         "stories",
@@ -1227,7 +1233,7 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
     createStory: (title) =>
       request(
         dependencies.fetch,
-        "/api/stories",
+        api("/stories"),
         { method: "POST", headers: jsonHeaders, body: JSON.stringify({ title }) },
         201,
         "story",
@@ -1242,7 +1248,7 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
     attachSource: (storyId, sourceId, relevance) =>
       request(
         dependencies.fetch,
-        `/api/stories/${encodeURIComponent(storyId)}/sources`,
+        api(`/stories/${encodeURIComponent(storyId)}/sources`),
         {
           method: "POST",
           headers: jsonHeaders,
@@ -1262,7 +1268,7 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
     inspectStory: (storyId) =>
       request(
         dependencies.fetch,
-        `/api/stories/${encodeURIComponent(storyId)}`,
+        api(`/stories/${encodeURIComponent(storyId)}`),
         { method: "GET", headers: { Accept: "application/json" } },
         200,
         "inspection",
@@ -1272,7 +1278,7 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
     async assignStory(storyId, command) {
       try {
         const response = await dependencies.fetch(
-          `/api/stories/${encodeURIComponent(storyId)}/assignments`,
+          api(`/stories/${encodeURIComponent(storyId)}/assignments`),
           { method: "POST", headers: jsonHeaders, body: JSON.stringify(command) },
         );
         const body: unknown = await response.json();
@@ -1327,7 +1333,7 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
       }
     },
     startSourceResearch: (storyId) =>
-      acceptRun(resolved, `/api/stories/${encodeURIComponent(storyId)}/research`, {
+      acceptRun(resolved, api(`/stories/${encodeURIComponent(storyId)}/research`), {
         400: new Set(["INVALID_JSON", "INVALID_REQUEST"]),
         404: new Set(["STORY_NOT_FOUND"]),
         409: new Set(["SOURCE_RESEARCH_NOT_ALLOWED", "AGENT_RUN_ID_CONFLICT"]),
@@ -1337,7 +1343,7 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
     startAutopilot: (storyId, options) =>
       acceptRun(
         resolved,
-        `/api/stories/${encodeURIComponent(storyId)}/autopilot`,
+        api(`/stories/${encodeURIComponent(storyId)}/autopilot`),
         {
           400: new Set(["INVALID_JSON", "INVALID_REQUEST"]),
           404: new Set(["STORY_NOT_FOUND"]),
@@ -1351,7 +1357,7 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
       startRun(
         resolved,
         storyId,
-        `/api/stories/${encodeURIComponent(storyId)}/assignment-proposals`,
+        api(`/stories/${encodeURIComponent(storyId)}/assignment-proposals`),
         {
           400: new Set(["INVALID_JSON", "INVALID_REQUEST"]),
           404: new Set(["STORY_NOT_FOUND"]),
@@ -1365,7 +1371,7 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
       startRun(
         resolved,
         storyId,
-        `/api/stories/${encodeURIComponent(storyId)}/writer-drafts`,
+        api(`/stories/${encodeURIComponent(storyId)}/writer-drafts`),
         {
           400: new Set(["INVALID_JSON", "INVALID_REQUEST"]),
           404: new Set(["STORY_NOT_FOUND"]),
@@ -1385,7 +1391,7 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
       startRun(
         resolved,
         storyId,
-        `/api/stories/${encodeURIComponent(storyId)}/writer-revisions`,
+        api(`/stories/${encodeURIComponent(storyId)}/writer-revisions`),
         {
           400: new Set(["INVALID_JSON", "INVALID_REQUEST"]),
           404: new Set(["STORY_NOT_FOUND"]),
@@ -1407,7 +1413,7 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
     async rejectStory(storyId, reason) {
       try {
         const response = await dependencies.fetch(
-          `/api/stories/${encodeURIComponent(storyId)}/rejections`,
+          api(`/stories/${encodeURIComponent(storyId)}/rejections`),
           {
             method: "POST",
             headers: jsonHeaders,
@@ -1443,7 +1449,7 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
     async publishStory(storyId, reason) {
       try {
         const response = await dependencies.fetch(
-          `/api/stories/${encodeURIComponent(storyId)}/publications`,
+          api(`/stories/${encodeURIComponent(storyId)}/publications`),
           {
             method: "POST",
             headers: jsonHeaders,
@@ -1479,7 +1485,7 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
     async submitReview(storyId) {
       try {
         const response = await dependencies.fetch(
-          `/api/stories/${encodeURIComponent(storyId)}/review-submissions`,
+          api(`/stories/${encodeURIComponent(storyId)}/review-submissions`),
           {
             method: "POST",
             headers: jsonHeaders,
@@ -1516,7 +1522,7 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
       startRun(
         resolved,
         storyId,
-        `/api/stories/${encodeURIComponent(storyId)}/director-reviews`,
+        api(`/stories/${encodeURIComponent(storyId)}/director-reviews`),
         {
           400: new Set(["INVALID_JSON", "INVALID_REQUEST"]),
           404: new Set(["STORY_NOT_FOUND"]),
@@ -1538,7 +1544,7 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
     async recordReviewDecision(storyId, command) {
       try {
         const response = await dependencies.fetch(
-          `/api/stories/${encodeURIComponent(storyId)}/review-decisions`,
+          api(`/stories/${encodeURIComponent(storyId)}/review-decisions`),
           {
             method: "POST",
             headers: jsonHeaders,
@@ -1579,7 +1585,3 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
   };
   return client;
 }
-
-export const storyClient = createStoryClient({
-  fetch: (input, init) => globalThis.fetch(input, init),
-});

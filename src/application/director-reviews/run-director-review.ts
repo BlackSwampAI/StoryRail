@@ -8,7 +8,6 @@ import {
   type CredentialUnavailableCode,
   type CredentialUnavailableError,
   withNewsroomStandards,
-  agentProfileId,
   articleBodyMarkdown,
   measureArticleGrounding,
   unsupportedDirectorQuotes,
@@ -22,7 +21,6 @@ import {
   type StoryId,
 } from "@/domain/editorial";
 
-export const DIRECTOR_PROFILE_ID = agentProfileId("storyrail-director-v1");
 export const DIRECTOR_REVIEW_PROMPT = Object.freeze({
   key: "storyrail_director_review",
   version: "1",
@@ -242,7 +240,7 @@ export function createRunDirectorReview(dependencies: {
       selected.push({ reference, document: evidence.document });
     }
 
-    const profile = await dependencies.profiles.findById(DIRECTOR_PROFILE_ID);
+    const profile = await dependencies.profiles.findBuiltIn("editor_in_chief");
     if (!profile || profile.role !== "editor_in_chief" || !profile.builtIn)
       return {
         ok: false,

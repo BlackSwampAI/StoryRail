@@ -1,6 +1,9 @@
+import { siteId } from "@/domain/editorial";
 import { describe, expect, it, vi } from "vitest";
 
 import { createSourceInboxClient } from "./source-inbox-client";
+
+const SITE_ID = siteId("site-second");
 
 const actor = { type: "operator", operatorId: "operator-24" } as const;
 const source = {
@@ -63,8 +66,8 @@ describe("sourceInboxClient", () => {
           },
         ),
     );
-    const result = await createSourceInboxClient(fetch).listPendingSources();
-    expect(fetch).toHaveBeenCalledWith("/api/source-inbox", {
+    const result = await createSourceInboxClient({ siteId: SITE_ID, fetch }).listPendingSources();
+    expect(fetch).toHaveBeenCalledWith("/api/sites/site-second/source-inbox", {
       method: "GET",
       headers: { Accept: "application/json" },
     });
@@ -86,13 +89,13 @@ describe("sourceInboxClient", () => {
     const fetch = vi.fn(
       async () => new Response(JSON.stringify({ ok: true, triageDecision }), { status: 200 }),
     );
-    const result = await createSourceInboxClient(fetch).recordTriageDecision(
+    const result = await createSourceInboxClient({ siteId: SITE_ID, fetch }).recordTriageDecision(
       source.id,
       "skip",
       null,
       "No new facts.",
     );
-    expect(fetch).toHaveBeenCalledWith("/api/sources/source%2Fa%20b/triage", {
+    expect(fetch).toHaveBeenCalledWith("/api/sites/site-second/sources/source%2Fa%20b/triage", {
       method: "PUT",
       headers: { Accept: "application/json", "Content-Type": "application/json" },
       body: JSON.stringify({ decision: "skip", storyId: null, reason: "No new facts." }),
@@ -104,12 +107,18 @@ describe("sourceInboxClient", () => {
     const fetch = vi.fn<typeof globalThis.fetch>(
       async () => new Response(JSON.stringify({ ok: true, preparation }), { status: 201 }),
     );
-    const result = await createSourceInboxClient(fetch).prepareEvidence(source.id, extraction.id);
-    expect(fetch).toHaveBeenCalledWith("/api/sources/source%2Fa%20b/preparations", {
-      method: "POST",
-      headers: { Accept: "application/json", "Content-Type": "application/json" },
-      body: JSON.stringify({ extractionId: extraction.id }),
-    });
+    const result = await createSourceInboxClient({ siteId: SITE_ID, fetch }).prepareEvidence(
+      source.id,
+      extraction.id,
+    );
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sites/site-second/sources/source%2Fa%20b/preparations",
+      {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({ extractionId: extraction.id }),
+      },
+    );
     expect(result).toEqual({ kind: "completed", value: preparation });
     expect(String(fetch.mock.calls[0]?.[1]?.body)).not.toMatch(/model|provider|prompt|actor/i);
   });
@@ -123,7 +132,7 @@ describe("sourceInboxClient", () => {
         ),
     );
     await expect(
-      createSourceInboxClient(fetch).prepareEvidence(source.id, extraction.id),
+      createSourceInboxClient({ siteId: SITE_ID, fetch }).prepareEvidence(source.id, extraction.id),
     ).resolves.toMatchObject({ kind: "unavailable" });
     expect(fetch).toHaveBeenCalledOnce();
   });
@@ -132,15 +141,20 @@ describe("sourceInboxClient", () => {
     const fetch = vi.fn(
       async () => new Response(JSON.stringify({ ok: true, extraction }), { status: 201 }),
     );
-    await expect(createSourceInboxClient(fetch).retryExtraction(source.id)).resolves.toEqual({
+    await expect(
+      createSourceInboxClient({ siteId: SITE_ID, fetch }).retryExtraction(source.id),
+    ).resolves.toEqual({
       kind: "completed",
       value: extraction,
     });
-    expect(fetch).toHaveBeenCalledWith("/api/sources/source%2Fa%20b/extractions", {
-      method: "POST",
-      headers: { Accept: "application/json", "Content-Type": "application/json" },
-      body: "{}",
-    });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sites/site-second/sources/source%2Fa%20b/extractions",
+      {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: "{}",
+      },
+    );
   });
 
   it("treats a recorded extraction failure as a completed attempt", async () => {
@@ -157,7 +171,9 @@ describe("sourceInboxClient", () => {
     const fetch = vi.fn(
       async () => new Response(JSON.stringify({ ok: true, extraction: failed }), { status: 201 }),
     );
-    await expect(createSourceInboxClient(fetch).retryExtraction(source.id)).resolves.toEqual({
+    await expect(
+      createSourceInboxClient({ siteId: SITE_ID, fetch }).retryExtraction(source.id),
+    ).resolves.toEqual({
       kind: "completed",
       value: failed,
     });
@@ -171,7 +187,9 @@ describe("sourceInboxClient", () => {
           { status: 404 },
         ),
     );
-    await expect(createSourceInboxClient(fetch).retryExtraction(source.id)).resolves.toEqual({
+    await expect(
+      createSourceInboxClient({ siteId: SITE_ID, fetch }).retryExtraction(source.id),
+    ).resolves.toEqual({
       kind: "application-failure",
       error: { code: "SOURCE_NOT_FOUND", message: "missing" },
     });
@@ -185,7 +203,9 @@ describe("sourceInboxClient", () => {
           { status: 201 },
         ),
     );
-    await expect(createSourceInboxClient(fetch).retryExtraction(source.id)).resolves.toMatchObject({
+    await expect(
+      createSourceInboxClient({ siteId: SITE_ID, fetch }).retryExtraction(source.id),
+    ).resolves.toMatchObject({
       kind: "unavailable",
     });
     expect(fetch).toHaveBeenCalledOnce();
@@ -202,7 +222,9 @@ describe("sourceInboxClient", () => {
           { status: 200 },
         ),
     );
-    await expect(createSourceInboxClient(fetch).listPendingSources()).resolves.toMatchObject({
+    await expect(
+      createSourceInboxClient({ siteId: SITE_ID, fetch }).listPendingSources(),
+    ).resolves.toMatchObject({
       kind: "unavailable",
     });
     expect(fetch).toHaveBeenCalledOnce();

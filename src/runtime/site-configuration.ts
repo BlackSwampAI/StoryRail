@@ -1,20 +1,20 @@
 import { siteId, type SiteId } from "@/domain/editorial";
 
 /**
- * The Site every installation starts with. It is created by migration and is the only Site that
- * exists until Sites can be created, so an unset variable is an ordinary single-site install
- * rather than a misconfiguration worth refusing to start over.
+ * The Site every installation starts with. It is created by migration, so a fresh install always
+ * has one Site to land on even before an operator has created any of their own.
  */
 export const DEFAULT_SITE_ID = siteId("site-default");
 
 /**
- * The one place a request or a run learns which Site it belongs to.
+ * Which Site the bare `/` sends an operator to, and nothing more.
  *
- * Every runtime resolves the Site here and hands it to the repositories it builds. Nothing below
- * a composition root reads the environment, so no handler can quietly pick a different Site than
- * the repositories it is about to call were scoped to.
+ * The Site a request belongs to now comes from the URL path, because two tabs must be able to
+ * show two newsrooms and a shared link has to carry its tenant with it. `STORYRAIL_SITE_ID`
+ * survives only as the landing choice for an installation whose operators bookmarked `/` before
+ * Sites could be switched; it no longer selects the tenant any request is served as.
  */
-export function resolveSiteId(
+export function resolveLandingSiteId(
   environment: Readonly<Partial<NodeJS.ProcessEnv>> = process.env,
 ): SiteId {
   const configured = environment.STORYRAIL_SITE_ID?.trim();

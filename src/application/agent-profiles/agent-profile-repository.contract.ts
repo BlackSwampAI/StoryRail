@@ -46,6 +46,19 @@ export function describeAgentProfileRepositoryContract(
       await expect(repository.findById(agentProfileId("missing-profile"))).resolves.toBeNull();
     });
 
+    it("finds the newsroom's own built-in for a role, and never a Writer someone created", async () => {
+      const custom = profile("custom-writer", { name: "Custom Writer" });
+      const builtIn = profile("built-in-writer", { name: "General Writer", builtIn: true });
+      await repository.append(custom);
+      await repository.append(builtIn);
+
+      await expect(repository.findBuiltIn("writer")).resolves.toMatchObject({
+        role: "writer",
+        builtIn: true,
+      });
+      await expect(repository.findBuiltIn("writer")).resolves.not.toMatchObject({ id: custom.id });
+    });
+
     it("treats an exact replay as idempotent and returns a fresh result", async () => {
       const expected = profile("replay");
       const first = await repository.append(expected);
@@ -83,6 +96,12 @@ export function createReferenceAgentProfileRepository(
   return {
     async findById(profileId) {
       const found = profiles.get(profileId);
+      return found ? structuredClone(found) : null;
+    },
+    async findBuiltIn(role) {
+      const found = [...profiles.values()]
+        .filter((candidate) => candidate.builtIn && candidate.role === role)
+        .sort((left, right) => left.id.localeCompare(right.id))[0];
       return found ? structuredClone(found) : null;
     },
     async append(candidate) {

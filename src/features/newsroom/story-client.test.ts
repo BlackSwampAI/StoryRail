@@ -1,5 +1,6 @@
 // @vitest-environment node
 
+import { siteId } from "@/domain/editorial";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -7,6 +8,8 @@ import {
   STORY_REQUEST_UNAVAILABLE_MESSAGE,
   type StoryClientDependencies,
 } from "./story-client";
+
+const SITE_ID = siteId("site-second");
 
 const STORY = {
   id: "story-0021",
@@ -141,7 +144,7 @@ describe("story-client", () => {
         response(200, { ok: true, stories: [{ story: opaqueStory, sourceCount: 3 }] }),
       )
       .mockResolvedValueOnce(response(200, { ok: true, stories: [] }));
-    const client = createStoryClient({ fetch });
+    const client = createStoryClient({ siteId: SITE_ID, fetch });
 
     await expect(client.listStories()).resolves.toEqual({
       kind: "completed",
@@ -149,8 +152,14 @@ describe("story-client", () => {
     });
     await expect(client.listStories()).resolves.toEqual({ kind: "completed", value: [] });
     expect(fetch.mock.calls).toEqual([
-      ["/api/stories", { method: "GET", headers: { Accept: "application/json" } }],
-      ["/api/stories", { method: "GET", headers: { Accept: "application/json" } }],
+      [
+        "/api/sites/site-second/stories",
+        { method: "GET", headers: { Accept: "application/json" } },
+      ],
+      [
+        "/api/sites/site-second/stories",
+        { method: "GET", headers: { Accept: "application/json" } },
+      ],
     ]);
   });
 
@@ -163,7 +172,7 @@ describe("story-client", () => {
     { ok: false, stories: [] },
   ])("fails closed for malformed listing response %# without retry", async (body) => {
     const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () => response(200, body));
-    await expect(createStoryClient({ fetch }).listStories()).resolves.toEqual({
+    await expect(createStoryClient({ siteId: SITE_ID, fetch }).listStories()).resolves.toEqual({
       kind: "unavailable",
       message: STORY_REQUEST_UNAVAILABLE_MESSAGE,
     });
@@ -176,7 +185,7 @@ describe("story-client", () => {
       .mockResolvedValueOnce(response(201, { ok: true, story: STORY }))
       .mockResolvedValueOnce(response(200, { ok: true, attachment: ATTACHMENT }))
       .mockResolvedValueOnce(response(200, { ok: true, inspection: INSPECTION }));
-    const client = createStoryClient({ fetch });
+    const client = createStoryClient({ siteId: SITE_ID, fetch });
 
     await expect(client.createStory(STORY.title)).resolves.toEqual({
       kind: "completed",
@@ -193,7 +202,7 @@ describe("story-client", () => {
 
     expect(fetch.mock.calls).toEqual([
       [
-        "/api/stories",
+        "/api/sites/site-second/stories",
         {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -201,14 +210,17 @@ describe("story-client", () => {
         },
       ],
       [
-        `/api/stories/${STORY.id}/sources`,
+        `/api/sites/site-second/stories/${STORY.id}/sources`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
           body: JSON.stringify({ sourceId: SOURCE.id, relevance: ATTACHMENT.relevance }),
         },
       ],
-      [`/api/stories/${STORY.id}`, { method: "GET", headers: { Accept: "application/json" } }],
+      [
+        `/api/sites/site-second/stories/${STORY.id}`,
+        { method: "GET", headers: { Accept: "application/json" } },
+      ],
     ]);
     expect(JSON.parse(String(fetch.mock.calls[0]![1]?.body))).toEqual({ title: STORY.title });
     expect(JSON.parse(String(fetch.mock.calls[1]![1]?.body))).toEqual({
@@ -261,7 +273,9 @@ describe("story-client", () => {
     );
 
     expect(timestamps.every((timestamp) => Number.isNaN(Date.parse(timestamp)))).toBe(true);
-    await expect(createStoryClient({ fetch }).inspectStory(STORY.id)).resolves.toEqual({
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).inspectStory(STORY.id),
+    ).resolves.toEqual({
       kind: "completed",
       value: opaqueInspection,
     });
@@ -319,7 +333,9 @@ describe("story-client", () => {
       }),
     );
 
-    await expect(createStoryClient({ fetch }).inspectStory(STORY.id)).resolves.toMatchObject({
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).inspectStory(STORY.id),
+    ).resolves.toMatchObject({
       kind: "unavailable",
     });
   });
@@ -341,7 +357,7 @@ describe("story-client", () => {
       .fn<StoryClientDependencies["fetch"]>()
       .mockResolvedValueOnce(response(200, { ok: true, inspection: inspections[0] }))
       .mockResolvedValueOnce(response(200, { ok: true, inspection: inspections[1] }));
-    const client = createStoryClient({ fetch });
+    const client = createStoryClient({ siteId: SITE_ID, fetch });
 
     await expect(client.inspectStory(STORY.id)).resolves.toEqual({
       kind: "completed",
@@ -396,7 +412,9 @@ describe("story-client", () => {
       }),
     );
 
-    await expect(createStoryClient({ fetch }).inspectStory(STORY.id)).resolves.toEqual({
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).inspectStory(STORY.id),
+    ).resolves.toEqual({
       kind: "unavailable",
       message: STORY_REQUEST_UNAVAILABLE_MESSAGE,
     });
@@ -412,7 +430,7 @@ describe("story-client", () => {
     const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
       response(status, { ok: false, error }),
     );
-    const client = createStoryClient({ fetch });
+    const client = createStoryClient({ siteId: SITE_ID, fetch });
     const result =
       operation === "create"
         ? await client.createStory(STORY.title)
@@ -434,7 +452,7 @@ describe("story-client", () => {
     ],
   ] as const)("fails closed for %s without retrying", async (_label, makeResponse) => {
     const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () => makeResponse());
-    const result = await createStoryClient({ fetch }).createStory(STORY.title);
+    const result = await createStoryClient({ siteId: SITE_ID, fetch }).createStory(STORY.title);
 
     expect(result).toEqual({
       kind: "unavailable",
@@ -448,7 +466,7 @@ describe("story-client", () => {
     const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () => {
       throw new Error("postgresql://secret@internal/storyrail");
     });
-    const result = await createStoryClient({ fetch }).listStories();
+    const result = await createStoryClient({ siteId: SITE_ID, fetch }).listStories();
 
     expect(result).toEqual({
       kind: "unavailable",
@@ -491,12 +509,14 @@ describe("story-client", () => {
     const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
       response(201, { ok: true, assignment, story: assignedStory, transitionReceipt }),
     );
-    await expect(createStoryClient({ fetch }).assignStory(STORY.id, command)).resolves.toEqual({
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).assignStory(STORY.id, command),
+    ).resolves.toEqual({
       kind: "completed",
       value: { assignment, story: assignedStory, transitionReceipt },
     });
     expect(fetch).toHaveBeenCalledWith(
-      `/api/stories/${STORY.id}/assignments`,
+      `/api/sites/site-second/stories/${STORY.id}/assignments`,
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify(command),
@@ -509,7 +529,7 @@ describe("story-client", () => {
       response(201, { ok: true, assignment: { id: "partial" }, story: STORY }),
     );
     await expect(
-      createStoryClient({ fetch }).assignStory(STORY.id, {
+      createStoryClient({ siteId: SITE_ID, fetch }).assignStory(STORY.id, {
         writerProfileId: "writer",
         angle: "Angle",
         brief: "Brief",
@@ -540,7 +560,12 @@ describe("story-client", () => {
       .mockResolvedValueOnce(
         response(200, { ok: true, inspection: { ...INSPECTION, agentRuns: [strictFailed] } }),
       );
-    const client = createStoryClient({ fetch, now: () => 0, wait: async () => {} });
+    const client = createStoryClient({
+      siteId: SITE_ID,
+      fetch,
+      now: () => 0,
+      wait: async () => {},
+    });
     await expect(client.generateAssignmentProposal(STORY.id)).resolves.toEqual({
       kind: "completed",
       value: AGENT_RUN,
@@ -551,10 +576,14 @@ describe("story-client", () => {
     });
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      `/api/stories/${STORY.id}/assignment-proposals`,
+      `/api/sites/site-second/stories/${STORY.id}/assignment-proposals`,
       expect.objectContaining({ method: "POST", body: "{}" }),
     );
-    expect(fetch).toHaveBeenNthCalledWith(2, `/api/stories/${STORY.id}`, expect.anything());
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      `/api/sites/site-second/stories/${STORY.id}`,
+      expect.anything(),
+    );
   });
 
   it("keeps following a started run until it stops running", async () => {
@@ -573,6 +602,7 @@ describe("story-client", () => {
       );
     const waited: number[] = [];
     const client = createStoryClient({
+      siteId: SITE_ID,
       fetch,
       now: () => 0,
       wait: async (milliseconds) => {
@@ -600,7 +630,7 @@ describe("story-client", () => {
           },
         }),
       );
-    const client = createStoryClient({ fetch });
+    const client = createStoryClient({ siteId: SITE_ID, fetch });
     await expect(client.generateAssignmentProposal(STORY.id)).resolves.toEqual({
       kind: "unavailable",
       message: STORY_REQUEST_UNAVAILABLE_MESSAGE,
@@ -654,11 +684,16 @@ describe("story-client", () => {
         response(200, { ok: true, inspection: { ...INSPECTION, agentRuns: [run] } }),
       );
     await expect(
-      createStoryClient({ fetch, now: () => 0, wait: async () => {} }).createWriterDraft(STORY.id),
+      createStoryClient({
+        siteId: SITE_ID,
+        fetch,
+        now: () => 0,
+        wait: async () => {},
+      }).createWriterDraft(STORY.id),
     ).resolves.toEqual({ kind: "completed", value: run });
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      `/api/stories/${STORY.id}/writer-drafts`,
+      `/api/sites/site-second/stories/${STORY.id}/writer-drafts`,
       expect.objectContaining({ method: "POST", body: "{}" }),
     );
   });
@@ -667,7 +702,7 @@ describe("story-client", () => {
     const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
       response(500, { ok: false, error: { code: "INTERNAL_SERVER_ERROR", message: "Safe." } }),
     );
-    const client = createStoryClient({ fetch });
+    const client = createStoryClient({ siteId: SITE_ID, fetch });
 
     await client.rejectStory(STORY.id, "No longer in scope.");
     await client.submitReview(STORY.id);
@@ -681,7 +716,7 @@ describe("story-client", () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      `/api/stories/${STORY.id}/rejections`,
+      `/api/sites/site-second/stories/${STORY.id}/rejections`,
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ reason: "No longer in scope." }),
@@ -689,12 +724,12 @@ describe("story-client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      `/api/stories/${STORY.id}/review-submissions`,
+      `/api/sites/site-second/stories/${STORY.id}/review-submissions`,
       expect.objectContaining({ method: "POST", body: "{}" }),
     );
     expect(fetch).toHaveBeenNthCalledWith(
       3,
-      `/api/stories/${STORY.id}/director-reviews`,
+      `/api/sites/site-second/stories/${STORY.id}/director-reviews`,
       expect.objectContaining({ method: "POST", body: "{}" }),
     );
     expect(JSON.parse(String(fetch.mock.calls[3]![1]?.body))).toEqual({
@@ -704,7 +739,7 @@ describe("story-client", () => {
     });
     expect(fetch).toHaveBeenNthCalledWith(
       5,
-      `/api/stories/${STORY.id}/writer-revisions`,
+      `/api/sites/site-second/stories/${STORY.id}/writer-revisions`,
       expect.objectContaining({ method: "POST", body: "{}" }),
     );
   });
@@ -726,7 +761,7 @@ describe("story-client", () => {
     );
 
     await expect(
-      createStoryClient({ fetch }).rejectStory(STORY.id, transitionReceipt.reason),
+      createStoryClient({ siteId: SITE_ID, fetch }).rejectStory(STORY.id, transitionReceipt.reason),
     ).resolves.toEqual({
       kind: "completed",
       value: { story: rejected, transitionReceipt },
@@ -739,7 +774,6 @@ describe("story-client", () => {
     expect(Object.keys(exports).sort()).toEqual([
       "STORY_REQUEST_UNAVAILABLE_MESSAGE",
       "createStoryClient",
-      "storyClient",
     ]);
     expect(exports).not.toHaveProperty("runtime");
     expect(exports).not.toHaveProperty("pool");

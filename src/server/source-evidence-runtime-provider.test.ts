@@ -2,6 +2,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
+import { siteId } from "@/domain/editorial";
 import type { SourceEvidenceRuntime } from "@/runtime";
 
 import {
@@ -9,6 +10,8 @@ import {
   type SourceEvidenceRuntimeFactory,
   type SourceEvidenceRuntimeProvider,
 } from "./source-evidence-runtime-provider";
+
+const SITE_ID = siteId("site-provider");
 
 function makeRuntime(label: string): SourceEvidenceRuntime & {
   readonly label: string;
@@ -52,9 +55,9 @@ describe("createSourceEvidenceRuntimeProvider", () => {
 
     expect(factory).not.toHaveBeenCalled();
 
-    const first = provider.get();
-    const second = provider.get();
-    const third = provider.get();
+    const first = provider.get(SITE_ID);
+    const second = provider.get(SITE_ID);
+    const third = provider.get(SITE_ID);
 
     expect(first).toBe(runtime);
     expect(second).toBe(runtime);
@@ -70,9 +73,9 @@ describe("createSourceEvidenceRuntimeProvider", () => {
     const firstProvider = createSourceEvidenceRuntimeProvider(firstFactory);
     const secondProvider = createSourceEvidenceRuntimeProvider(secondFactory);
 
-    expect(firstProvider.get()).toBe(firstRuntime);
-    expect(secondProvider.get()).toBe(secondRuntime);
-    expect(firstProvider.get()).not.toBe(secondProvider.get());
+    expect(firstProvider.get(SITE_ID)).toBe(firstRuntime);
+    expect(secondProvider.get(SITE_ID)).toBe(secondRuntime);
+    expect(firstProvider.get(SITE_ID)).not.toBe(secondProvider.get(SITE_ID));
     expect(firstFactory).toHaveBeenCalledOnce();
     expect(secondFactory).toHaveBeenCalledOnce();
   });
@@ -88,10 +91,10 @@ describe("createSourceEvidenceRuntimeProvider", () => {
       .mockImplementationOnce(() => runtime);
     const provider = createSourceEvidenceRuntimeProvider(factory);
 
-    expect(() => provider.get()).toThrow(failure);
+    expect(() => provider.get(SITE_ID)).toThrow(failure);
     expect(factory).toHaveBeenCalledTimes(1);
-    expect(provider.get()).toBe(runtime);
-    expect(provider.get()).toBe(runtime);
+    expect(provider.get(SITE_ID)).toBe(runtime);
+    expect(provider.get(SITE_ID)).toBe(runtime);
     expect(factory).toHaveBeenCalledTimes(2);
   });
 
@@ -99,8 +102,8 @@ describe("createSourceEvidenceRuntimeProvider", () => {
     const runtime = makeRuntime("surface");
     const provider = createSourceEvidenceRuntimeProvider(() => runtime);
 
-    provider.get();
-    provider.get();
+    provider.get(SITE_ID);
+    provider.get(SITE_ID);
 
     expect(runtime.preserveUrlSource).not.toHaveBeenCalled();
     expect(runtime.extractPersistedSource).not.toHaveBeenCalled();

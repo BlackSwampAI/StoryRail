@@ -1,18 +1,24 @@
+import type { SiteId } from "@/domain/editorial";
 import {
   createAssignmentEditorRuntimeFromEnvironment,
   type AssignmentEditorRuntime,
 } from "@/runtime";
 
+import {
+  createSiteKeyedRuntimeProvider,
+  type SiteKeyedRuntimeProvider,
+} from "./site-keyed-runtime-provider";
+
+export type AssignmentEditorRuntimeFactory = (site: SiteId) => AssignmentEditorRuntime;
+
+export type AssignmentEditorRuntimeProvider = SiteKeyedRuntimeProvider<AssignmentEditorRuntime>;
+
 export function createAssignmentEditorRuntimeProvider(
-  createRuntime: () => AssignmentEditorRuntime = createAssignmentEditorRuntimeFromEnvironment,
-) {
-  let runtime: AssignmentEditorRuntime | undefined;
-  return Object.freeze({
-    get(): AssignmentEditorRuntime {
-      runtime ??= createRuntime();
-      return runtime;
-    },
-  });
+  createRuntime: AssignmentEditorRuntimeFactory = (site) =>
+    createAssignmentEditorRuntimeFromEnvironment({ siteId: site }),
+): AssignmentEditorRuntimeProvider {
+  return createSiteKeyedRuntimeProvider(createRuntime);
 }
 
-export const assignmentEditorRuntimeProvider = createAssignmentEditorRuntimeProvider();
+export const assignmentEditorRuntimeProvider: AssignmentEditorRuntimeProvider =
+  createAssignmentEditorRuntimeProvider();

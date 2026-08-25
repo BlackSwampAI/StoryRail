@@ -13,8 +13,9 @@ import {
   type ConnectionStatus,
   type ScaffoldSection,
 } from "./account-scaffold";
-import { modelCatalogClient, type ModelCatalogClient } from "./model-catalog-client";
-import { siteSettingsClient, type SiteSettingsClient } from "./site-settings-client";
+import type { ModelCatalogClient } from "./model-catalog-client";
+import { useNewsroomClients } from "./newsroom-clients";
+import type { SiteSettingsClient } from "./site-settings-client";
 import {
   AgentModelsForm,
   StoredConnectorRow,
@@ -158,9 +159,12 @@ type StoredSettingsState =
 export function SettingsWorkspace({
   theme,
   onThemeChange,
-  requests = siteSettingsClient,
-  catalog = modelCatalogClient,
+  requests: suppliedRequests,
+  catalog: suppliedCatalog,
 }: SettingsWorkspaceProps) {
+  const clients = useNewsroomClients();
+  const requests = suppliedRequests ?? clients.siteSettings;
+  const catalog = suppliedCatalog ?? clients.modelCatalog;
   const [stored, setStored] = useState<StoredSettingsState>({ kind: "loading" });
 
   useEffect(() => {

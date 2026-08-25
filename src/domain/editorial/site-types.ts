@@ -13,3 +13,24 @@ export interface Site {
   readonly domain: string;
   readonly description: string;
 }
+
+export type SiteDomainValidationErrorCode =
+  "SITE_DOMAIN_REQUIRED" | "SITE_DOMAIN_TOO_LONG" | "INVALID_SITE_DOMAIN";
+
+export interface SiteDomainValidationError {
+  readonly code: SiteDomainValidationErrorCode;
+  readonly message: string;
+}
+
+export interface CanonicalizeSiteDomainSuccess {
+  readonly ok: true;
+  readonly domain: string;
+}
+
+export interface CanonicalizeSiteDomainFailure {
+  readonly ok: false;
+  readonly error: SiteDomainValidationError;
+}
+
+export type CanonicalizeSiteDomainResult =
+  CanonicalizeSiteDomainSuccess | CanonicalizeSiteDomainFailure;

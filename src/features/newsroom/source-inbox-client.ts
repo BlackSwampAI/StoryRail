@@ -6,9 +6,12 @@ import {
   type SourceExtraction,
   type SourceEvidencePreparation,
   type SourceTriageDecision,
+  type SiteId,
   type SourceTriageDecisionKind,
   type UrlSource,
 } from "@/domain/editorial";
+
+import { siteApiPath } from "./site-paths";
 
 export const SOURCE_INBOX_UNAVAILABLE_MESSAGE = "The Source Inbox request could not be completed.";
 
@@ -267,11 +270,16 @@ const unavailable = (): SourceInboxClientResult<never> => ({
   message: SOURCE_INBOX_UNAVAILABLE_MESSAGE,
 });
 
-export function createSourceInboxClient(fetch: typeof globalThis.fetch): SourceInboxClient {
+export function createSourceInboxClient(dependencies: {
+  readonly siteId: SiteId;
+  readonly fetch: typeof globalThis.fetch;
+}): SourceInboxClient {
+  const { fetch } = dependencies;
+  const api = (suffix: string) => siteApiPath(dependencies.siteId, suffix);
   return {
     async listPendingSources() {
       try {
-        const response = await fetch("/api/source-inbox", {
+        const response = await fetch(api("/source-inbox"), {
           method: "GET",
           headers: { Accept: "application/json" },
         });
@@ -288,7 +296,7 @@ export function createSourceInboxClient(fetch: typeof globalThis.fetch): SourceI
     },
     async recordTriageDecision(sourceId, decision, storyId, reason) {
       try {
-        const response = await fetch(`/api/sources/${encodeURIComponent(sourceId)}/triage`, {
+        const response = await fetch(api(`/sources/${encodeURIComponent(sourceId)}/triage`), {
           method: "PUT",
           headers: { Accept: "application/json", "Content-Type": "application/json" },
           body: JSON.stringify({ decision, storyId, reason }),
@@ -317,7 +325,7 @@ export function createSourceInboxClient(fetch: typeof globalThis.fetch): SourceI
     },
     async prepareEvidence(sourceId, extractionId) {
       try {
-        const response = await fetch(`/api/sources/${encodeURIComponent(sourceId)}/preparations`, {
+        const response = await fetch(api(`/sources/${encodeURIComponent(sourceId)}/preparations`), {
           method: "POST",
           headers: { Accept: "application/json", "Content-Type": "application/json" },
           body: JSON.stringify({ extractionId }),
@@ -350,7 +358,7 @@ export function createSourceInboxClient(fetch: typeof globalThis.fetch): SourceI
     },
     async retryExtraction(sourceId) {
       try {
-        const response = await fetch(`/api/sources/${encodeURIComponent(sourceId)}/extractions`, {
+        const response = await fetch(api(`/sources/${encodeURIComponent(sourceId)}/extractions`), {
           method: "POST",
           headers: { Accept: "application/json", "Content-Type": "application/json" },
           body: JSON.stringify({}),
@@ -383,7 +391,3 @@ export function createSourceInboxClient(fetch: typeof globalThis.fetch): SourceI
     },
   };
 }
-
-export const sourceInboxClient = createSourceInboxClient((input, init) =>
-  globalThis.fetch(input, init),
-);
