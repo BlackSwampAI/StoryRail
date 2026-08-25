@@ -6,6 +6,10 @@ import { siteId, type Site, type SiteId } from "@/domain/editorial";
 
 import { createAgentProfileClient, type AgentProfileClient } from "./agent-profile-client";
 import { createModelCatalogClient, type ModelCatalogClient } from "./model-catalog-client";
+import {
+  createNewsroomStandardsClient,
+  type NewsroomStandardsClient,
+} from "./newsroom-standards-client";
 import { createSiteSettingsClient, type SiteSettingsClient } from "./site-settings-client";
 import {
   createSourceEvidenceUrlClient,
@@ -20,6 +24,7 @@ export interface NewsroomClients {
   readonly agentProfiles: AgentProfileClient;
   readonly siteSettings: SiteSettingsClient;
   readonly modelCatalog: ModelCatalogClient;
+  readonly newsroomStandards: NewsroomStandardsClient;
   readonly requestSourceEvidenceUrl: RequestSourceEvidenceUrl;
 }
 
@@ -39,6 +44,7 @@ export function createNewsroomClients(
     agentProfiles: createAgentProfileClient({ siteId: site, fetch: fetchImplementation }),
     siteSettings: createSiteSettingsClient({ siteId: site, fetch: fetchImplementation }),
     modelCatalog: createModelCatalogClient({ siteId: site, fetch: fetchImplementation }),
+    newsroomStandards: createNewsroomStandardsClient({ siteId: site, fetch: fetchImplementation }),
     requestSourceEvidenceUrl: createSourceEvidenceUrlClient({
       siteId: site,
       fetch: fetchImplementation,
