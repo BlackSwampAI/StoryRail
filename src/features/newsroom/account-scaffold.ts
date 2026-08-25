@@ -1,6 +1,8 @@
 import {
   FIRECRAWL_API_KEY_SLOT,
   OPENROUTER_API_KEY_SLOT,
+  STUDIOCMS_API_TOKEN_SLOT,
+  WORDPRESS_APPLICATION_PASSWORD_SLOT,
   type CredentialSlot,
 } from "@/domain/editorial";
 
@@ -69,6 +71,9 @@ export interface ScaffoldSection {
 
 /** The section whose fields are the stored agent model ids rather than static text. */
 export const AGENT_MODELS_SECTION_ID = "agent-models";
+
+/** The section whose form is the stored destination rather than a list of intentions. */
+export const DESTINATIONS_SECTION_ID = "destinations";
 
 export const SCAFFOLD_SETTINGS: readonly ScaffoldSection[] = [
   {
@@ -154,14 +159,29 @@ export const SCAFFOLD_SETTINGS: readonly ScaffoldSection[] = [
     ],
   },
   {
-    id: "destinations",
+    id: DESTINATIONS_SECTION_ID,
     title: "Publishing destinations",
     summary:
-      "Where a published Story is delivered. Publishing records the decision today; it does not deliver.",
+      "Where a published Story is delivered. The delivery is recorded before the request leaves, and a destination with no credential delivers nothing at all.",
+    // Both slots are offered whichever kind is selected. They are separate credentials, so a
+    // newsroom that moves between the two keeps the key it is not using rather than having to
+    // find it again, and an operator can see at a glance which of the two is ready.
+    storedConnectors: [
+      {
+        name: "StudioCMS",
+        detail: "Bearer token from the StudioCMS dashboard.",
+        slot: STUDIOCMS_API_TOKEN_SLOT,
+        label: "StudioCMS API token",
+      },
+      {
+        name: "WordPress",
+        detail: "Application Password for the WordPress user named below.",
+        slot: WORDPRESS_APPLICATION_PASSWORD_SLOT,
+        label: "WordPress application password",
+      },
+    ],
     connectors: [
-      { name: "StudioCMS", detail: "Publish through the StudioCMS API", status: "planned" },
       { name: "Ghost", detail: "Publish to a Ghost site", status: "planned" },
-      { name: "WordPress", detail: "Publish through the WordPress REST API", status: "planned" },
       { name: "Webhook", detail: "Post the Article to any endpoint", status: "planned" },
     ],
   },

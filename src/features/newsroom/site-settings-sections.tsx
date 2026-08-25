@@ -3,9 +3,13 @@
 import { useEffect, useState, type FormEvent } from "react";
 
 import {
+  DEFAULT_DESTINATION_DRAFT,
+  SITE_DESTINATION_KINDS,
   SITE_MODEL_ROLES,
   type CredentialSlot,
   type CredentialUnavailableError,
+  type SiteDestinationKind,
+  type SiteDestinationSettings,
   type SiteModelIds,
   type SiteModelRole,
 } from "@/domain/editorial";
@@ -407,6 +411,286 @@ export function AgentModelsForm({
       <button type="submit" className={styles.primaryAction} disabled={pending}>
         {pending ? "Saving…" : "Save agent models"}
       </button>
+      {message === null ? null : <p role="status">{message}</p>}
+    </form>
+  );
+}
+
+const DESTINATION_KIND_LABELS: Readonly<Record<SiteDestinationKind, string>> = {
+  studiocms: "StudioCMS",
+  wordpress: "WordPress",
+};
+
+/**
+ * The base URL means a different thing to each destination, and getting it wrong fails at the far
+ * end as a bare 404 that names nothing. StudioCMS is addressed at its REST base, while the
+ * WordPress adapter appends `/wp-json/wp/v2/posts` itself and so wants the site root alone.
+ */
+const DESTINATION_BASE_URL_GUIDANCE: Readonly<Record<SiteDestinationKind, string>> = {
+  studiocms: "Include the API path, as in https://example.com/studiocms_api/rest/v1",
+  wordpress:
+    "The site root only, as in https://example.com — StoryRail appends /wp-json/wp/v2/posts itself.",
+};
+
+interface DestinationDraft {
+  readonly kind: SiteDestinationKind;
+  readonly studiocms: { readonly baseUrl: string; readonly package: string };
+  readonly wordpress: { readonly baseUrl: string; readonly username: string };
+  readonly draft: boolean;
+}
+
+const EMPTY_DRAFT: DestinationDraft = {
+  kind: "wordpress",
+  studiocms: { baseUrl: "", package: "" },
+  wordpress: { baseUrl: "", username: "" },
+  draft: DEFAULT_DESTINATION_DRAFT,
+};
+
+function draftFrom(destination: SiteDestinationSettings | null): DestinationDraft {
+  if (destination === null) return EMPTY_DRAFT;
+  return destination.kind === "studiocms"
+    ? {
+        ...EMPTY_DRAFT,
+        kind: "studiocms",
+        studiocms: { baseUrl: destination.baseUrl, package: destination.package },
+        draft: destination.draft,
+      }
+    : {
+        ...EMPTY_DRAFT,
+        kind: "wordpress",
+        wordpress: { baseUrl: destination.baseUrl, username: destination.username },
+        draft: destination.draft,
+      };
+}
+
+/**
+ * The stored destination, edited in the shape the chosen kind actually has.
+ *
+ * The two kinds keep their own fields in state rather than sharing them, so an operator who
+ * looks at the other kind and comes back has not lost what they typed — and so a value belonging
+ * to one kind can never be submitted as part of the other.
+ */
+export function DestinationForm({
+  destination,
+  models,
+  loading,
+  requests,
+  onDestinationSaved,
+}: {
+  readonly destination: SiteDestinationSettings | null;
+  readonly models: SiteModelIds | null;
+  readonly loading: boolean;
+  readonly requests: SiteSettingsClient;
+  readonly onDestinationSaved: (destination: SiteDestinationSettings | null) => void;
+}) {
+  const [edits, setEdits] = useState<DestinationDraft | null>(null);
+  const [pending, setPending] = useState(false);
+  const [confirmingRemoval, setConfirmingRemoval] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  if (loading || models === null) {
+    return (
+      <p role="status">
+        {loading ? "Reading the destination…" : "The destination could not be read."}
+      </p>
+    );
+  }
+
+  const current = edits ?? draftFrom(destination);
+  const kind = current.kind;
+  const edit = (change: Partial<DestinationDraft>) => setEdits({ ...current, ...change });
+
+  function candidate(): SiteDestinationSettings | { readonly problem: string } {
+    if (kind === "studiocms") {
+      const { baseUrl, package: renderer } = current.studiocms;
+      if (baseUrl.trim().length === 0) return { problem: "Enter the StudioCMS REST base URL." };
+      if (renderer.trim().length === 0)
+        return { problem: "Name the StudioCMS renderer package to store content under." };
+      return {
+        kind,
+        baseUrl: baseUrl.trim(),
+        package: renderer.trim(),
+        draft: current.draft,
+      };
+    }
+    const { baseUrl, username } = current.wordpress;
+    if (baseUrl.trim().length === 0) return { problem: "Enter the WordPress site URL." };
+    if (username.trim().length === 0)
+      return { problem: "Name the WordPress user the Application Password belongs to." };
+    return { kind, baseUrl: baseUrl.trim(), username: username.trim(), draft: current.draft };
+  }
+
+  async function save(next: SiteDestinationSettings | null) {
+    if (models === null) return;
+    setPending(true);
+    setMessage(null);
+    try {
+      const result = await requests.saveDestination(models, next);
+      if (result.kind !== "completed") {
+        // Nothing was stored, so the edits stay on screen to be corrected rather than retyped.
+        setMessage(describe(result));
+        return;
+      }
+      // What is now configured is whatever the store says, never what was typed at it.
+      onDestinationSaved(result.value.destination);
+      setEdits(null);
+      setConfirmingRemoval(false);
+      setMessage(
+        result.value.destination === null
+          ? "Destination removed. Publishing a Story no longer delivers it anywhere."
+          : "Destination saved.",
+      );
+    } catch {
+      setMessage("The destination could not be saved.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const next = candidate();
+    if ("problem" in next) {
+      setMessage(next.problem);
+      return;
+    }
+    void save(next);
+  }
+
+  return (
+    <form className={styles.destinationForm} aria-busy={pending} onSubmit={submit}>
+      <div className={styles.destinationKindChoice}>
+        <label htmlFor="destination-kind">Destination</label>
+        <select
+          id="destination-kind"
+          name="kind"
+          value={kind}
+          onChange={(event) => edit({ kind: event.target.value as SiteDestinationKind })}
+          disabled={pending}
+        >
+          {SITE_DESTINATION_KINDS.map((option) => (
+            <option key={option} value={option}>
+              {DESTINATION_KIND_LABELS[option]}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label htmlFor="destination-base-url">Base URL</label>
+        <input
+          id="destination-base-url"
+          name="baseUrl"
+          inputMode="url"
+          value={kind === "studiocms" ? current.studiocms.baseUrl : current.wordpress.baseUrl}
+          onChange={(event) =>
+            edit(
+              kind === "studiocms"
+                ? { studiocms: { ...current.studiocms, baseUrl: event.target.value } }
+                : { wordpress: { ...current.wordpress, baseUrl: event.target.value } },
+            )
+          }
+          disabled={pending}
+        />
+        <small className={styles.destinationHint}>{DESTINATION_BASE_URL_GUIDANCE[kind]}</small>
+      </div>
+
+      {kind === "studiocms" ? (
+        <div>
+          <label htmlFor="destination-package">Renderer package</label>
+          <input
+            id="destination-package"
+            name="package"
+            value={current.studiocms.package}
+            onChange={(event) =>
+              edit({ studiocms: { ...current.studiocms, package: event.target.value } })
+            }
+            disabled={pending}
+          />
+          <small className={styles.destinationHint}>
+            Which renderer StudioCMS stores the body under, such as @studiocms/markdown-remark.
+          </small>
+        </div>
+      ) : (
+        <div>
+          <label htmlFor="destination-username">WordPress user</label>
+          <input
+            id="destination-username"
+            name="username"
+            autoComplete="off"
+            value={current.wordpress.username}
+            onChange={(event) =>
+              edit({ wordpress: { ...current.wordpress, username: event.target.value } })
+            }
+            disabled={pending}
+          />
+          <small className={styles.destinationHint}>
+            The user the Application Password above belongs to. It is half of an HTTP Basic header
+            rather than a secret, so it is stored in plain settings.
+          </small>
+        </div>
+      )}
+
+      <div className={styles.destinationDraftChoice}>
+        <label htmlFor="destination-draft">
+          <input
+            id="destination-draft"
+            name="draft"
+            type="checkbox"
+            checked={current.draft}
+            onChange={(event) => edit({ draft: event.target.checked })}
+            disabled={pending}
+          />
+          Deliver as a draft
+        </label>
+        <small className={styles.destinationHint}>
+          StoryRail writes the page and a human decides it is fit to be seen. Turn this off and a
+          published Story appears on the site the moment it is delivered.
+        </small>
+      </div>
+
+      <div className={styles.destinationActions}>
+        <button type="submit" className={styles.primaryAction} disabled={pending}>
+          {pending ? "Saving…" : "Save destination"}
+        </button>
+        {destination !== null && !confirmingRemoval ? (
+          <button
+            type="button"
+            className={styles.tertiaryAction}
+            disabled={pending}
+            onClick={() => setConfirmingRemoval(true)}
+          >
+            Remove destination
+          </button>
+        ) : null}
+      </div>
+
+      {confirmingRemoval ? (
+        <div className={styles.credentialConfirm} role="group" aria-label="Remove the destination">
+          <p>
+            Remove the destination? Publishing a Story keeps working and records the decision, but
+            nothing is delivered anywhere until one is configured again. The stored keys are left
+            where they are.
+          </p>
+          <button
+            type="button"
+            className={styles.dangerAction}
+            disabled={pending}
+            onClick={() => void save(null)}
+          >
+            {pending ? "Removing…" : "Remove destination"}
+          </button>
+          <button
+            type="button"
+            className={styles.tertiaryAction}
+            disabled={pending}
+            onClick={() => setConfirmingRemoval(false)}
+          >
+            Keep it
+          </button>
+        </div>
+      ) : null}
+
       {message === null ? null : <p role="status">{message}</p>}
     </form>
   );

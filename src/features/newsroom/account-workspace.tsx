@@ -2,12 +2,13 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 
-import type { CredentialSlot, SiteModelIds } from "@/domain/editorial";
+import type { CredentialSlot, SiteDestinationSettings, SiteModelIds } from "@/domain/editorial";
 
 import styles from "./newsroom-shell.module.css";
 import { NEWSROOM_THEMES, type NewsroomThemeId } from "./theme";
 import {
   AGENT_MODELS_SECTION_ID,
+  DESTINATIONS_SECTION_ID,
   SCAFFOLD_OPERATOR,
   SCAFFOLD_SETTINGS,
   type ConnectionStatus,
@@ -18,6 +19,7 @@ import { useNewsroomClients } from "./newsroom-clients";
 import type { SiteSettingsClient } from "./site-settings-client";
 import {
   AgentModelsForm,
+  DestinationForm,
   StoredConnectorRow,
   credentialFailureMessage,
   type CredentialState,
@@ -152,6 +154,7 @@ type StoredSettingsState =
   | {
       readonly kind: "loaded";
       readonly models: SiteModelIds;
+      readonly destination: SiteDestinationSettings | null;
       readonly credentials: ReadonlyMap<CredentialSlot, CredentialState>;
     }
   | { readonly kind: "unavailable"; readonly message: string };
@@ -177,6 +180,7 @@ export function SettingsWorkspace({
             ? {
                 kind: "loaded",
                 models: result.value.settings.models,
+                destination: result.value.settings.destination,
                 credentials: new Map(
                   result.value.credentials.map((credential) => [
                     credential.slot,
@@ -225,9 +229,9 @@ export function SettingsWorkspace({
       </header>
 
       <ScaffoldNotice>
-        Three things here are real and stored: the OpenRouter key, the Firecrawl key, and the model
-        each agent role runs on. Every other row is layout for a milestone on the roadmap and does
-        nothing.
+        The stored settings are the OpenRouter and Firecrawl keys, the model each agent role runs
+        on, and where a published Story is delivered along with the key it is delivered with. Every
+        other row is layout for a milestone on the roadmap and does nothing.
       </ScaffoldNotice>
 
       {stored.kind === "unavailable" ? (
@@ -293,6 +297,20 @@ export function SettingsWorkspace({
             />
           ))}
         >
+          {section.id === DESTINATIONS_SECTION_ID ? (
+            <DestinationForm
+              destination={stored.kind === "loaded" ? stored.destination : null}
+              models={stored.kind === "loaded" ? stored.models : null}
+              loading={loading}
+              requests={requests}
+              onDestinationSaved={(destination) =>
+                setStored((current) =>
+                  current.kind === "loaded" ? { ...current, destination } : current,
+                )
+              }
+            />
+          ) : null}
+
           {section.id === AGENT_MODELS_SECTION_ID ? (
             <AgentModelsForm
               models={stored.kind === "loaded" ? stored.models : null}
