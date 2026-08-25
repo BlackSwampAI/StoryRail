@@ -327,6 +327,88 @@ describe("createWriterDraft", () => {
     expect(persist).not.toHaveBeenCalled();
   });
 
+  it("records a correction that went out of scope instead of dying on the way to saying so", async () => {
+    // The Writer is asked to fix one block and rewrites another nobody objected to. The draft is
+    // refused, and the refusal has to reach the record: this once threw while building the failed
+    // run, which left the in-flight run stranded at `running` where it read as a hung model rather
+    // than as the refusal it was.
+    const facts = fixture();
+    const complete = vi.fn(async (run: AgentRun) => ({ ok: true as const, run }));
+    const persist = vi.fn();
+    const grounded = { sourceId: "source-a", evidenceId: "prepared-a", quote: "Evidence" };
+    const ungrounded = {
+      sourceId: "source-a",
+      evidenceId: "prepared-a",
+      quote: "Never written anywhere",
+    };
+    const generateStructured = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true as const,
+        output: {
+          headline: "Draft",
+          dek: null,
+          blocks: [
+            { kind: "claim", markdown: "The claim under objection.", citations: [ungrounded] },
+            { kind: "claim", markdown: "A claim nobody objected to.", citations: [grounded] },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true as const,
+        output: {
+          headline: "Draft",
+          dek: null,
+          blocks: [
+            { kind: "claim", markdown: "The claim, now corrected.", citations: [grounded] },
+            { kind: "claim", markdown: "Rewritten though nothing asked.", citations: [grounded] },
+          ],
+        },
+      });
+    const model: StructuredModel = {
+      descriptor: { provider: "openrouter", model: "writer" },
+      limits: { maximumInputCharacters: 60_000 },
+      generateStructured: generateStructured as StructuredModel["generateStructured"],
+    };
+    const workflow = createWriterDraft({
+      inspections: {
+        inspect: vi.fn(async () => ({ ok: true as const, inspection: facts.inspection })),
+      },
+      runs: {
+        append: vi.fn(async (run: AgentRun) => ({ ok: true as const, run })),
+        complete,
+        listByStoryId: vi.fn(),
+      },
+      persistence: { persist },
+      resolveModel: async () => ({ ok: true, model }),
+      createAgentRunId: () => agentRunId("run-out-of-scope"),
+      createArticleId: () => articleId("unused"),
+      createRevisionId: () => articleRevisionId("unused"),
+      createTransitionId: () => transitionId("unused"),
+      now: () => "now",
+    });
+
+    expect(
+      await settleAgentRun(
+        workflow({ storyId: facts.story.id, requestedBy: facts.assignment.assignedBy }),
+      ),
+    ).toMatchObject({
+      ok: true,
+      run: { outcome: "failed", failure: { code: "MODEL_CORRECTION_OUT_OF_SCOPE" } },
+    });
+    // Both turns happened, and the failure still names the citation the correction was for.
+    expect(generateStructured).toHaveBeenCalledTimes(2);
+    expect(complete).toHaveBeenCalledOnce();
+    expect(complete.mock.calls[0]?.[0]).toMatchObject({
+      outcome: "failed",
+      failure: {
+        code: "MODEL_CORRECTION_OUT_OF_SCOPE",
+        findings: [{ blockIndex: 0, quote: ungrounded.quote }],
+      },
+    });
+    expect(persist).not.toHaveBeenCalled();
+  });
+
   it("does not call a model when no Assignment evidence is usable", async () => {
     const facts = fixture();
     const resolveModel = vi.fn();

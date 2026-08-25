@@ -363,6 +363,84 @@ describe("createWriterRevision", () => {
     expect(persist).not.toHaveBeenCalled();
   });
 
+  it("records a correction that went out of scope instead of dying on the way to saying so", async () => {
+    // The same defect the draft path carried: building the failed run threw, so a refusal the
+    // newsroom had already decided could never reach the record and the in-flight run was left
+    // stranded at `running`.
+    const inspection = fixture();
+    const persist = vi.fn();
+    const complete = vi.fn(async (run: AgentRun) => ({ ok: true as const, run }));
+    const grounded = {
+      sourceId: "source-41",
+      evidenceId: "preparation-41",
+      quote: "The supplied date is August 13.",
+    };
+    const ungrounded = { ...grounded, quote: "The supplied date is September 2." };
+    const generateStructured = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true as const,
+        output: {
+          headline: "Revised headline",
+          dek: null,
+          blocks: [
+            { kind: "claim", markdown: "The claim under objection.", citations: [ungrounded] },
+            { kind: "claim", markdown: "A claim nobody objected to.", citations: [grounded] },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true as const,
+        output: {
+          headline: "Revised headline",
+          dek: null,
+          blocks: [
+            { kind: "claim", markdown: "The claim, now corrected.", citations: [grounded] },
+            { kind: "claim", markdown: "Rewritten though nothing asked.", citations: [grounded] },
+          ],
+        },
+      });
+    const model: StructuredModel = {
+      descriptor: { provider: "openrouter", model: "writer" },
+      limits: { maximumInputCharacters: 60_000 },
+      generateStructured: generateStructured as StructuredModel["generateStructured"],
+    };
+    const workflow = createWriterRevision({
+      inspections: { inspect: vi.fn(async () => ({ ok: true as const, inspection })) },
+      runs: {
+        append: vi.fn(async (run) => ({ ok: true as const, run })),
+        complete,
+        listByStoryId: vi.fn(),
+      },
+      persistence: { persist },
+      resolveModel: async () => ({ ok: true, model }),
+      createAgentRunId: () => agentRunId("writer-run-out-of-scope-41"),
+      createRevisionId: () => articleRevisionId("unused"),
+      createTransitionId: () => transitionId("unused"),
+      now: () => "now",
+    });
+
+    expect(
+      await settleAgentRun(
+        workflow({
+          storyId: inspection.story.id,
+          requestedBy: { type: "operator", operatorId: operatorId("operator-41") },
+        }),
+      ),
+    ).toMatchObject({
+      ok: true,
+      run: { outcome: "failed", failure: { code: "MODEL_CORRECTION_OUT_OF_SCOPE" } },
+    });
+    expect(generateStructured).toHaveBeenCalledTimes(2);
+    expect(complete.mock.calls[0]?.[0]).toMatchObject({
+      failure: {
+        code: "MODEL_CORRECTION_OUT_OF_SCOPE",
+        findings: [{ blockIndex: 0, quote: ungrounded.quote }],
+      },
+    });
+    expect(persist).not.toHaveBeenCalled();
+  });
+
   it("rejects a revision whose number does not match the durable Story cycle", async () => {
     const inspection = fixture();
     const mismatched = {
