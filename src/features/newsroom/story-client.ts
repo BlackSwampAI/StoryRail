@@ -3,6 +3,7 @@ import {
   DIRECTOR_CHECK_NAMES,
   SOURCE_EXTRACTION_FAILURE_CODES,
   PREPARATION_FAILURE_CODES,
+  GROUNDING_REFUSAL_CODES,
   MODEL_FAILURE_CODES,
   type EditorialActor,
   type AgentProfile,
@@ -141,6 +142,9 @@ const GROUNDING_FAILURE_CODES: ReadonlySet<string> = new Set([
   "CITATION_QUOTE_UNSUPPORTED",
 ]);
 const MODEL_FAILURE_CODE_SET = new Set<string>(MODEL_FAILURE_CODES);
+// Which failures may carry findings is the domain's rule, imported rather than restated. Written
+// out here as a literal, it drifted from the domain and made a correctly recorded run unreadable.
+const GROUNDING_REFUSAL_CODE_SET = new Set<string>(GROUNDING_REFUSAL_CODES);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -172,8 +176,8 @@ function isStringOrNull(value: unknown): value is string | null {
 }
 
 /**
- * Findings explain a grounding refusal and belong to that code alone, so a failure carrying them
- * under any other code is refused rather than shown.
+ * Findings explain a grounding refusal and belong to those codes alone, so a failure carrying
+ * them under any other code is refused rather than shown.
  */
 function isModelFailure(value: unknown): boolean {
   if (
@@ -193,7 +197,7 @@ function isModelFailure(value: unknown): boolean {
     );
   return (
     hasExactKeys(value, ["code", "retryable", "findings"]) &&
-    value.code === "MODEL_OUTPUT_UNGROUNDED" &&
+    GROUNDING_REFUSAL_CODE_SET.has(value.code) &&
     Array.isArray(value.findings) &&
     value.findings.length > 0 &&
     value.findings.every(
