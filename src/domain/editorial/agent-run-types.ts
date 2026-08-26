@@ -17,10 +17,14 @@ import type {
   StoryState,
 } from "./types";
 
+/** Whether a run read a Source through prepared evidence or through the raw extraction. */
+export const EVIDENCE_KINDS = ["prepared", "raw"] as const;
+export type EvidenceKind = (typeof EVIDENCE_KINDS)[number];
+
 export interface EvidenceReference {
   readonly sourceId: SourceId;
   readonly relevance: string;
-  readonly evidenceKind: "prepared" | "raw";
+  readonly evidenceKind: EvidenceKind;
   readonly evidenceId: SourceEvidencePreparationId | SourceExtractionId;
 }
 

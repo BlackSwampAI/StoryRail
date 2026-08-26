@@ -23,7 +23,8 @@ export const MAXIMUM_DELIVERY_RECORD_CHARACTERS = 4_000;
  * Whether this delivery made the page or changed one StoryRail had already made. It is decided
  * from the record of prior deliveries rather than from asking the destination what exists.
  */
-export type DeliveryOperation = "create" | "update";
+export const DELIVERY_OPERATIONS = ["create", "update"] as const;
+export type DeliveryOperation = (typeof DELIVERY_OPERATIONS)[number];
 
 export interface StoryDeliveryRequest {
   readonly operation: DeliveryOperation;

@@ -1,43 +1,11 @@
-import { z } from "zod";
-
 import {
-  ARTICLE_BLOCK_KINDS,
+  articleRevisionSchema,
+  articleSchema,
   createArticle,
   createArticleRevision,
   type Article,
   type ArticleRevision,
 } from "@/domain/editorial";
-
-const nonEmpty = z.string().refine((value) => value.trim().length > 0 && value === value.trim());
-const citationSchema = z
-  .object({ sourceId: nonEmpty, evidenceId: nonEmpty, quote: nonEmpty })
-  .strict();
-const blockSchema = z
-  .object({
-    kind: z.enum(ARTICLE_BLOCK_KINDS),
-    markdown: nonEmpty,
-    citations: z.array(citationSchema),
-  })
-  .strict();
-const articleSchema = z
-  .object({ id: nonEmpty, storyId: nonEmpty, assignmentId: nonEmpty, createdAt: nonEmpty })
-  .strict();
-const revisionSchema = z
-  .object({
-    id: nonEmpty,
-    articleId: nonEmpty,
-    revisionNumber: z.number().int().min(1).max(3),
-    writerProfileId: nonEmpty,
-    agentRunId: nonEmpty,
-    headline: nonEmpty,
-    dek: nonEmpty.nullable(),
-    blocks: z.array(blockSchema).min(1),
-    createdBy: z
-      .object({ type: z.literal("agent"), role: z.literal("writer"), runId: nonEmpty })
-      .strict(),
-    createdAt: nonEmpty,
-  })
-  .strict();
 
 export class PostgresArticleInvariantError extends Error {
   constructor() {
@@ -73,7 +41,7 @@ export function decodePostgresArticleRevision(row: {
   agent_run_id: unknown;
   payload: unknown;
 }): ArticleRevision {
-  const parsed = revisionSchema.safeParse(row.payload);
+  const parsed = articleRevisionSchema.safeParse(row.payload);
   if (
     !parsed.success ||
     parsed.data.id !== row.revision_id ||

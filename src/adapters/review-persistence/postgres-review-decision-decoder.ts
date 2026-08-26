@@ -1,7 +1,10 @@
 import { isDeepStrictEqual } from "node:util";
-import { z } from "zod";
 
-import { createReviewDecision, type ReviewDecision } from "@/domain/editorial";
+import {
+  createReviewDecision,
+  reviewDecisionSchema,
+  type ReviewDecision,
+} from "@/domain/editorial";
 
 export class PostgresReviewInvariantError extends Error {
   constructor() {
@@ -9,21 +12,6 @@ export class PostgresReviewInvariantError extends Error {
     this.name = "PostgresReviewInvariantError";
   }
 }
-
-const nonEmpty = z.string().refine((value) => value.trim().length > 0 && value === value.trim());
-const schema = z
-  .object({
-    id: nonEmpty,
-    storyId: nonEmpty,
-    articleId: nonEmpty,
-    revisionId: nonEmpty,
-    directorRunId: nonEmpty,
-    decision: z.enum(["approve", "request_changes"]),
-    reason: nonEmpty,
-    decidedBy: z.object({ type: z.literal("operator"), operatorId: nonEmpty }).strict(),
-    decidedAt: nonEmpty,
-  })
-  .strict();
 
 export function decodePostgresReviewDecision(row: {
   readonly decision_id: unknown;
@@ -34,7 +22,7 @@ export function decodePostgresReviewDecision(row: {
   readonly decision: unknown;
   readonly payload: unknown;
 }): ReviewDecision {
-  const parsed = schema.safeParse(row.payload);
+  const parsed = reviewDecisionSchema.safeParse(row.payload);
   if (
     !parsed.success ||
     !isDeepStrictEqual(

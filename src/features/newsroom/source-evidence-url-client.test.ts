@@ -151,6 +151,20 @@ describe("source-evidence-url-client", () => {
     },
   );
 
+  it("reads back evidence a Researcher submitted and retrieved", async () => {
+    const requestedBy = { type: "agent", role: "researcher", runId: "research-run-26" } as const;
+    const source = { ...SOURCE, submittedBy: requestedBy };
+    const extraction = { ...SUCCESSFUL_EXTRACTION, requestedBy };
+    const controlled = controlledClient(jsonResponse(201, { ok: true, source, extraction }));
+
+    const result = await controlled.request(SUBMITTED_URL);
+
+    expect(result.kind).toBe("completed");
+    if (result.kind !== "completed") throw new Error("Expected a completed result.");
+    expect(result.source).toEqual(source);
+    expect(result.extraction).toEqual(extraction);
+  });
+
   it("classifies 422 URL validation and retains structured facts", async () => {
     const controlled = controlledClient(
       jsonResponse(422, {

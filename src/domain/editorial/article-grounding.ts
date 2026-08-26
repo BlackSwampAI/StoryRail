@@ -12,13 +12,23 @@ export interface GroundingEvidence {
   readonly content: string;
 }
 
-export type GroundingFailureCode =
+/**
+ * Why one citation could not be verified.
+ *
+ * Written as a runtime list with the type derived from it rather than as a bare union, because
+ * a union alone gives a reader that must check a code at runtime nothing to import, and both the
+ * database decoder and the browser answered that by typing the three codes out again.
+ */
+export const GROUNDING_FAILURE_CODES = [
   /** The citation points at evidence that was not part of this Assignment. */
-  | "CITATION_EVIDENCE_UNKNOWN"
+  "CITATION_EVIDENCE_UNKNOWN",
   /** The citation names a Source that does not own the evidence it points at. */
-  | "CITATION_SOURCE_MISMATCH"
+  "CITATION_SOURCE_MISMATCH",
   /** The quoted passage does not appear in the evidence it is attributed to. */
-  | "CITATION_QUOTE_UNSUPPORTED";
+  "CITATION_QUOTE_UNSUPPORTED",
+] as const;
+
+export type GroundingFailureCode = (typeof GROUNDING_FAILURE_CODES)[number];
 
 export interface GroundingFinding {
   readonly blockIndex: number;

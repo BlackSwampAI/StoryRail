@@ -48,6 +48,87 @@ function row(candidate: unknown = payload) {
   };
 }
 
+const REVISION_RUN = {
+  id: "writer-run-41",
+  storyId: payload.storyId,
+  profileId: "writer-41",
+  role: "writer",
+  operation: "article_revision",
+  model: { provider: "openrouter", model: "writer-model" },
+  prompt: { key: "storyrail_writer_revision", version: "1" },
+  requestedBy: payload.requestedBy,
+  startedAt: "started",
+  completedAt: "completed",
+  input: {
+    story: {
+      id: payload.storyId,
+      title: "Story",
+      state: "changes_requested",
+      revisionCycle: 1,
+    },
+    assignment: {
+      id: "assignment-41",
+      storyId: payload.storyId,
+      writerProfileId: "writer-41",
+      sourceIds: ["source-decoder-0030"],
+      angle: "Angle",
+      brief: "Brief",
+      constraints: null,
+    },
+    article: { id: "article-41", assignmentId: "assignment-41" },
+    revision: {
+      id: "revision-1-41",
+      articleId: "article-41",
+      revisionNumber: 1,
+      writerProfileId: "writer-41",
+      agentRunId: "writer-run-1-41",
+      headline: "Headline",
+      dek: null,
+      bodyMarkdown: "Body",
+    },
+    directorReview: {
+      recommendation: "approve",
+      summary: "Director considered it ready.",
+      checks: {
+        assignment: { status: "pass", note: "Aligned.", quoted: "Quoted from the Article." },
+        support: {
+          status: "pass",
+          note: "Each claim follows.",
+          quoted: "Quoted from the Article.",
+        },
+        accuracy: { status: "pass", note: "Supported.", quoted: "Quoted from the Article." },
+        headline: { status: "pass", note: "Supported.", quoted: "Quoted from the Article." },
+        structure: { status: "pass", note: "Coherent.", quoted: "Quoted from the Article." },
+        style: { status: "pass", note: "Clear.", quoted: "Quoted from the Article." },
+      },
+      revisionInstructions: null,
+    },
+    reviewDecision: {
+      id: "decision-41",
+      storyId: payload.storyId,
+      articleId: "article-41",
+      revisionId: "revision-1-41",
+      directorRunId: "director-run-41",
+      decision: "request_changes",
+      reason: "Operator requires one clarification.",
+      decidedBy: payload.requestedBy,
+      decidedAt: "decided",
+    },
+    evidence: [
+      {
+        sourceId: "source-decoder-0030",
+        relevance: "Primary",
+        evidenceKind: "raw",
+        evidenceId: "extraction-decoder-0030",
+      },
+    ],
+    unavailableSourceIds: [],
+  },
+  outcome: "succeeded",
+  articleId: "article-41",
+  revisionId: "revision-2-41",
+};
+
 describe("PostgreSQL AgentRun decoder", () => {
   it("strictly decodes successful and failed runs as fresh results", () => {
     const decoded = decodePostgresAgentRun(row());
@@ -114,86 +195,7 @@ describe("PostgreSQL AgentRun decoder", () => {
   });
 
   it("strictly decodes a Writer article_revision run", () => {
-    const revision = {
-      id: "writer-run-41",
-      storyId: payload.storyId,
-      profileId: "writer-41",
-      role: "writer",
-      operation: "article_revision",
-      model: { provider: "openrouter", model: "writer-model" },
-      prompt: { key: "storyrail_writer_revision", version: "1" },
-      requestedBy: payload.requestedBy,
-      startedAt: "started",
-      completedAt: "completed",
-      input: {
-        story: {
-          id: payload.storyId,
-          title: "Story",
-          state: "changes_requested",
-          revisionCycle: 1,
-        },
-        assignment: {
-          id: "assignment-41",
-          storyId: payload.storyId,
-          writerProfileId: "writer-41",
-          sourceIds: ["source-decoder-0030"],
-          angle: "Angle",
-          brief: "Brief",
-          constraints: null,
-        },
-        article: { id: "article-41", assignmentId: "assignment-41" },
-        revision: {
-          id: "revision-1-41",
-          articleId: "article-41",
-          revisionNumber: 1,
-          writerProfileId: "writer-41",
-          agentRunId: "writer-run-1-41",
-          headline: "Headline",
-          dek: null,
-          bodyMarkdown: "Body",
-        },
-        directorReview: {
-          recommendation: "approve",
-          summary: "Director considered it ready.",
-          checks: {
-            assignment: { status: "pass", note: "Aligned.", quoted: "Quoted from the Article." },
-            support: {
-              status: "pass",
-              note: "Each claim follows.",
-              quoted: "Quoted from the Article.",
-            },
-            accuracy: { status: "pass", note: "Supported.", quoted: "Quoted from the Article." },
-            headline: { status: "pass", note: "Supported.", quoted: "Quoted from the Article." },
-            structure: { status: "pass", note: "Coherent.", quoted: "Quoted from the Article." },
-            style: { status: "pass", note: "Clear.", quoted: "Quoted from the Article." },
-          },
-          revisionInstructions: null,
-        },
-        reviewDecision: {
-          id: "decision-41",
-          storyId: payload.storyId,
-          articleId: "article-41",
-          revisionId: "revision-1-41",
-          directorRunId: "director-run-41",
-          decision: "request_changes",
-          reason: "Operator requires one clarification.",
-          decidedBy: payload.requestedBy,
-          decidedAt: "decided",
-        },
-        evidence: [
-          {
-            sourceId: "source-decoder-0030",
-            relevance: "Primary",
-            evidenceKind: "raw",
-            evidenceId: "extraction-decoder-0030",
-          },
-        ],
-        unavailableSourceIds: [],
-      },
-      outcome: "succeeded",
-      articleId: "article-41",
-      revisionId: "revision-2-41",
-    };
+    const revision = REVISION_RUN;
     expect(
       decodePostgresAgentRun({
         run_id: revision.id,
@@ -205,6 +207,36 @@ describe("PostgreSQL AgentRun decoder", () => {
         payload: revision,
       }),
     ).toEqual(revision);
+  });
+
+  it("decodes a Writer revision run that needed a correction turn", () => {
+    // A revision goes through the same correction turn a draft does. Until both readers shared
+    // one account of a run, this reader had no `corrected` on a revision at all, so a run the
+    // newsroom had recorded correctly could not be read back out of PostgreSQL.
+    const corrected = {
+      ...REVISION_RUN,
+      corrected: [
+        {
+          blockIndex: 0,
+          citationIndex: 0,
+          code: "CITATION_QUOTE_UNSUPPORTED",
+          quote: "A passage the evidence did not carry.",
+          evidenceId: "extraction-decoder-0030",
+        },
+      ],
+    };
+
+    expect(
+      decodePostgresAgentRun({
+        run_id: corrected.id,
+        story_id: corrected.storyId,
+        profile_id: corrected.profileId,
+        role: corrected.role,
+        operation: corrected.operation,
+        outcome: corrected.outcome,
+        payload: corrected,
+      }),
+    ).toEqual(corrected);
   });
 
   it("strictly decodes a Director article_review run", () => {
