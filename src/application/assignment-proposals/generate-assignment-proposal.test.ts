@@ -16,6 +16,7 @@ import {
   sourceId,
   storyId,
   type AgentProfile,
+  type NewsroomIdentity,
 } from "@/domain/editorial";
 
 import {
@@ -156,6 +157,10 @@ function setup(
     reason: "Specialist fit",
   },
   profiles: readonly AgentProfile[] = [editor, builtInWriter, customWriter],
+  newsroom: Partial<{
+    readonly readNewsroomStandards: () => Promise<string | null>;
+    readonly readNewsroomIdentity: () => Promise<NewsroomIdentity | null>;
+  }> = {},
 ) {
   type MockModelResult =
     | { readonly ok: true; readonly output: unknown }
@@ -189,12 +194,32 @@ function setup(
     runs,
     resolveModel: async () => ({ ok: true as const, model }),
     createAgentRunId: () => agentRunId("run-0030"),
+    ...newsroom,
     now: vi.fn().mockReturnValueOnce("started").mockReturnValueOnce("completed"),
   });
   return { workflow, generateStructured, runs, model };
 }
 
 describe("generateAssignmentProposal", () => {
+  it("tells the Assignment Editor which newsroom it is proposing for", async () => {
+    // The angle an editor proposes depends on who the newsroom serves, so the Site's own name
+    // and description travel with the standards rather than being left in the database.
+    const { workflow, generateStructured } = setup(undefined, undefined, undefined, {
+      readNewsroomIdentity: async () => ({
+        name: "Black Swamp AI",
+        description: "Guides, Tips and News from the AI World",
+      }),
+      readNewsroomStandards: async () => "Headlines are sentence case.",
+    });
+
+    await settleAgentRun(workflow({ storyId: story.id, requestedBy: actor }));
+
+    const prompt = generateStructured.mock.calls[0]![0].systemPrompt;
+    expect(prompt).toContain("Black Swamp AI");
+    expect(prompt).toContain("Guides, Tips and News from the AI World");
+    expect(prompt).toContain("Headlines are sentence case.");
+  });
+
   it("makes exactly one safe structured request and persists exact prepared-evidence provenance", async () => {
     const { workflow, generateStructured, runs } = setup();
     const result = await settleAgentRun(workflow({ storyId: story.id, requestedBy: actor }));

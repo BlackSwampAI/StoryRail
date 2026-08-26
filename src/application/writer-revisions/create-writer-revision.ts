@@ -10,6 +10,7 @@ import {
 } from "@/application/writer-drafts";
 import {
   withNewsroomStandards,
+  type NewsroomIdentity,
   createArticleRevision,
   type CredentialUnavailableCode,
   articleBodyMarkdown,
@@ -117,6 +118,8 @@ export function createWriterRevision(dependencies: {
   readonly createTransitionId: () => TransitionId;
   /** The newsroom's standards, in force when the run starts. Absent is normal. */
   readonly readNewsroomStandards?: () => Promise<string | null>;
+  /** Who this newsroom is, read when the run starts. A newsroom that has said nothing is normal. */
+  readonly readNewsroomIdentity?: () => Promise<NewsroomIdentity | null>;
   readonly now: () => string;
 }) {
   return async (command: {
@@ -336,6 +339,7 @@ export function createWriterRevision(dependencies: {
     // completion it produces continue past this point.
     const completion = (async (): Promise<CreateWriterRevisionResult> => {
       const standards = (await dependencies.readNewsroomStandards?.()) ?? null;
+      const newsroom = (await dependencies.readNewsroomIdentity?.()) ?? null;
       const modelInput = {
         ...input,
         evidence: selected.map(({ reference, document }) => ({ ...reference, document })),
@@ -350,6 +354,7 @@ export function createWriterRevision(dependencies: {
           systemPrompt: withNewsroomStandards(
             writerRevisionSystemPrompt(writerProfile.instructions),
             standards,
+            newsroom,
           ),
           input: modelInput,
           schema: writerRevisionOutputSchema,
@@ -370,6 +375,7 @@ export function createWriterRevision(dependencies: {
             systemPrompt: withNewsroomStandards(
               writerRevisionSystemPrompt(writerProfile.instructions),
               standards,
+              newsroom,
             ),
             input: modelInput,
             schema: writerRevisionOutputSchema,

@@ -14,6 +14,7 @@ import type { StoryInspectionRepository } from "@/application/story-inspection";
 import type { SourceExtractor } from "@/adapters/source-extraction";
 import {
   withNewsroomStandards,
+  type NewsroomIdentity,
   canonicalizeSourceUrl,
   recordAgentRun,
   recordSourceExtraction,
@@ -140,6 +141,8 @@ export function createResearchStorySources(dependencies: {
   readonly createExtractionId: () => SourceExtractionId;
   /** The newsroom's standards, in force when the run starts. Absent is normal. */
   readonly readNewsroomStandards?: () => Promise<string | null>;
+  /** Who this newsroom is, read when the run starts. A newsroom that has said nothing is normal. */
+  readonly readNewsroomIdentity?: () => Promise<NewsroomIdentity | null>;
   readonly now: () => string;
   readonly maximumCalls?: number;
   readonly maximumTurns?: number;
@@ -288,6 +291,7 @@ export function createResearchStorySources(dependencies: {
       ]);
 
       const standards = (await dependencies.readNewsroomStandards?.()) ?? null;
+      const newsroom = (await dependencies.readNewsroomIdentity?.()) ?? null;
       const { result } = await runToolAssisted({
         model: resolved.model,
         registry,
@@ -295,6 +299,7 @@ export function createResearchStorySources(dependencies: {
         systemPrompt: withNewsroomStandards(
           researcherSystemPrompt(profile.instructions),
           standards,
+          newsroom,
         ),
         input: { story: input.story, evidence: known },
         schema: sourceResearchOutputSchema,

@@ -35,3 +35,15 @@ export type RecordNewsroomStandardsResult =
         readonly message: string;
       };
     };
+
+/**
+ * Who a newsroom is, as an agent is told it: the Site's own name and what it publishes.
+ *
+ * Deliberately separate from {@link NewsroomStandards}. Standards govern how work reads; this
+ * says who the newsroom is and who it serves, which is what an agent needs in order to judge
+ * whether a story belongs here at all.
+ */
+export interface NewsroomIdentity {
+  readonly name: string;
+  readonly description: string;
+}

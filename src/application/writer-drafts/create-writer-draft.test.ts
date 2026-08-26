@@ -139,6 +139,77 @@ function fixture() {
 }
 
 describe("createWriterDraft", () => {
+  it("tells the Writer which newsroom it is writing for", async () => {
+    // A Writer that knows who the newsroom serves pitches the piece at them, and the guard on
+    // that context is what keeps it from becoming a licence to assert more than the evidence.
+    const facts = fixture();
+    const generateStructured = vi.fn(async () => ({
+      ok: true as const,
+      output: {
+        headline: "Draft",
+        dek: null,
+        blocks: [
+          {
+            kind: "claim",
+            markdown: "The evidence says so.",
+            citations: [{ sourceId: "source-a", evidenceId: "prepared-a", quote: "Evidence" }],
+          },
+        ],
+      },
+    }));
+    const workflow = createWriterDraft({
+      inspections: {
+        inspect: vi.fn(async () => ({ ok: true as const, inspection: facts.inspection })),
+      },
+      runs: {
+        append: vi.fn(async (run) => ({ ok: true as const, run })),
+        complete: vi.fn(async (run) => ({ ok: true as const, run })),
+        listByStoryId: vi.fn(),
+      },
+      persistence: {
+        persist: vi.fn<WriterDraftPersistence["persist"]>(async (command) => ({
+          ok: true as const,
+          run: command.run,
+          article: command.article,
+          revision: command.revision,
+          story: command.story,
+          transitionReceipt: command.transitionReceipt,
+        })),
+      },
+      resolveModel: async () => ({
+        ok: true,
+        model: {
+          descriptor: { provider: "openrouter", model: "default-writer" },
+          limits: { maximumInputCharacters: 60_000 },
+          generateStructured:
+            generateStructured as unknown as StructuredModel["generateStructured"],
+        },
+      }),
+      createAgentRunId: () => agentRunId("run-31"),
+      createArticleId: () => articleId("article-31"),
+      createRevisionId: () => articleRevisionId("revision-31"),
+      createTransitionId: () => transitionId("transition-31"),
+      readNewsroomIdentity: async () => ({
+        name: "Black Swamp AI",
+        description: "Guides, Tips and News from the AI World",
+      }),
+      readNewsroomStandards: async () => "Headlines are sentence case.",
+      now: () => "now",
+    });
+
+    await settleAgentRun(
+      workflow({ storyId: facts.story.id, requestedBy: facts.assignment.assignedBy }),
+    );
+
+    const prompt = (
+      generateStructured.mock.calls[0] as unknown as [StructuredModelRequest<unknown>]
+    )[0].systemPrompt;
+    expect(prompt).toContain("Black Swamp AI");
+    expect(prompt).toContain("Guides, Tips and News from the AI World");
+    expect(prompt).toContain("never relaxes the rules above about evidence");
+    expect(prompt).toContain("Headlines are sentence case.");
+  });
+
   it("uses prepared Assignment evidence, records unavailable Sources, and persists Revision 1", async () => {
     const facts = fixture();
     const generateStructured = vi.fn(async (request: StructuredModelRequest<unknown>) => {

@@ -8,6 +8,7 @@ import {
   type CredentialUnavailableCode,
   type CredentialUnavailableError,
   withNewsroomStandards,
+  type NewsroomIdentity,
   articleBodyMarkdown,
   measureArticleGrounding,
   unsupportedDirectorQuotes,
@@ -126,6 +127,8 @@ export function createRunDirectorReview(dependencies: {
   readonly createAgentRunId: () => AgentRunId;
   /** The newsroom's standards, in force when the run starts. Absent is normal. */
   readonly readNewsroomStandards?: () => Promise<string | null>;
+  /** Who this newsroom is, read when the run starts. A newsroom that has said nothing is normal. */
+  readonly readNewsroomIdentity?: () => Promise<NewsroomIdentity | null>;
   readonly now: () => string;
 }) {
   return async (command: {
@@ -319,11 +322,13 @@ export function createRunDirectorReview(dependencies: {
     // completion it produces continue past this point.
     const completion = (async (): Promise<RunDirectorReviewResult> => {
       const standards = (await dependencies.readNewsroomStandards?.()) ?? null;
+      const newsroom = (await dependencies.readNewsroomIdentity?.()) ?? null;
       const generated = await resolved.model
         .generateStructured({
           systemPrompt: withNewsroomStandards(
             directorSystemPrompt(profile.instructions),
             standards,
+            newsroom,
           ),
           input: {
             ...input,

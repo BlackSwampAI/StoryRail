@@ -64,6 +64,43 @@ describe("adding standards to a role's prompt", () => {
     expect(composed).toContain("Headlines are sentence case.");
     expect(composed).toContain("never relax the rules above about evidence, citation, tools");
   });
+
+  it("says which newsroom the work is for, and that saying so licenses nothing", () => {
+    // Telling an agent who the newsroom serves is context for judgement. An agent told that must
+    // not conclude it may therefore assert things about those readers.
+    const composed = withNewsroomStandards(role, null, {
+      name: "Black Swamp AI",
+      description: "Guides, Tips and News from the AI World",
+    });
+
+    expect(composed.startsWith(role)).toBe(true);
+    expect(composed).toContain("Black Swamp AI");
+    expect(composed).toContain("Guides, Tips and News from the AI World");
+    expect(composed).toContain("never licence to assert anything the evidence does not support");
+    expect(composed).toContain("never relaxes the rules above about evidence, citation, tools");
+  });
+
+  it("stays silent about a newsroom that has described itself as nothing", () => {
+    // An empty heading reads like a newsroom that forgot to say who it is, which is worse than
+    // saying nothing at all.
+    expect(withNewsroomStandards(role, null, null)).toBe(role);
+    expect(withNewsroomStandards(role, null, { name: "Black Swamp AI", description: "   " })).toBe(
+      role,
+    );
+  });
+
+  it("keeps who the newsroom is separate from how its work should read", () => {
+    const composed = withNewsroomStandards(role, "Headlines are sentence case.", {
+      name: "Black Swamp AI",
+      description: "Guides, Tips and News from the AI World",
+    });
+
+    expect(composed).toContain("The newsroom you are working for, Black Swamp AI, publishes:");
+    expect(composed).toContain("Editorial standards for this newsroom, set by the operator.");
+    expect(composed.indexOf("Black Swamp AI")).toBeLessThan(
+      composed.indexOf("Editorial standards for this newsroom"),
+    );
+  });
 });
 
 describe("which standards a run worked under", () => {

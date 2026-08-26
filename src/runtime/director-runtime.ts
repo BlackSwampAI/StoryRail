@@ -20,6 +20,7 @@ import {
   type SiteId,
   type StoryId,
 } from "@/domain/editorial";
+import { createNewsroomIdentityReader } from "./newsroom-identity";
 import { createSiteStore } from "./site-store";
 import {
   loadDirectorRuntimeConfiguration,
@@ -78,6 +79,7 @@ export function createDirectorRuntime(options: {
     }).list();
     return history.at(-1)?.text ?? null;
   };
+  const readNewsroomIdentity = createNewsroomIdentityReader({ pool, siteId: options.siteId });
   const uuid = options.createUuid ?? randomUUID;
   const store = createSiteStore({
     pool,
@@ -86,6 +88,7 @@ export function createDirectorRuntime(options: {
   });
   const workflow = createRunDirectorReview({
     readNewsroomStandards,
+    readNewsroomIdentity,
     inspections: createPostgresStoryInspectionRepository({ pool, siteId: options.siteId }),
     profiles: createPostgresAgentProfileRepository({ pool, siteId: options.siteId }),
     runs: createPostgresAgentRunRepository({ pool }),
