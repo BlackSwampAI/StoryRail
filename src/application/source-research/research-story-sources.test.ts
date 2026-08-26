@@ -96,6 +96,7 @@ function inspection(state: "intake" | "assigned" = "intake") {
     agentRuns: [],
     reviewDecisions: [],
     deliveries: [],
+    toolCalls: [],
     article: null,
   };
 }

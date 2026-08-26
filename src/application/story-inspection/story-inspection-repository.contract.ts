@@ -249,6 +249,7 @@ export function describeStoryInspectionRepositoryContract(
           agentRuns: [],
           reviewDecisions: [],
           deliveries: [],
+          toolCalls: [],
           article: null,
         },
       });
@@ -270,6 +271,7 @@ export function describeStoryInspectionRepositoryContract(
           agentRuns: [],
           reviewDecisions: [],
           deliveries: [],
+          toolCalls: [],
           article: null,
         },
       });
@@ -386,6 +388,7 @@ export function describeStoryInspectionRepositoryContract(
           agentRuns: [],
           reviewDecisions: [],
           deliveries: [],
+          toolCalls: [],
           article: null,
         },
       });
@@ -425,6 +428,7 @@ export function describeStoryInspectionRepositoryContract(
           agentRuns: [],
           reviewDecisions: [],
           deliveries: [],
+          toolCalls: [],
           article: null,
         },
       });
@@ -450,6 +454,7 @@ export function describeStoryInspectionRepositoryContract(
           agentRuns: [first, second],
           reviewDecisions: [],
           deliveries: [],
+          toolCalls: [],
           article: null,
         },
       });
@@ -489,6 +494,7 @@ export function describeStoryInspectionRepositoryContract(
           agentRuns: [],
           reviewDecisions: [],
           deliveries: [],
+          toolCalls: [],
           article: null,
         },
       });
@@ -589,6 +595,7 @@ export function describeStoryInspectionRepositoryContract(
         agentRuns: [],
         reviewDecisions: [],
         deliveries: [],
+        toolCalls: [],
         article: null,
       });
       expect(second.inspection).not.toBe(first.inspection);
@@ -677,6 +684,7 @@ export function createReferenceStoryInspectionRepositoryHarness(): StoryInspecti
               agentRuns: agentRuns.get(storyIdentity) ?? [],
               reviewDecisions: [],
               deliveries: [],
+              toolCalls: [],
               article: null,
             }),
           };

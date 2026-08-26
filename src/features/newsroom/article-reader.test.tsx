@@ -16,6 +16,7 @@ import {
 } from "@/domain/editorial";
 
 import { ArticleReader } from "./article-reader";
+import styles from "./newsroom-shell.module.css";
 
 const SOURCE = sourceId("source-reader");
 const PREPARED = sourceEvidencePreparationId("prepared-reader");
@@ -115,11 +116,11 @@ describe("reading an Article with its support attached", () => {
     renderReader();
     expect(screen.queryByText(/The release shipped on Tuesday$/)).not.toBeInTheDocument();
 
-    const toggle = screen.getByRole("button", { name: /show 1 source/i });
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    fireEvent.click(toggle);
+    const mark = screen.getByRole("button", { name: /attributed · 1 source/i });
+    expect(mark).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(mark);
 
-    expect(screen.getByRole("button", { name: /hide 1 source/i })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: /attributed · 1 source/i })).toHaveAttribute(
       "aria-expanded",
       "true",
     );
@@ -128,6 +129,18 @@ describe("reading an Article with its support attached", () => {
     const link = screen.getByRole("link", { name: "Announcing the release" });
     expect(link).toHaveAttribute("href", "https://blog.example.test/release");
     expect(screen.getByText(/prepared evidence/)).toBeInTheDocument();
+  });
+
+  // A filled button per paragraph stacked down the whole piece and drowned the prose it was
+  // annotating. The grounding still has to be visible, so the mark is quietened, not removed.
+  it("marks a claim's attribution as quietly as it marks unattributed prose", () => {
+    renderReader();
+
+    const mark = screen.getByRole("button", { name: /attributed · 1 source/i });
+    expect(mark.className).toBe(styles.claimMark);
+    expect(screen.queryByRole("button", { name: /^show 1 source$/i })).not.toBeInTheDocument();
+    fireEvent.click(mark);
+    expect(screen.getByText("The release shipped on Tuesday")).toBeInTheDocument();
   });
 
   it("labels uncited prose instead of letting it pass as reporting", () => {
@@ -152,7 +165,7 @@ describe("reading an Article with its support attached", () => {
       "aria-pressed",
       "false",
     );
-    expect(screen.getByRole("button", { name: /show 1 source/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /attributed · 1 source/i })).toBeInTheDocument();
   });
 
   it("shows the article's own derived text rather than a second rendering of it", () => {
@@ -163,7 +176,9 @@ describe("reading an Article with its support attached", () => {
       screen.getByText(articleBodyMarkdown(revision.blocks), { collapseWhitespace: false }),
     ).toBeInTheDocument();
     // The attributions are what the operator asked to be able to read past.
-    expect(screen.queryByRole("button", { name: /show 1 source/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /attributed · 1 source/i }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText(/Writer's own framing/)).not.toBeInTheDocument();
   });
 
@@ -257,7 +272,7 @@ describe("reading an Article with its support attached", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /show 1 source/i }));
+    fireEvent.click(screen.getByRole("button", { name: /attributed · 1 source/i }));
     expect(screen.getByText("Source unavailable on this Story")).toBeInTheDocument();
     expect(screen.getByText(/evidence record not found/)).toBeInTheDocument();
   });

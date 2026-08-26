@@ -5,6 +5,7 @@ import type { Pool, QueryResultRow } from "pg";
 import type {
   AgentProfile,
   AgentRun,
+  AgentToolCall,
   Article,
   ArticleRevision,
   Assignment,
@@ -43,6 +44,7 @@ import {
 } from "../article-persistence/postgres-article-decoder";
 import { decodePostgresReviewDecision } from "../review-persistence";
 import { decodePostgresStoryDelivery } from "../story-delivery-persistence/postgres-story-delivery-decoder";
+import { decodePostgresAgentToolCall } from "../agent-tool-call-persistence/postgres-agent-tool-call-decoder";
 
 export interface CreatePostgresStoryInspectionRepositoryOptions {
   readonly pool: Pool;
@@ -80,6 +82,7 @@ interface StoryInspectionRow extends QueryResultRow {
   readonly article_revision_rows: unknown;
   readonly review_decision_rows: unknown;
   readonly delivery_payloads: unknown;
+  readonly tool_call_payloads: unknown;
 }
 
 interface AssembledStoryInspectionSource {
@@ -432,6 +435,15 @@ function decodeDeliveries(row: StoryInspectionRow): StoryDelivery[] {
   });
 }
 
+function decodeToolCalls(row: StoryInspectionRow): AgentToolCall[] {
+  if (!Array.isArray(row.tool_call_payloads)) throw invariantError();
+  return row.tool_call_payloads.map((payload) => {
+    const call = decodePostgresAgentToolCall(payload, invariantError);
+    if (call.storyId !== row.story_id) throw invariantError();
+    return call;
+  });
+}
+
 export function createPostgresStoryInspectionRepository(
   options: CreatePostgresStoryInspectionRepositoryOptions,
 ): StoryInspectionRepository {
@@ -528,7 +540,12 @@ export function createPostgresStoryInspectionRepository(
                     ORDER BY delivery.started_at ASC, delivery.delivery_id COLLATE "C" ASC)
                   FROM storyrail.story_deliveries AS delivery
                   WHERE delivery.story_id = story.story_id
-                ), '[]'::jsonb) AS delivery_payloads
+                ), '[]'::jsonb) AS delivery_payloads,
+                COALESCE((
+                  SELECT jsonb_agg(tool_call.payload ORDER BY tool_call.append_position ASC)
+                  FROM storyrail.agent_tool_calls AS tool_call
+                  WHERE tool_call.story_id = story.story_id
+                ), '[]'::jsonb) AS tool_call_payloads
          FROM storyrail.stories AS story
          LEFT JOIN storyrail.story_source_attachments AS attachment
            ON attachment.story_id = story.story_id
@@ -572,6 +589,7 @@ export function createPostgresStoryInspectionRepository(
       const article = decodeArticle(firstRow);
       const reviewDecisions = decodeReviewDecisions(firstRow);
       const deliveries = decodeDeliveries(firstRow);
+      const toolCalls = decodeToolCalls(firstRow);
       if (
         article !== null &&
         (assignment === null ||
@@ -628,7 +646,8 @@ export function createPostgresStoryInspectionRepository(
           !isDeepStrictEqual(decodeAgentRuns(row), agentRuns) ||
           !isDeepStrictEqual(decodeArticle(row), article) ||
           !isDeepStrictEqual(decodeReviewDecisions(row), reviewDecisions) ||
-          !isDeepStrictEqual(decodeDeliveries(row), deliveries)
+          !isDeepStrictEqual(decodeDeliveries(row), deliveries) ||
+          !isDeepStrictEqual(decodeToolCalls(row), toolCalls)
         )
           throw invariantError();
 
@@ -664,6 +683,7 @@ export function createPostgresStoryInspectionRepository(
           article,
           reviewDecisions,
           deliveries,
+          toolCalls,
         },
       };
     },

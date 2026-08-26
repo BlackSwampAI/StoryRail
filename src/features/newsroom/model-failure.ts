@@ -1,5 +1,7 @@
 import type { ModelFailureCode } from "@/domain/editorial";
 
+import { withFailureCode } from "./failure-prose";
+
 /**
  * Failure codes are the durable record and stay verbatim in the audit panels. Where a failure
  * is reported to the operator as prose, it also needs to say what happened and who can act on
@@ -31,5 +33,5 @@ export function modelFailureMessage(
   activity: string,
   failure: { readonly code: ModelFailureCode },
 ): string {
-  return `${activity} failed. ${modelFailureExplanation(failure.code)} (${failure.code})`;
+  return `${activity} failed. ${withFailureCode(modelFailureExplanation(failure.code), failure.code)}`;
 }

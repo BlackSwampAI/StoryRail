@@ -292,6 +292,25 @@ export function NewsroomShell({
                 <p className={styles.navigationLabel} id="stories-navigation-label">
                   Stories
                 </p>
+                {/*
+                 * A loading state that cannot become an error is a lie by omission: the desk sat
+                 * on "Loading Stories…" and eight dashes with no way to tell a slow network from
+                 * an empty newsroom from a broken page. The failure is said at the desk rather
+                 * than inside a queue nobody has expanded.
+                 */}
+                {listing.kind === "loading" ? (
+                  <p className={styles.deskListingStatus} role="status">
+                    Loading Stories…
+                  </p>
+                ) : null}
+                {listing.kind === "unavailable" ? (
+                  <div className={styles.deskListingStatus} role="alert">
+                    <span>Stories could not be loaded.</span>
+                    <button type="button" onClick={() => void loadStories()}>
+                      Retry
+                    </button>
+                  </div>
+                ) : null}
                 <div className={styles.queueList}>
                   {STORY_STATES.map((state) => {
                     const queueStories = items.filter(({ story }) => story.state === state);

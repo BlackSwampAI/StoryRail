@@ -75,6 +75,7 @@ function inspection(state: StoryInspection["story"]["state"], written: boolean):
     transitions: [],
     reviewDecisions: [],
     deliveries: [],
+    toolCalls: [],
     agentRuns: [],
     article: written
       ? {

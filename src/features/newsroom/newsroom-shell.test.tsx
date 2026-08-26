@@ -60,6 +60,7 @@ function storyRequests(): StoryClient {
         agentRuns: [],
         reviewDecisions: [],
         deliveries: [],
+        toolCalls: [],
         article: null,
       },
     })),
@@ -355,6 +356,7 @@ describe("NewsroomShell", () => {
             agentRuns: [],
             reviewDecisions: [],
             deliveries: [],
+            toolCalls: [],
             article: null,
           },
         })
@@ -368,6 +370,7 @@ describe("NewsroomShell", () => {
             agentRuns: [],
             reviewDecisions: [],
             deliveries: [],
+            toolCalls: [],
             article: null,
           },
         }),
@@ -445,6 +448,33 @@ describe("NewsroomShell", () => {
       "aria-expanded",
       "false",
     );
+  });
+
+  // "Loading Stories…" and eight dashes, forever, is indistinguishable from a slow network, an
+  // empty newsroom and a broken page. A loading state that cannot fail says nothing.
+  it("says the Story listing failed and offers a retry, rather than loading forever", async () => {
+    const listStories = vi
+      .fn<StoryClient["listStories"]>()
+      .mockResolvedValueOnce({
+        kind: "unavailable",
+        message: "The Story request could not be completed.",
+      })
+      .mockResolvedValue({ kind: "completed", value: [{ story: STORY, sourceCount: 0 }] });
+    render(
+      <NewsroomShell
+        storyRequests={{ ...storyRequests(), listStories }}
+        sourceInboxRequests={inboxRequests()}
+      />,
+    );
+
+    const [alert] = await screen.findAllByRole("alert");
+    expect(alert).toHaveTextContent("Stories could not be loaded.");
+    expect(screen.queryByText("Loading Stories…")).toBeNull();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Retry" })[0] as HTMLElement);
+
+    expect((await screen.findAllByRole("button", { name: "Intake, 1 story" }))[0]).toBeVisible();
+    expect(screen.queryByText("Stories could not be loaded.")).toBeNull();
   });
 
   it("nests only the selected queue's Stories inside the consolidated Desk navigation", async () => {
@@ -673,6 +703,7 @@ describe("NewsroomShell", () => {
           agentRuns: [],
           reviewDecisions: [],
           deliveries: [],
+          toolCalls: [],
           article: null,
         },
       })),
@@ -887,6 +918,7 @@ describe("NewsroomShell", () => {
           agentRuns: [],
           reviewDecisions: [],
           deliveries: [],
+          toolCalls: [],
           article: null,
         },
       })),
@@ -971,6 +1003,7 @@ describe("NewsroomShell", () => {
       agentRuns: [],
       reviewDecisions: [],
       deliveries: [],
+      toolCalls: [],
       article: null,
     };
     const draftedInspection = {
@@ -979,6 +1012,7 @@ describe("NewsroomShell", () => {
       agentRuns: [successfulRun],
       reviewDecisions: [],
       deliveries: [],
+      toolCalls: [],
       article: {
         article: {
           id: articleIdentity,
@@ -1083,6 +1117,7 @@ describe("NewsroomShell", () => {
           agentRuns: [],
           reviewDecisions: [],
           deliveries: [],
+          toolCalls: [],
           article: {
             article: {
               id: articleIdentity,

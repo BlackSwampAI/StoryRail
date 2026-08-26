@@ -8,6 +8,7 @@ import {
   articleBodyMarkdown,
   type AgentProfile,
   type AgentRun,
+  type AgentToolCall,
   type Assignment,
   type EditorialActor,
   type StoryTransitionReceipt,
@@ -40,8 +41,12 @@ import {
  * A refused draft is only useful if it says what it could not support, so each finding names the
  * problem and shows the passage the Writer claimed to be quoting.
  */
-/** Stated where the operator chooses, so the cost of asking for research is not a surprise. */
-const AUTOPILOT_RESEARCH_PAGE_BUDGET = DEFAULT_RESEARCH_CALL_BUDGET;
+/**
+ * Stated where the operator chooses, so the cost of asking for research is not a surprise, and
+ * again against what a run has spent, so a thin result can be read as a budget rather than a
+ * fault.
+ */
+const RESEARCH_CALL_BUDGET = DEFAULT_RESEARCH_CALL_BUDGET;
 
 const GROUNDING_FINDING_LABELS = {
   CITATION_EVIDENCE_UNKNOWN: "Cited evidence not on this Assignment",
@@ -50,6 +55,8 @@ const GROUNDING_FINDING_LABELS = {
 } as const;
 import { autopilotProgress, resolveAutopilotFollow } from "./autopilot-follow";
 import { withRun } from "./agent-run-list";
+import { ToolActivity } from "./tool-activity";
+import { readableTime } from "./readable-time";
 import { STORY_STATE_LABELS } from "./newsroom-state";
 import { WRITER_ASSIGNMENT_DROP_ID, WRITER_DRAG_TYPE, type StaffState } from "./newsroom-staff";
 import styles from "./newsroom-shell.module.css";
@@ -875,6 +882,9 @@ export function StoryWorkspace({
   const [rejectionReason, setRejectionReason] = useState("");
   const [rejectionStatus, setRejectionStatus] = useState<string | null>(null);
   const [runs, setRuns] = useState<readonly AgentRun[]>(agentRuns);
+  // Tool calls arrive with the inspection and are refreshed by the same polls that follow the
+  // runs, so the list grows while a run is still working rather than only once it has finished.
+  const [toolCalls, setToolCalls] = useState<readonly AgentToolCall[]>(inspection.toolCalls);
   const [researchPending, setResearchPending] = useState(false);
   const [researchStatus, setResearchStatus] = useState<string | null>(null);
   const [autopilotPending, setAutopilotPending] = useState(false);
@@ -1167,6 +1177,7 @@ export function StoryWorkspace({
         const refreshed = await requests.inspectStory(story.id);
         if (!active || refreshed.kind !== "completed") return;
         setRuns(refreshed.value.agentRuns);
+        setToolCalls(refreshed.value.toolCalls);
         if (refreshed.value.agentRuns.some(isSuccessfulProposal)) setProposalReady(true);
         if (refreshed.value.agentRuns.every((run) => run.outcome !== "running")) {
           onWriterCompleted(refreshed.value);
@@ -1191,6 +1202,7 @@ export function StoryWorkspace({
         const refreshed = await requests.inspectStory(story.id);
         if (!active || refreshed.kind !== "completed") return;
         setRuns(refreshed.value.agentRuns);
+        setToolCalls(refreshed.value.toolCalls);
         const progress = autopilotProgress(refreshed.value);
         const observedAt = Date.now();
         const moved = progress !== autopilotWatch.progress;
@@ -1493,6 +1505,7 @@ export function StoryWorkspace({
           {autopilotStatus}
         </p>
       ) : null}
+      <ToolActivity calls={toolCalls} runs={runs} budget={RESEARCH_CALL_BUDGET} />
 
       {story.state === "rejected" && rejectionTransition ? (
         <section className={styles.rejectionResult} aria-labelledby="story-rejected-heading">
@@ -1627,7 +1640,7 @@ export function StoryWorkspace({
                 ) : null}
               </section>
             ) : story.state === "published" ? (
-              <section className={styles.reviewTask} aria-labelledby="published-heading">
+              <section className={styles.publishedTask} aria-labelledby="published-heading">
                 <p className={styles.currentTaskLabel}>Published</p>
                 <h2 id="published-heading">This Story is published</h2>
                 <p>
@@ -1643,14 +1656,18 @@ export function StoryWorkspace({
                 ) : deliveryStanding.kind === "in-flight" ? (
                   <p className={styles.deliveryRecord}>
                     A delivery to {deliveryStanding.delivery.destination} is in flight. It was
-                    started at {deliveryStanding.delivery.startedAt}.
+                    started at {readableTime(deliveryStanding.delivery.startedAt)}.
                   </p>
                 ) : deliveryStanding.kind === "delivered" ? (
                   <div className={styles.deliveryRecord}>
                     <p>
                       Delivered to {deliveryStanding.delivery.destination} as{" "}
                       <strong>{deliveryStanding.delivery.remoteId}</strong>, completed at{" "}
-                      {deliveryStanding.delivery.completedAt}.
+                      {readableTime(
+                        deliveryStanding.delivery.completedAt ??
+                          deliveryStanding.delivery.startedAt,
+                      )}
+                      .
                     </p>
                     {deliveryStanding.delivery.outcome === "succeeded" &&
                     deliveryStanding.delivery.result.assignedSlug !== undefined ? (
@@ -1665,7 +1682,11 @@ export function StoryWorkspace({
                   <div className={styles.deliveryRecord}>
                     <p>
                       The last delivery to {deliveryStanding.delivery.destination} failed at{" "}
-                      {deliveryStanding.delivery.completedAt}.
+                      {readableTime(
+                        deliveryStanding.delivery.completedAt ??
+                          deliveryStanding.delivery.startedAt,
+                      )}
+                      .
                     </p>
                     <p>
                       {deliveryStanding.delivery.outcome === "failed"
@@ -2131,6 +2152,31 @@ export function StoryWorkspace({
                   >
                     {researchRunning ? "Researcher is working…" : "Find more Sources"}
                   </button>
+                </div>
+                {/*
+                 * The research option is inside the autopilot control because it is an option on
+                 * starting autopilot and nothing else. Sitting loose on the page it read as
+                 * "research this Story": an operator ticked it, stepped the Story by hand, and
+                 * research was never asked to run.
+                 */}
+                <fieldset className={styles.autopilotControl}>
+                  <legend>Autopilot</legend>
+                  <label className={styles.autopilotOption}>
+                    <input
+                      type="checkbox"
+                      checked={autopilotResearch}
+                      disabled={autopilotPending || autopilotRunning}
+                      onChange={(event) => setAutopilotResearch(event.target.checked)}
+                    />
+                    <span>
+                      Research first, when autopilot runs
+                      <small>
+                        Retrieves up to {RESEARCH_CALL_BUDGET} linked pages and adds a model call
+                        before drafting. Slower, and it costs more per run. It applies only to
+                        autopilot — to research now, use Find more Sources.
+                      </small>
+                    </span>
+                  </label>
                   <button
                     type="button"
                     className={styles.tertiaryAction}
@@ -2139,22 +2185,7 @@ export function StoryWorkspace({
                   >
                     {autopilotRunning ? "Autopilot is running…" : "Run autopilot"}
                   </button>
-                </div>
-                <label className={styles.autopilotOption}>
-                  <input
-                    type="checkbox"
-                    checked={autopilotResearch}
-                    disabled={autopilotPending || autopilotRunning}
-                    onChange={(event) => setAutopilotResearch(event.target.checked)}
-                  />
-                  <span>
-                    Research first
-                    <small>
-                      Retrieves up to {AUTOPILOT_RESEARCH_PAGE_BUDGET} linked pages and adds a model
-                      call before drafting. Slower, and it costs more per run.
-                    </small>
-                  </span>
-                </label>
+                </fieldset>
                 <p className={styles.autopilotExplainer}>
                   Autopilot adopts the Director&apos;s recommendation as the decision and publishes
                   without a human reading the Article. Every record is still written as you, and

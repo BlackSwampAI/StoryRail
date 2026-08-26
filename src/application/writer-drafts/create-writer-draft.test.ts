@@ -69,6 +69,7 @@ function fixture() {
       agentRuns: [],
       reviewDecisions: [],
       deliveries: [],
+      toolCalls: [],
       sources: [
         {
           attachment: {

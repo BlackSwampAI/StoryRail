@@ -102,6 +102,7 @@ function inspection(overrides: Partial<StoryInspection> = {}): StoryInspection {
     },
     reviewDecisions: [],
     deliveries: [],
+    toolCalls: [],
     ...overrides,
   };
 }

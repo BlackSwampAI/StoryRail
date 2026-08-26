@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { StoryInspection } from "@/application/story-inspection";
 import type { StoryDelivery } from "@/domain/editorial";
 
+import styles from "./newsroom-shell.module.css";
 import { StoryWorkspace } from "./story-workspace";
 import { STORY_REQUEST_UNAVAILABLE_MESSAGE, type StoryClient } from "./story-client";
 
@@ -91,6 +92,7 @@ function inspection(options: {
     transitions: [],
     reviewDecisions: [],
     deliveries: options.deliveries ?? [],
+    toolCalls: [],
     agentRuns: [],
     article: {
       article: {
@@ -140,18 +142,37 @@ describe("delivering a published Story from the screen", () => {
     expect(screen.getByRole("button", { name: "Deliver to the destination" })).toBeTruthy();
   });
 
+  // Pinned to the foot of the viewport, this card covered about 200px of the Article at every
+  // scroll position, so the finished piece could only be read through a letterbox.
+  it("scrolls with the Article rather than sitting over it", () => {
+    renderWorkspace(inspection({}), requests());
+
+    const panel = screen
+      .getByRole("heading", { name: "This Story is published" })
+      .closest("section");
+    expect(panel).not.toBeNull();
+    expect(panel?.className).toContain(styles.publishedTask);
+    expect(panel?.className).not.toContain(styles.reviewTask);
+    // The Article is still on the page beneath it, which is what the operator came to read.
+    expect(screen.getAllByText("Article body.").length).toBeGreaterThan(0);
+  });
+
   it("does not offer delivery for a Story that is not published", () => {
     renderWorkspace(inspection({ state: "approved" }), requests());
 
     expect(screen.queryByRole("button", { name: /Deliver to the destination/ })).toBeNull();
   });
 
+  // The ISO value is the durable record and stays in the audit panel. An operator reading a
+  // delivery panel is being told when something happened, and a machine timestamp makes them
+  // decode it.
   it("names the destination, the page and the time an accepted delivery completed", () => {
     renderWorkspace(inspection({ deliveries: [DELIVERY] }), requests());
 
     expect(screen.getByText(/Delivered to wordpress as/)).toBeTruthy();
     expect(screen.getByText("412")).toBeTruthy();
-    expect(screen.getByText(/2026-08-25T09:00:04.000Z/)).toBeTruthy();
+    expect(screen.getByText(/25 Aug 2026, 09:00:04 UTC/)).toBeTruthy();
+    expect(screen.queryByText(/2026-08-25T09:00:04.000Z/)).toBeNull();
   });
 
   // A second delivery is how a later Revision reaches the post already made, so the action stays
