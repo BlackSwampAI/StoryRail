@@ -36,6 +36,7 @@ function inspection(value: Story): StoryInspection {
     transitions: [],
     agentRuns: [],
     reviewDecisions: [],
+    deliveries: [],
     article: null,
   };
 }

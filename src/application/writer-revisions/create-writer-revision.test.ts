@@ -177,6 +177,7 @@ function fixture(): StoryInspection {
     article: { article, revisions: [revision] },
     agentRuns: [writerRun, directorRun],
     reviewDecisions: [decision],
+    deliveries: [],
     transitions: [],
     sources: [
       {

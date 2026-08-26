@@ -27,6 +27,7 @@ const requests: StoryClient = {
   submitReview: vi.fn(unavailable),
   runDirectorReview: vi.fn(unavailable),
   recordReviewDecision: vi.fn(unavailable),
+  deliverStory: vi.fn(unavailable),
 };
 
 function inspection(): StoryInspection {
@@ -77,6 +78,7 @@ function inspection(): StoryInspection {
     },
     transitions: [],
     reviewDecisions: [],
+    deliveries: [],
     article: {
       article: {
         id: "article-38",
@@ -625,6 +627,7 @@ describe("Director review workspace", () => {
       article: null,
       agentRuns: [],
       reviewDecisions: [],
+      deliveries: [],
     } as StoryInspection;
     const generateAssignmentProposal = vi.fn<StoryClient["generateAssignmentProposal"]>(
       async () => new Promise<never>(() => undefined),

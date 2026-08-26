@@ -59,6 +59,7 @@ function inspection(agentRuns: StoryInspection["agentRuns"] = []): StoryInspecti
     transitions: [],
     agentRuns,
     reviewDecisions: [],
+    deliveries: [],
     article: null,
   };
 }
@@ -122,6 +123,10 @@ function requests(): StoryClient {
       message: STORY_REQUEST_UNAVAILABLE_MESSAGE,
     })),
     recordReviewDecision: vi.fn<StoryClient["recordReviewDecision"]>(async () => ({
+      kind: "unavailable",
+      message: STORY_REQUEST_UNAVAILABLE_MESSAGE,
+    })),
+    deliverStory: vi.fn<StoryClient["deliverStory"]>(async () => ({
       kind: "unavailable",
       message: STORY_REQUEST_UNAVAILABLE_MESSAGE,
     })),

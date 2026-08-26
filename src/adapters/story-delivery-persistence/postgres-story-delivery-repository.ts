@@ -1,77 +1,13 @@
 import type { Pool } from "pg";
-import { z } from "zod";
 
 import type {
   AppendStoryDeliveryResult,
   CompleteStoryDeliveryResult,
   StoryDeliveryRepository,
 } from "@/application/story-deliveries";
-import {
-  DELIVERY_FAILURE_CODES,
-  recordStoryDelivery,
-  type StoryDelivery,
-  type StoryId,
-} from "@/domain/editorial";
+import type { StoryDelivery, StoryId } from "@/domain/editorial";
 
-export class PostgresStoryDeliveryInvariantError extends Error {
-  constructor() {
-    super("PostgreSQL returned an invalid or impossible persisted Story delivery.");
-    this.name = "PostgresStoryDeliveryInvariantError";
-  }
-}
-
-const nonEmpty = z.string().refine((value) => value.trim().length > 0);
-const deliverySchema = z
-  .object({
-    id: nonEmpty,
-    storyId: nonEmpty,
-    revisionId: nonEmpty,
-    destination: nonEmpty,
-    remoteId: nonEmpty.nullable(),
-    request: z
-      .object({
-        operation: z.enum(["create", "update"]),
-        slug: nonEmpty,
-        draft: z.boolean(),
-        bodyCharacters: z.number().int().min(0),
-      })
-      .strict(),
-    startedAt: nonEmpty,
-  })
-  .and(
-    z.union([
-      z.object({ outcome: z.literal("running"), completedAt: z.null() }),
-      z.object({
-        outcome: z.literal("succeeded"),
-        completedAt: nonEmpty,
-        result: z
-          .object({
-            status: z.number().int(),
-            message: nonEmpty.nullable(),
-            // Present only on a delivery whose destination renamed the page, so both are
-            // optional and the domain refuses one without the other.
-            requestedSlug: nonEmpty.optional(),
-            assignedSlug: nonEmpty.optional(),
-          })
-          .strict(),
-      }),
-      z.object({
-        outcome: z.literal("failed"),
-        completedAt: nonEmpty,
-        failure: z
-          .object({ code: z.enum(DELIVERY_FAILURE_CODES), message: nonEmpty.nullable() })
-          .strict(),
-      }),
-    ]),
-  );
-
-function decode(payload: unknown): StoryDelivery {
-  const parsed = deliverySchema.safeParse(payload);
-  if (!parsed.success) throw new PostgresStoryDeliveryInvariantError();
-  const recorded = recordStoryDelivery(parsed.data as unknown as StoryDelivery);
-  if (!recorded.ok) throw new PostgresStoryDeliveryInvariantError();
-  return recorded.delivery;
-}
+import { decodePostgresStoryDelivery } from "./postgres-story-delivery-decoder";
 
 export function createPostgresStoryDeliveryRepository(dependencies: {
   readonly pool: Pool;
@@ -144,7 +80,7 @@ export function createPostgresStoryDeliveryRepository(dependencies: {
         [query.storyId, query.destination],
       );
       const row = rows[0];
-      return row ? decode(row.payload) : null;
+      return row ? decodePostgresStoryDelivery(row.payload) : null;
     },
 
     async listByStoryId(storyId: StoryId): Promise<readonly StoryDelivery[]> {
@@ -153,7 +89,7 @@ export function createPostgresStoryDeliveryRepository(dependencies: {
          WHERE story_id = $1 ORDER BY started_at`,
         [storyId],
       );
-      return rows.map((row) => decode(row.payload));
+      return rows.map((row) => decodePostgresStoryDelivery(row.payload));
     },
   };
 }

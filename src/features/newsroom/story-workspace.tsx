@@ -30,6 +30,11 @@ import { ArticleReader } from "./article-reader";
 import { EditorialLedger } from "./editorial-ledger-panel";
 import { EditorialTaskPending } from "./editorial-task-pending";
 import { modelFailureMessage } from "./model-failure";
+import {
+  deliveryFailureMessage,
+  deliveryNotAttemptedMessage,
+  readDeliveries,
+} from "./delivery-outcome";
 
 /**
  * A refused draft is only useful if it says what it could not support, so each finding names the
@@ -857,6 +862,9 @@ export function StoryWorkspace({
   const [publicationPending, setPublicationPending] = useState(false);
   const [publicationReason, setPublicationReason] = useState("");
   const [publicationStatus, setPublicationStatus] = useState<string | null>(null);
+  const [deliveryPending, setDeliveryPending] = useState(false);
+  const [deliveryStatus, setDeliveryStatus] = useState<string | null>(null);
+  const [deliveryConfirming, setDeliveryConfirming] = useState(false);
   const [editingAssignment, setEditingAssignment] = useState(false);
   const [proposalReady, setProposalReady] = useState(durableProposal !== undefined);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
@@ -946,6 +954,15 @@ export function StoryWorkspace({
     existingDecision?.decision ?? (revisionsExhausted ? "approve" : null),
   );
   const [decisionReason, setDecisionReason] = useState(existingDecision?.reason ?? "");
+  const { standing: deliveryStanding, delivered: deliveredPost } = readDeliveries(
+    inspection.deliveries,
+  );
+  // A destination that publishes live is not a draft a human still has to approve, so that one
+  // is confirmed first. It is known from the record of what has already been sent there, which
+  // is the only account of the destination this workspace holds.
+  const destinationPublishesLive = inspection.deliveries.some(
+    (delivery) => !delivery.request.draft,
+  );
   const rejectionTransition = [...inspection.transitions]
     .reverse()
     .find((transition) => transition.nextState === "rejected");
@@ -1279,6 +1296,45 @@ export function StoryWorkspace({
     }
   }
 
+  /**
+   * Delivery is asked for, never assumed. A second one is an ordinary act rather than a retry —
+   * it is how a later Revision reaches the post already made — so the action stays available
+   * after a success and reads as an update to that post.
+   */
+  async function deliver() {
+    if (deliveryPending) return;
+    setDeliveryPending(true);
+    setDeliveryStatus(null);
+    try {
+      const result = await requests.deliverStory(story.id);
+      setDeliveryConfirming(false);
+      if (result.kind === "unavailable") {
+        setDeliveryStatus(
+          "The delivery outcome is unavailable. Reopen this Story to see whether it was sent.",
+        );
+        return;
+      }
+      setDeliveryStatus(
+        result.kind === "delivered"
+          ? `Delivered to ${result.delivery.destination}.`
+          : result.kind === "refused"
+            ? deliveryFailureMessage(result.error)
+            : result.kind === "not-attempted"
+              ? deliveryNotAttemptedMessage(result.error)
+              : result.error.message,
+      );
+      // The durable record is what the panel reads, so it is re-read rather than guessed at.
+      const refreshed = await requests.inspectStory(story.id);
+      if (refreshed.kind === "completed") onReviewStateChanged(refreshed.value);
+    } catch {
+      setDeliveryStatus(
+        "The delivery outcome is unavailable. Reopen this Story to see whether it was sent.",
+      );
+    } finally {
+      setDeliveryPending(false);
+    }
+  }
+
   async function refreshAfterReviewChange(message: string) {
     const refreshed = await requests.inspectStory(story.id);
     if (refreshed.kind === "completed") onReviewStateChanged(refreshed.value);
@@ -1577,6 +1633,94 @@ export function StoryWorkspace({
                   Published is terminal. The Article, its revisions, and every durable record behind
                   them stay available.
                 </p>
+                <h3>Delivery</h3>
+                {deliveryStanding.kind === "never-delivered" ? (
+                  <p className={styles.deliveryRecord}>
+                    This Story has never been delivered. Publishing records the decision to release
+                    it; it does not send it anywhere.
+                  </p>
+                ) : deliveryStanding.kind === "in-flight" ? (
+                  <p className={styles.deliveryRecord}>
+                    A delivery to {deliveryStanding.delivery.destination} is in flight. It was
+                    started at {deliveryStanding.delivery.startedAt}.
+                  </p>
+                ) : deliveryStanding.kind === "delivered" ? (
+                  <div className={styles.deliveryRecord}>
+                    <p>
+                      Delivered to {deliveryStanding.delivery.destination} as{" "}
+                      <strong>{deliveryStanding.delivery.remoteId}</strong>, completed at{" "}
+                      {deliveryStanding.delivery.completedAt}.
+                    </p>
+                    {deliveryStanding.delivery.outcome === "succeeded" &&
+                    deliveryStanding.delivery.result.assignedSlug !== undefined ? (
+                      <p className={styles.deliverySlugWarning}>
+                        The destination changed the address: this Story asked for{" "}
+                        <code>{deliveryStanding.delivery.result.requestedSlug}</code> and the post
+                        is at <code>{deliveryStanding.delivery.result.assignedSlug}</code>.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className={styles.deliveryRecord}>
+                    <p>
+                      The last delivery to {deliveryStanding.delivery.destination} failed at{" "}
+                      {deliveryStanding.delivery.completedAt}.
+                    </p>
+                    <p>
+                      {deliveryStanding.delivery.outcome === "failed"
+                        ? deliveryFailureMessage(deliveryStanding.delivery.failure)
+                        : null}
+                    </p>
+                  </div>
+                )}
+                {deliveryConfirming ? (
+                  <div className={styles.taskActions}>
+                    <p className={styles.formHint}>
+                      This destination publishes live rather than as a draft, so the post is visible
+                      to readers as soon as it arrives.
+                    </p>
+                    <button
+                      type="button"
+                      className={styles.primaryAction}
+                      disabled={deliveryPending}
+                      onClick={() => void deliver()}
+                    >
+                      {deliveryPending ? "Delivering…" : "Publish it live now"}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.secondaryAction}
+                      disabled={deliveryPending}
+                      onClick={() => setDeliveryConfirming(false)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className={styles.primaryAction}
+                    disabled={deliveryPending}
+                    onClick={() => {
+                      if (destinationPublishesLive) setDeliveryConfirming(true);
+                      else void deliver();
+                    }}
+                  >
+                    {deliveryPending
+                      ? "Delivering…"
+                      : deliveredPost
+                        ? "Update the delivered post"
+                        : "Deliver to the destination"}
+                  </button>
+                )}
+                {deliveryStatus ? (
+                  <p
+                    role={deliveryStatus.startsWith("Delivered") ? "status" : "alert"}
+                    className={styles.inlineAlert}
+                  >
+                    {deliveryStatus}
+                  </p>
+                ) : null}
               </section>
             ) : story.state === "in_review" && directorRunning ? (
               <EditorialTaskPending

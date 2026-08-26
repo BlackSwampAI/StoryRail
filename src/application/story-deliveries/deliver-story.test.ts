@@ -101,6 +101,7 @@ function inspection(overrides: Partial<StoryInspection> = {}): StoryInspection {
       revisions: [revision(1, "Council Approves the Harbour Plan")],
     },
     reviewDecisions: [],
+    deliveries: [],
     ...overrides,
   };
 }

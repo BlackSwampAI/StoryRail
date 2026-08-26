@@ -59,6 +59,7 @@ function storyRequests(): StoryClient {
         transitions: [],
         agentRuns: [],
         reviewDecisions: [],
+        deliveries: [],
         article: null,
       },
     })),
@@ -103,6 +104,10 @@ function storyRequests(): StoryClient {
       message: "The Story request could not be completed.",
     })),
     recordReviewDecision: vi.fn<StoryClient["recordReviewDecision"]>(async () => ({
+      kind: "unavailable",
+      message: "The Story request could not be completed.",
+    })),
+    deliverStory: vi.fn<StoryClient["deliverStory"]>(async () => ({
       kind: "unavailable",
       message: "The Story request could not be completed.",
     })),
@@ -349,6 +354,7 @@ describe("NewsroomShell", () => {
             transitions: [],
             agentRuns: [],
             reviewDecisions: [],
+            deliveries: [],
             article: null,
           },
         })
@@ -361,6 +367,7 @@ describe("NewsroomShell", () => {
             transitions: [receipt],
             agentRuns: [],
             reviewDecisions: [],
+            deliveries: [],
             article: null,
           },
         }),
@@ -665,6 +672,7 @@ describe("NewsroomShell", () => {
           transitions: [],
           agentRuns: [],
           reviewDecisions: [],
+          deliveries: [],
           article: null,
         },
       })),
@@ -878,6 +886,7 @@ describe("NewsroomShell", () => {
           transitions: [],
           agentRuns: [],
           reviewDecisions: [],
+          deliveries: [],
           article: null,
         },
       })),
@@ -961,6 +970,7 @@ describe("NewsroomShell", () => {
       transitions: [],
       agentRuns: [],
       reviewDecisions: [],
+      deliveries: [],
       article: null,
     };
     const draftedInspection = {
@@ -968,6 +978,7 @@ describe("NewsroomShell", () => {
       story: inProgress,
       agentRuns: [successfulRun],
       reviewDecisions: [],
+      deliveries: [],
       article: {
         article: {
           id: articleIdentity,
@@ -1071,6 +1082,7 @@ describe("NewsroomShell", () => {
           transitions: [],
           agentRuns: [],
           reviewDecisions: [],
+          deliveries: [],
           article: {
             article: {
               id: articleIdentity,

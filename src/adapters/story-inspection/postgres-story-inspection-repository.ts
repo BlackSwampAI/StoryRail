@@ -19,6 +19,7 @@ import type {
   SourceExtraction,
   SourceId,
   Story,
+  StoryDelivery,
   StoryId,
   StorySourceAttachment,
   StoryState,
@@ -41,6 +42,7 @@ import {
   decodePostgresArticleRevision,
 } from "../article-persistence/postgres-article-decoder";
 import { decodePostgresReviewDecision } from "../review-persistence";
+import { decodePostgresStoryDelivery } from "../story-delivery-persistence/postgres-story-delivery-decoder";
 
 export interface CreatePostgresStoryInspectionRepositoryOptions {
   readonly pool: Pool;
@@ -77,6 +79,7 @@ interface StoryInspectionRow extends QueryResultRow {
   readonly article_payload: unknown;
   readonly article_revision_rows: unknown;
   readonly review_decision_rows: unknown;
+  readonly delivery_payloads: unknown;
 }
 
 interface AssembledStoryInspectionSource {
@@ -420,6 +423,15 @@ function decodeReviewDecisions(row: StoryInspectionRow): ReviewDecision[] {
   });
 }
 
+function decodeDeliveries(row: StoryInspectionRow): StoryDelivery[] {
+  if (!Array.isArray(row.delivery_payloads)) throw invariantError();
+  return row.delivery_payloads.map((payload) => {
+    const delivery = decodePostgresStoryDelivery(payload, invariantError);
+    if (delivery.storyId !== row.story_id) throw invariantError();
+    return delivery;
+  });
+}
+
 export function createPostgresStoryInspectionRepository(
   options: CreatePostgresStoryInspectionRepositoryOptions,
 ): StoryInspectionRepository {
@@ -510,7 +522,13 @@ export function createPostgresStoryInspectionRepository(
                   ) ORDER BY decision.append_position ASC)
                   FROM storyrail.review_decisions AS decision
                   WHERE decision.story_id = story.story_id
-                ), '[]'::jsonb) AS review_decision_rows
+                ), '[]'::jsonb) AS review_decision_rows,
+                COALESCE((
+                  SELECT jsonb_agg(delivery.payload
+                    ORDER BY delivery.started_at ASC, delivery.delivery_id COLLATE "C" ASC)
+                  FROM storyrail.story_deliveries AS delivery
+                  WHERE delivery.story_id = story.story_id
+                ), '[]'::jsonb) AS delivery_payloads
          FROM storyrail.stories AS story
          LEFT JOIN storyrail.story_source_attachments AS attachment
            ON attachment.story_id = story.story_id
@@ -553,6 +571,7 @@ export function createPostgresStoryInspectionRepository(
       const agentRuns = decodeAgentRuns(firstRow);
       const article = decodeArticle(firstRow);
       const reviewDecisions = decodeReviewDecisions(firstRow);
+      const deliveries = decodeDeliveries(firstRow);
       if (
         article !== null &&
         (assignment === null ||
@@ -608,7 +627,8 @@ export function createPostgresStoryInspectionRepository(
           !isDeepStrictEqual(decodeTransitions(row), transitions) ||
           !isDeepStrictEqual(decodeAgentRuns(row), agentRuns) ||
           !isDeepStrictEqual(decodeArticle(row), article) ||
-          !isDeepStrictEqual(decodeReviewDecisions(row), reviewDecisions)
+          !isDeepStrictEqual(decodeReviewDecisions(row), reviewDecisions) ||
+          !isDeepStrictEqual(decodeDeliveries(row), deliveries)
         )
           throw invariantError();
 
@@ -643,6 +663,7 @@ export function createPostgresStoryInspectionRepository(
           agentRuns,
           article,
           reviewDecisions,
+          deliveries,
         },
       };
     },

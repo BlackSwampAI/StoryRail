@@ -5,6 +5,7 @@ import {
   PREPARATION_FAILURE_CODES,
   GROUNDING_REFUSAL_CODES,
   MODEL_FAILURE_CODES,
+  DELIVERY_FAILURE_CODES,
   type EditorialActor,
   type AgentProfile,
   type Assignment,
@@ -16,6 +17,7 @@ import {
   type SourceExtraction,
   type SourceEvidencePreparation,
   type Story,
+  type StoryDelivery,
   type StoryTransitionReceipt,
   type StorySourceAttachment,
   type SiteId,
@@ -43,6 +45,26 @@ export interface StoryClientApplicationError {
 
 export type StoryClientResult<Value> =
   | { readonly kind: "completed"; readonly value: Value }
+  | { readonly kind: "application-failure"; readonly error: StoryClientApplicationError }
+  | { readonly kind: "unavailable"; readonly message: typeof STORY_REQUEST_UNAVAILABLE_MESSAGE };
+
+/**
+ * What became of one request to deliver.
+ *
+ * "Refused" and "not attempted" are kept apart all the way to the screen, because they are not
+ * degrees of the same thing: a refusal has a durable delivery record behind it and a destination
+ * that said no, while nothing at all happened when no destination or credential is configured.
+ * An operator told only that delivery "failed" goes looking at the website instead of at their
+ * own settings, which is the confusion this whole panel exists to end.
+ */
+export type DeliverStoryOutcome =
+  | { readonly kind: "delivered"; readonly delivery: StoryDelivery }
+  | {
+      readonly kind: "refused";
+      readonly error: StoryClientApplicationError;
+      readonly delivery: StoryDelivery | null;
+    }
+  | { readonly kind: "not-attempted"; readonly error: StoryClientApplicationError }
   | { readonly kind: "application-failure"; readonly error: StoryClientApplicationError }
   | { readonly kind: "unavailable"; readonly message: typeof STORY_REQUEST_UNAVAILABLE_MESSAGE };
 
@@ -107,6 +129,11 @@ export interface StoryClient {
     StoryClientResult<{ readonly story: Story; readonly transitionReceipt: StoryTransitionReceipt }>
   >;
   readonly runDirectorReview: (storyId: string) => Promise<StoryClientResult<AgentRun>>;
+  /**
+   * Asks for one delivery of a published Story. There is nothing to send: the latest Revision is
+   * what goes, and where it goes is the Site's configured destination.
+   */
+  readonly deliverStory: (storyId: string) => Promise<DeliverStoryOutcome>;
   readonly recordReviewDecision: (
     storyId: string,
     command: {
@@ -142,6 +169,7 @@ const GROUNDING_FAILURE_CODES: ReadonlySet<string> = new Set([
   "CITATION_QUOTE_UNSUPPORTED",
 ]);
 const MODEL_FAILURE_CODE_SET = new Set<string>(MODEL_FAILURE_CODES);
+const DELIVERY_FAILURE_CODE_SET = new Set<string>(DELIVERY_FAILURE_CODES);
 // Which failures may carry findings is the domain's rule, imported rather than restated. Written
 // out here as a literal, it drifted from the domain and made a correctly recorded run unreadable.
 const GROUNDING_REFUSAL_CODE_SET = new Set<string>(GROUNDING_REFUSAL_CODES);
@@ -741,6 +769,82 @@ function isReviewDecision(value: unknown): value is ReviewDecision {
   );
 }
 
+/**
+ * A delivery is checked outcome by outcome, because the outcomes are not variations on one
+ * shape: only an accepted delivery names the page it wrote, and only a refused one names why.
+ * A record read loosely enough to be either would let the screen report a failed send as a
+ * delivered post, which is the one thing this panel exists to tell apart.
+ */
+function isDeliveryRequest(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ["operation", "slug", "draft", "bodyCharacters"]) &&
+    (value.operation === "create" || value.operation === "update") &&
+    isString(value.slug) &&
+    value.slug.trim().length > 0 &&
+    typeof value.draft === "boolean" &&
+    Number.isInteger(value.bodyCharacters) &&
+    (value.bodyCharacters as number) >= 0
+  );
+}
+
+/**
+ * The requested and assigned slugs travel as a pair or not at all: their presence is the fact
+ * that the destination renamed the page, so one without the other says nothing readable.
+ */
+function isDeliveryResult(value: unknown): boolean {
+  if (
+    !isRecord(value) ||
+    !Number.isInteger(value.status) ||
+    !isStringOrNull(value.message) ||
+    !(
+      hasExactKeys(value, ["status", "message"]) ||
+      hasExactKeys(value, ["status", "message", "requestedSlug", "assignedSlug"])
+    )
+  )
+    return false;
+  return (
+    !("requestedSlug" in value) ||
+    (isString(value.requestedSlug) &&
+      isString(value.assignedSlug) &&
+      value.requestedSlug !== value.assignedSlug)
+  );
+}
+
+function isDelivery(value: unknown): value is StoryDelivery {
+  const common =
+    isRecord(value) &&
+    isString(value.id) &&
+    isString(value.storyId) &&
+    isString(value.revisionId) &&
+    isString(value.destination) &&
+    isStringOrNull(value.remoteId) &&
+    isDeliveryRequest(value.request) &&
+    isString(value.startedAt);
+  if (!common) return false;
+  const record = value as Record<string, unknown>;
+  const base = ["id", "storyId", "revisionId", "destination", "remoteId", "request", "startedAt"];
+  if (record.outcome === "running")
+    return hasExactKeys(record, [...base, "outcome", "completedAt"]) && record.completedAt === null;
+  if (record.outcome === "succeeded")
+    return (
+      hasExactKeys(record, [...base, "outcome", "completedAt", "result"]) &&
+      isString(record.completedAt) &&
+      isString(record.remoteId) &&
+      isDeliveryResult(record.result)
+    );
+  return (
+    record.outcome === "failed" &&
+    hasExactKeys(record, [...base, "outcome", "completedAt", "failure"]) &&
+    isString(record.completedAt) &&
+    isRecord(record.failure) &&
+    hasExactKeys(record.failure, ["code", "message"]) &&
+    isString(record.failure.code) &&
+    DELIVERY_FAILURE_CODE_SET.has(record.failure.code) &&
+    isStringOrNull(record.failure.message)
+  );
+}
+
 function isWriterAgentRun(value: unknown): value is AgentRun {
   if (
     !isRecord(value) ||
@@ -998,6 +1102,7 @@ function isInspection(value: unknown): value is StoryInspection {
       "agentRuns",
       "article",
       "reviewDecisions",
+      "deliveries",
     ]) ||
     !isStory(value.story) ||
     !Array.isArray(value.sources) ||
@@ -1006,7 +1111,9 @@ function isInspection(value: unknown): value is StoryInspection {
     !Array.isArray(value.agentRuns) ||
     !value.agentRuns.every(isAgentRun) ||
     !Array.isArray(value.reviewDecisions) ||
-    !value.reviewDecisions.every(isReviewDecision)
+    !value.reviewDecisions.every(isReviewDecision) ||
+    !Array.isArray(value.deliveries) ||
+    !value.deliveries.every(isDelivery)
   ) {
     return false;
   }
@@ -1027,6 +1134,7 @@ function isInspection(value: unknown): value is StoryInspection {
     value.transitions.every((receipt) => receipt.storyId === story.id) &&
     value.agentRuns.every((run) => run.storyId === story.id) &&
     value.reviewDecisions.every((decision) => decision.storyId === story.id) &&
+    value.deliveries.every((delivery) => delivery.storyId === story.id) &&
     value.sources.every((item) => {
       if (
         !isRecord(item) ||
@@ -1279,6 +1387,37 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
         isInspection,
         { 404: new Set(["STORY_NOT_FOUND"]) },
       ),
+    async deliverStory(storyId) {
+      const unreadableOutcome: DeliverStoryOutcome = {
+        kind: "unavailable",
+        message: STORY_REQUEST_UNAVAILABLE_MESSAGE,
+      };
+      try {
+        const response = await dependencies.fetch(
+          api(`/stories/${encodeURIComponent(storyId)}/deliveries`),
+          { method: "POST", headers: jsonHeaders, body: JSON.stringify({}) },
+        );
+        const body: unknown = await response.json();
+        if (!isRecord(body)) return unreadableOutcome;
+        if (response.status === 201 && body.ok === true && isDelivery(body.delivery))
+          return { kind: "delivered", delivery: body.delivery };
+        if (body.ok !== false || !isApplicationError(body.error)) return unreadableOutcome;
+        // A 502 is an attempt the destination refused, and the record of it came back with the
+        // answer. A 503 is work that never left, and carries no record because none was written.
+        if (response.status === 502)
+          return {
+            kind: "refused",
+            error: body.error,
+            delivery: isDelivery(body.delivery) ? body.delivery : null,
+          };
+        if (response.status === 503) return { kind: "not-attempted", error: body.error };
+        if (response.status === 404 || response.status === 409)
+          return { kind: "application-failure", error: body.error };
+        return unreadableOutcome;
+      } catch {
+        return unreadableOutcome;
+      }
+    },
     async assignStory(storyId, command) {
       try {
         const response = await dependencies.fetch(

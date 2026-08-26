@@ -53,6 +53,7 @@ function inspection(state: "in_progress" | "in_review" = "in_progress") {
     transitions: [],
     agentRuns: [],
     reviewDecisions: [],
+    deliveries: [],
     article: {
       article,
       revisions: [
