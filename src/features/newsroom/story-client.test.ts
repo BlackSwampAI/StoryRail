@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { siteId } from "@/domain/editorial";
+import { STORY_STATES, siteId } from "@/domain/editorial";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -132,11 +132,155 @@ const AGENT_RUN = {
   },
 } as const;
 
+const RESEARCHER_RUN = {
+  id: "research-run-0033",
+  storyId: STORY.id,
+  profileId: "storyrail-researcher-v1",
+  role: "researcher",
+  operation: "source_research",
+  model: { provider: "openrouter", model: "provider/model" },
+  prompt: { key: "storyrail_researcher", version: "1" },
+  requestedBy: { type: "operator", operatorId: "operator-0033" },
+  startedAt: "opaque-started",
+  completedAt: "opaque-completed",
+  input: {
+    story: { id: STORY.id, title: STORY.title, state: "intake", revisionCycle: 0 },
+    evidence: [],
+    unavailableSourceIds: [],
+  },
+} as const;
+
 function response(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status });
 }
 
 describe("story-client", () => {
+  it("reads back a run an agent in the Researcher role requested", async () => {
+    const run = {
+      ...AGENT_RUN,
+      requestedBy: { type: "agent", role: "researcher", runId: "research-run-0031" },
+    };
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(200, { ok: true, inspection: { ...INSPECTION, agentRuns: [run] } }),
+    );
+
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).inspectStory(STORY.id),
+    ).resolves.toEqual({
+      kind: "completed",
+      value: { ...INSPECTION, agentRuns: [run] },
+    });
+  });
+
+  it("reads back a Researcher run in each outcome the domain allows", async () => {
+    const common = {
+      id: "research-run-0032",
+      storyId: STORY.id,
+      profileId: "storyrail-researcher-v1",
+      role: "researcher",
+      operation: "source_research",
+      model: { provider: "openrouter", model: "provider/model" },
+      prompt: { key: "storyrail_researcher", version: "1" },
+      requestedBy: { type: "operator", operatorId: "operator-0032" },
+      startedAt: "opaque-started",
+      input: {
+        story: { id: STORY.id, title: STORY.title, state: "intake", revisionCycle: 0 },
+        evidence: [
+          {
+            sourceId: SOURCE.id,
+            relevance: ATTACHMENT.relevance,
+            evidenceKind: "prepared",
+            evidenceId: PREPARATION.id,
+          },
+        ],
+        unavailableSourceIds: [],
+      },
+    } as const;
+    const runs = [
+      { ...common, completedAt: null, outcome: "running" },
+      {
+        ...common,
+        completedAt: "opaque-completed",
+        outcome: "succeeded",
+        attached: [
+          { sourceId: "source-found", url: "https://example.com/found", relevance: "Why it fits" },
+        ],
+      },
+      {
+        ...common,
+        completedAt: "opaque-completed",
+        outcome: "failed",
+        failure: { code: "MODEL_REQUEST_FAILED", retryable: true },
+      },
+    ];
+
+    for (const run of runs) {
+      const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+        response(200, { ok: true, inspection: { ...INSPECTION, agentRuns: [run] } }),
+      );
+
+      await expect(
+        createStoryClient({ siteId: SITE_ID, fetch }).inspectStory(STORY.id),
+      ).resolves.toEqual({
+        kind: "completed",
+        value: { ...INSPECTION, agentRuns: [run] },
+      });
+    }
+  });
+
+  it("reads back a Researcher run that attached nothing as a complete run", async () => {
+    const run = {
+      ...RESEARCHER_RUN,
+      outcome: "succeeded",
+      attached: [],
+    };
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(200, { ok: true, inspection: { ...INSPECTION, agentRuns: [run] } }),
+    );
+
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).inspectStory(STORY.id),
+    ).resolves.toEqual({
+      kind: "completed",
+      value: { ...INSPECTION, agentRuns: [run] },
+    });
+  });
+
+  it("refuses a Researcher run carrying a key the domain does not record", async () => {
+    const run = {
+      ...RESEARCHER_RUN,
+      outcome: "succeeded",
+      attached: [],
+      searchProvider: "an-unrecorded-extra",
+    };
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(200, { ok: true, inspection: { ...INSPECTION, agentRuns: [run] } }),
+    );
+
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).inspectStory(STORY.id),
+    ).resolves.toEqual({
+      kind: "unavailable",
+      message: STORY_REQUEST_UNAVAILABLE_MESSAGE,
+    });
+  });
+
+  it("reads back a Story in every state the domain allows", async () => {
+    for (const state of STORY_STATES) {
+      const story = { ...STORY, state };
+      const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+        response(200, { ok: true, inspection: { ...INSPECTION, story } }),
+      );
+
+      await expect(
+        createStoryClient({ siteId: SITE_ID, fetch }).inspectStory(STORY.id),
+      ).resolves.toEqual({
+        kind: "completed",
+        value: { ...INSPECTION, story },
+      });
+    }
+  });
+
   it("sends the exact listing GET and parses complete and empty listings", async () => {
     const opaqueStory = { ...STORY, createdAt: "opaque-created", updatedAt: "opaque-updated" };
     const fetch = vi
