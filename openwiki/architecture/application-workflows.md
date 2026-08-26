@@ -166,6 +166,14 @@ Rejection is terminal and does not contact a model. It preserves all existing wo
 
 `src/application/model-catalog/model-catalog.ts` provides a filtered model catalog interface (`ModelCatalog`) returning models that support `structured_outputs`. It is used by the settings workspace to populate model selectors for supervised roles without persisting third-party catalog state in the database.
 
+## Site creation workflow
+
+`src/application/sites/create-site.ts` — `createCreateSite` sets up a new independent newsroom:
+1. Validates and canonicalizes domain input (`canonicalizeSiteDomain`).
+2. Checks domain uniqueness across existing sites via `SiteRepository.findByDomain` (`SITE_DOMAIN_TAKEN`).
+3. Allocates `SiteId` and persists the `Site` record.
+4. Automatically seeds the four built-in Agent Profiles for the site (`assignment_editor`, `writer`, `editor_in_chief`, `researcher`) via `builtInAgentProfilesForSite`.
+
 ## Repository ports
 
 Persistence contracts are expressed as interfaces in the application layer and implemented by PostgreSQL adapters:

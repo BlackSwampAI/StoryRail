@@ -146,18 +146,38 @@ Both functions copy the actor defensively (`copyActor`) so returned objects do n
 
 Profiles are configuration, not execution: they do not invoke models or carry credentials. Migration `0027` seeds three built-in profiles (`storyrail-assignment-editor-v1`, `storyrail-general-writer-v1`, `storyrail-director-v1`) and enforces that a non-built-in profile must be a `writer` (custom profiles can only be Writers).
 
-## Newsroom standards
+## Site and Tenancy
 
-`newsroom-standards-types.ts` and `newsroom-standards.ts` model the editorial standards that govern how work reads in a newsroom (voice, usage, publication practices). A `NewsroomStandards` record carries `id`, `revisionNumber`, `text`, `updatedBy` (must be an `OperatorActor`), and `updatedAt`.
+`site-types.ts` and `site-domain.ts` model the tenant boundary for a newsroom:
 
-`recordNewsroomStandards` validates:
-- Identity fields: non-empty `id` and `updatedAt`, and `updatedBy` must be an operator with non-empty `operatorId` (`NEWSROOM_STANDARDS_IDENTITY_INVALID`).
-- `revisionNumber` must be an integer ≥ 1 (`NEWSROOM_STANDARDS_REVISION_INVALID`).
-- `text` must be non-empty and ≤ `MAXIMUM_STANDARDS_CHARACTERS` (8,000) (`NEWSROOM_STANDARDS_TEXT_INVALID`).
+- A `Site` carries `id: SiteId`, `name: string`, `domain: string`, `description: string | null`, `createdAt: string`, and `updatedAt: string`.
+- `canonicalizeSiteDomain(input)` normalizes domains (lowercases, strips ports, rejects credentials and paths) ensuring hostname uniqueness (`SITE_DOMAIN_REQUIRED`, `SITE_DOMAIN_INVALID`).
+- `createSiteRecord` validates site names, canonicalized domains, and optional descriptions.
+- `built-in-agent-profiles.ts` provides `builtInAgentProfilesForSite(siteId)`, which constructs the four default built-in profiles for a site: Assignment Editor (`assignment_editor`), General Writer (`writer`), Director (`editor_in_chief`), and Source Researcher (`researcher`).
 
-Standards are append-only and timestamped: editing creates a new revision rather than replacing the existing text. The standards a run worked under are derived from when the run started rather than being copied onto every run, because both records already fix themselves in time. Standards govern how work reads, never what may be claimed; they are placed after each role's own rules in system prompts and labelled as what they are.
+## Newsroom identity and standards
+
+`newsroom-standards-types.ts` and `newsroom-standards.ts` model both the newsroom's public identity (who agents work for) and editorial standards (how work reads in voice and style):
+
+- `NewsroomIdentity` carries `name: string` and optional `description: string | null`.
+- `formatNewsroomIdentity(identity)` formats an identity block for prompts:
+  `You work for <name>, an editorial newsroom: <description>.`
+- `NewsroomStandards` carries `id`, `revisionNumber`, `text`, `updatedBy` (`OperatorActor`), and `updatedAt`.
+- `withNewsroomStandards(prompt, standards, identity)` assembles the prompt context in strict order: (1) role rules, (2) newsroom identity (who you work for), and (3) newsroom standards (how work should read).
+- Guardrails: Identity and standards are context for judging editorial relevance and tone; they are never license to assert claims unsupported by source evidence. If a site has no description or standards, the respective prompt blocks are omitted cleanly rather than leaving empty headers.
+
+Standards are append-only and timestamped: editing creates a new revision rather than replacing the existing text. The standards and identity a run worked under are read dynamically when the run starts.
 
 Migration `0063` creates the `storyrail.newsroom_standards` table and seeds an initial empty standards document.
+
+## Article Grounding and Evidence Normalization
+
+`article-grounding.ts` verifies that cited claims and direct quotations in an Article Revision are strictly grounded in the source evidence:
+
+- `verifyArticleGrounding` inspects cited article blocks against raw and prepared source evidence documents.
+<!-- openwiki: broken internal link [url] file "url" does not exist. Fix the href or restore the target, then delete this comment. -->
+- Evidence and quote comparison performs markdown-neutral text normalization (`normalizeEvidenceForComparison`): Markdown syntax (bold `**`, italics `*`, code backticks, markdown links `[text](url)` retaining link text, and images `![alt](url)` stripped completely) is normalized away on both sides before quotation matching. This prevents a Writer from being refused for quoting text from a markdown-rendered source.
+- Model failure codes: When an ungrounded claim or quote is found, the run is rejected with `MODEL_OUTPUT_UNGROUNDED` or `MODEL_CORRECTION_OUT_OF_SCOPE` accompanied by specific grounding findings (`CITATION_QUOTE_UNSUPPORTED`, etc.). Both failure codes are permitted to carry grounding findings in domain validation and schema.
 
 ## Assignments
 
@@ -224,13 +244,15 @@ Revision 1 is created by the [Writer draft workflow](application-workflows.md#wr
 
 ## Story Deliveries
 
-`story-delivery-types.ts` and `story-delivery.ts` model the delivery of a published Story's Article Revision to an external destination (e.g., StudioCMS). Delivery is an outbound write and is tracked as an explicit audit record:
+`story-delivery-types.ts` and `story-delivery.ts` model the delivery of a published Story's Article Revision to an external destination (e.g., StudioCMS or WordPress). Delivery is an outbound write and is tracked as an explicit audit record:
 
 - A delivery record describes what was sent (`StoryDeliveryRequest`: `operation` ("create" | "update"), `slug`, `draft` boolean, `bodyCharacters`) and what came back (`outcome`: "running" | "succeeded" | "failed"), never storing the Article body itself.
-- `DELIVERY_FAILURE_CODES`: `DESTINATION_UNREACHABLE`, `DESTINATION_REJECTED`, `DESTINATION_UNAUTHORIZED`, `DESTINATION_RESPONSE_INVALID`.
+- Destinations support StudioCMS (`studiocms`) and WordPress (`wordpress`).
+- WordPress delivers block-by-block serialized Gutenberg markup (`<!-- wp:paragraph -->`, `<!-- wp:heading -->`), with requested vs. assigned slug tracking when WordPress uniquifies colliding slugs.
+- `DELIVERY_FAILURE_CODES`: `DESTINATION_UNREACHABLE`, `DESTINATION_REJECTED`, `DESTINATION_UNAUTHORIZED`, `DESTINATION_RESPONSE_INVALID`. Note: HTTP 500 status responses are classified as `DESTINATION_REJECTED` (since the server answered and rejected), whereas timeouts (408) and rate limits (429) remain `DESTINATION_UNREACHABLE`.
 - Durability pattern: Following `agent_tool_calls`, a delivery row is written as `running` before the HTTP request leaves the newsroom process, ensuring no write to the outside world occurs unrecorded. When the response arrives, the row is updated in place to `succeeded` or `failed`.
 - Slug generation: `storyDeliverySlug(headline)` derives a URL-safe slug (max 96 chars) deterministically from the headline.
-- Remote ID tracking: For `create`, StudioCMS returns a prose message containing the created page ID, which StoryRail parses and stores in `remoteId`. Subsequent deliveries of newer revisions update the existing page via `PATCH` using this `remoteId`.
+- Remote ID tracking: For `create`, destinations return the created page or post ID, which StoryRail stores in `remoteId`. Subsequent deliveries of newer revisions update the existing remote resource via `PATCH`/`POST` using this `remoteId`.
 
 ## Re-export barrel
 

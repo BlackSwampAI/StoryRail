@@ -7,27 +7,42 @@ tags: [http-api, rest, endpoints, interface]
 
 # HTTP API endpoints
 
-StoryRail exposes its workflows through hand-rolled HTTP handlers in `src/interfaces/http`, bound to Next.js route handlers under `src/app/api`. All handlers return JSON with `Cache-Control: no-store`. Request bodies must be `application/json`; a missing or non-JSON media type yields `415 UNSUPPORTED_MEDIA_TYPE` and invalid JSON yields `400 INVALID_JSON`. Handler-level body shape validation yields `400 INVALID_REQUEST` when the object does not have the exact expected keys and types.
+StoryRail exposes its workflows through hand-rolled HTTP handlers in `src/interfaces/http`, bound to Next.js route handlers under `src/app/api`. With multi-tenancy (#90), site-specific routes live under `src/app/api/sites/[siteId]/*` and use `withSite` (`src/server/site-route.ts`) to resolve the site from the database before executing handlers. A non-existent site returns `404 SITE_NOT_FOUND` before any handler runs. The site collection route `/api/sites` handles site creation and listing.
 
-Three lazy server providers back the routes:
+All handlers return JSON with `Cache-Control: no-store`. Request bodies must be `application/json`; a missing or non-JSON media type yields `415 UNSUPPORTED_MEDIA_TYPE` and invalid JSON yields `400 INVALID_JSON`. Handler-level body shape validation yields `400 INVALID_REQUEST` when the object does not have the exact expected keys and types.
 
-- `sourceEvidenceRuntimeProvider` (`src/server/source-evidence-runtime-provider.ts`) — builds the Source-evidence runtime on first use.
-- `evidencePreparationRuntimeProvider` (`src/server/evidence-preparation-runtime-provider.ts`) — builds the model-backed preparation runtime on first use.
-- `storyRuntimeProvider` (`src/server/story-runtime-provider.ts`) — builds the Story runtime on first use.
-- `assignmentEditorRuntimeProvider` (`src/server/assignment-editor-runtime-provider.ts`) — builds the Assignment-editor runtime on first use.
-- `writerRuntimeProvider` (`src/server/writer-runtime-provider.ts`) — builds the Writer runtime on first use.
-- `directorRuntimeProvider` (`src/server/director-runtime-provider.ts`) — builds the Director runtime on first use.
+Providers back the routes through `site-keyed-runtime-provider.ts`:
 
-## POST /api/sources/[sourceId]/preparations — prepare evidence
+- `siteDirectoryProvider` (`src/server/site-directory-provider.ts`) — lists and creates sites.
+- `sourceEvidenceRuntimeProvider` (`src/server/source-evidence-runtime-provider.ts`) — builds the Source-evidence runtime for a given `siteId`.
+- `evidencePreparationRuntimeProvider` (`src/server/evidence-preparation-runtime-provider.ts`) — builds the model-backed preparation runtime for a given `siteId`.
+- `storyRuntimeProvider` (`src/server/story-runtime-provider.ts`) — builds the Story runtime for a given `siteId`.
+- `assignmentEditorRuntimeProvider` (`src/server/assignment-editor-runtime-provider.ts`) — builds the Assignment-editor runtime for a given `siteId`.
+- `writerRuntimeProvider` (`src/server/writer-runtime-provider.ts`) — builds the Writer runtime for a given `siteId`.
+- `directorRuntimeProvider` (`src/server/director-runtime-provider.ts`) — builds the Director runtime for a given `siteId`.
+- `modelCatalogProvider` (`src/server/model-catalog-provider.ts`) — discovers structured-output models from OpenRouter.
 
-- Route: `src/app/api/sources/[sourceId]/preparations/route.ts`
+## Sites collection
+
+### GET /api/sites — list sites
+- Route: `src/app/api/sites/route.ts`
+- Response: `{ "ok": true, "sites": Site[] }`
+
+### POST /api/sites — create a site
+- Route: `src/app/api/sites/route.ts`
+- Body: `{ "name": string, "domain": string, "description"?: string }`
+- Workflow: creates a new tenant `Site`, canonicalizes domain to lowercase, seeds built-in Agent Profiles (`assignment_editor`, `writer`, `editor_in_chief`, `researcher`), and returns `201` with `{ "ok": true, "site": Site }` or `409 SITE_DOMAIN_TAKEN`.
+
+## POST /api/sites/[siteId]/sources/[sourceId]/preparations — prepare evidence
+
+- Route: `src/app/api/sites/[siteId]/sources/[sourceId]/preparations/route.ts`
 - Handler: `src/interfaces/http/prepare-source-evidence-handler.ts`
 - Body: `{ "extractionId": string }`
 - Workflow: explicitly prepares one successful raw extraction through the configured OpenRouter model and appends the successful or failed immutable attempt. It does not replace raw evidence or resolve triage.
 
-## POST /api/sources/[sourceId]/extractions — retry Source extraction
+## POST /api/sites/[siteId]/sources/[sourceId]/extractions — retry Source extraction
 
-- Route: `src/app/api/sources/[sourceId]/extractions/route.ts`
+- Route: `src/app/api/sites/[siteId]/sources/[sourceId]/extractions/route.ts`
 - Handler: `src/interfaces/http/extract-persisted-source-handler.ts`
 - Provider: `sourceEvidenceRuntimeProvider`
 - Body: `{}` (exactly an empty object). The Source identity is carried by the route; the body exists only to keep the JSON contract uniform across the Source endpoints. `STORYRAIL_OPERATOR_ID` must be configured or the handler returns 500.
@@ -45,9 +60,9 @@ A recorded extraction failure is a durable attempt, not a request failure: it ap
 | 400    | Invalid JSON or a body carrying any property (`INVALID_JSON`, `INVALID_REQUEST`)                                                                                          |
 | 500    | Missing `STORYRAIL_OPERATOR_ID` or internal error                                                                                                                          |
 
-## POST /api/source-evidence/url — preserve and extract a URL Source
+## POST /api/sites/[siteId]/source-evidence/url — preserve and extract a URL Source
 
-- Route: `src/app/api/source-evidence/url/route.ts`
+- Route: `src/app/api/sites/[siteId]/source-evidence/url/route.ts`
 - Handler: `src/interfaces/http/preserve-and-extract-url-source-handler.ts`
 - Provider: `sourceEvidenceRuntimeProvider`
 - Body: `{ "submittedUrl": string }` (exactly one string property)
@@ -64,9 +79,9 @@ Status codes:
 | 409    | Preservation duplicate/conflict (`DUPLICATE_SOURCE`, `SOURCE_ID_CONFLICT`)                                                                                              |
 | 500    | Extraction-stage failure or internal server error                                                                                                                       |
 
-## POST /api/stories — create a Story
+## POST /api/sites/[siteId]/stories — create a Story
 
-- Route: `src/app/api/stories/route.ts`
+- Route: `src/app/api/sites/[siteId]/stories/route.ts`
 - Handler: `src/interfaces/http/create-story-handler.ts`
 - Provider: `storyRuntimeProvider`
 - Body: `{ "title": string }` (exactly one string property)
@@ -80,27 +95,27 @@ Status codes:
 | 415/400 | Media type / JSON / shape errors        |
 | 500     | Internal server error                   |
 
-## GET /api/stories — list Stories
+## GET /api/sites/[siteId]/stories — list Stories
 
-- Route: `src/app/api/stories/route.ts`
+- Route: `src/app/api/sites/[siteId]/stories/route.ts`
 - Handler: `src/interfaces/http/list-stories-handler.ts`
 - Provider: `storyRuntimeProvider`
 - Response: `{ "ok": true, "stories": StoryListItem[] }` where `StoryListItem` is `{ story: Story, sourceCount: number }`
 
 Always returns 200 on success or 500 on internal failure.
 
-## GET /api/stories/[storyId] — inspect a Story
+## GET /api/sites/[siteId]/stories/[storyId] — inspect a Story
 
-- Route: `src/app/api/stories/[storyId]/route.ts`
+- Route: `src/app/api/sites/[siteId]/stories/[storyId]/route.ts`
 - Handler: `src/interfaces/http/inspect-story-handler.ts`
 - Provider: `storyRuntimeProvider`
 - Response: the full `InspectStoryResult` (`{ ok: true, inspection: StoryInspection }` on 200, or `{ ok: false, error: { code: "STORY_NOT_FOUND" } }` on 404).
 
-`StoryInspection` (from `src/application/story-inspection/story-inspection-repository.ts`) assembles the Story with its attached Sources, the optional `{ assignment, writerProfile }` pair, the `StoryTransitionReceipt[]` history, the `AgentRun[]` history (including Director runs), the optional `{ article, revisions }` pair, and the `ReviewDecision[]` history. Each Source entry contains `{ attachment, source, extractions, preparations }`, preserving both raw extraction attempts and derived preparation attempts.
+`StoryInspection` (from `src/application/story-inspection/story-inspection-repository.ts`) assembles the Story with its attached Sources, the optional `{ assignment, writerProfile }` pair, the `StoryTransitionReceipt[]` history, the `AgentRun[]` history (including Director runs), the optional `{ article, revisions }` pair, the `ReviewDecision[]` history, and the `StoryDelivery[]` history in append order. Each Source entry contains `{ attachment, source, extractions, preparations }`, preserving both raw extraction attempts and derived preparation attempts.
 
-## POST /api/stories/[storyId]/sources — attach a Source to a Story
+## POST /api/sites/[siteId]/stories/[storyId]/sources — attach a Source to a Story
 
-- Route: `src/app/api/stories/[storyId]/sources/route.ts`
+- Route: `src/app/api/sites/[siteId]/stories/[storyId]/sources/route.ts`
 - Handler: `src/interfaces/http/attach-source-to-story-handler.ts`
 - Provider: `storyRuntimeProvider`
 - Body: `{ "sourceId": string, "relevance": string }` (exactly two string properties)
@@ -115,16 +130,16 @@ Always returns 200 on success or 500 on internal failure.
 | 415/400 | Media type / JSON / shape errors        |
 | 500     | Internal server error                   |
 
-## GET /api/source-inbox — list pending Sources
+## GET /api/sites/[siteId]/source-inbox — list pending Sources
 
-- Route: `src/app/api/source-inbox/route.ts`
+- Route: `src/app/api/sites/[siteId]/source-inbox/route.ts`
 - Handler: `src/interfaces/http/list-source-inbox-handler.ts`
 - Provider: `storyRuntimeProvider`
 - Response: `{ "ok": true, "sources": SourceInboxItem[] }` where each `SourceInboxItem` contains `{ source, extractions, preparations }`. A Source is pending only when it has no final triage decision **and** no Story attachment.
 
-## PUT /api/sources/[sourceId]/triage — record a Source triage decision
+## PUT /api/sites/[siteId]/sources/[sourceId]/triage — record a Source triage decision
 
-- Route: `src/app/api/sources/[sourceId]/triage/route.ts`
+- Route: `src/app/api/sites/[siteId]/sources/[sourceId]/triage/route.ts`
 - Handler: `src/interfaces/http/record-source-triage-decision-handler.ts`
 - Provider: `storyRuntimeProvider`
 - Body: `{ "decision": "new_story" | "existing_story" | "skip", "storyId": string | null, "reason": string }` (exactly three properties). `STORYRAIL_OPERATOR_ID` must be configured or the handler returns 500.
@@ -138,18 +153,18 @@ Always returns 200 on success or 500 on internal failure.
 | 415/400 | Media type / JSON / shape errors                                                                 |
 | 500     | Missing `STORYRAIL_OPERATOR_ID` or internal error                                                |
 
-## GET /api/agent-profiles — list Agent Profiles
+## GET /api/sites/[siteId]/agent-profiles — list Agent Profiles
 
-- Route: `src/app/api/agent-profiles/route.ts`
+- Route: `src/app/api/sites/[siteId]/agent-profiles/route.ts`
 - Handler: `src/interfaces/http/list-agent-profiles-handler.ts`
 - Provider: `storyRuntimeProvider`
 - Response: `{ "ok": true, "profiles": AgentProfile[] }` (built-in and custom Writers, the Assignment Editor, and the Director).
 
 Always returns 200 on success or 500 on internal failure.
 
-## POST /api/agent-profiles — create a custom Writer Profile
+## POST /api/sites/[siteId]/agent-profiles — create a custom Writer Profile
 
-- Route: `src/app/api/agent-profiles/route.ts`
+- Route: `src/app/api/sites/[siteId]/agent-profiles/route.ts`
 - Handler: `src/interfaces/http/create-custom-writer-profile-handler.ts`
 - Provider: `storyRuntimeProvider`
 - Body: `{ "name": string, "instructions": string, "model": { "provider": string, "model": string } | null }` (exactly three properties). A null `model` means the Writer uses the runtime default.
@@ -162,9 +177,9 @@ Always returns 200 on success or 500 on internal failure.
 | 415/400 | Media type / JSON / shape errors                                                                                                                                  |
 | 500     | Internal server error                                                                                                                                             |
 
-## POST /api/stories/[storyId]/assignment-proposals — generate an Assignment Editor proposal
+## POST /api/sites/[siteId]/stories/[storyId]/assignment-proposals — generate an Assignment Editor proposal
 
-- Route: `src/app/api/stories/[storyId]/assignment-proposals/route.ts`
+- Route: `src/app/api/sites/[siteId]/stories/[storyId]/assignment-proposals/route.ts`
 - Handler: `src/interfaces/http/generate-assignment-proposal-handler.ts`
 - Provider: `assignmentEditorRuntimeProvider`
 - Body: `{}` (exactly an empty object). `STORYRAIL_OPERATOR_ID` must be configured or the handler returns 500.
@@ -179,9 +194,9 @@ Always returns 200 on success or 500 on internal failure.
 | 500    | `ASSIGNMENT_EDITOR_PROFILE_UNAVAILABLE`, missing `STORYRAIL_OPERATOR_ID`, or internal error       |
 | 503    | Assignment-editor runtime not configured (`ASSIGNMENT_EDITOR_UNAVAILABLE`)                        |
 
-## POST /api/stories/[storyId]/assignments — create a durable Assignment
+## POST /api/sites/[siteId]/stories/[storyId]/assignments — create a durable Assignment
 
-- Route: `src/app/api/stories/[storyId]/assignments/route.ts`
+- Route: `src/app/api/sites/[siteId]/stories/[storyId]/assignments/route.ts`
 - Handler: `src/interfaces/http/assign-story-handler.ts`
 - Provider: `storyRuntimeProvider`
 - Body: `{ "writerProfileId": string, "angle": string, "brief": string, "constraints": string | null, "reason": string }` (exactly five properties). The operator actor is derived from `STORYRAIL_OPERATOR_ID`.
@@ -196,13 +211,13 @@ Always returns 200 on success or 500 on internal failure.
 | 415/400 | Media type / JSON / shape errors                                                                                                                                                                                            |
 | 500     | Missing `STORYRAIL_OPERATOR_ID` or internal error                                                                                                                                                                           |
 
-## POST /api/stories/[storyId]/writer-drafts — run the Writer and create the first Article
+## POST /api/sites/[siteId]/stories/[storyId]/writer-drafts — run the Writer and create the first Article
 
-- Route: `src/app/api/stories/[storyId]/writer-drafts/route.ts`
+- Route: `src/app/api/sites/[siteId]/stories/[storyId]/writer-drafts/route.ts`
 - Handler: `src/interfaces/http/create-writer-draft-handler.ts`
 - Provider: `writerRuntimeProvider`
 - Body: `{}` (exactly an empty object). `STORYRAIL_OPERATOR_ID` must be configured or the handler returns 500.
-- Workflow: `createWriterDraft`. Validates the Story is Assigned with a durable Assignment and no existing Article, resolves the executable Writer model, runs the supervised Writer against the Assignment's evidence snapshot, records a Writer `AgentRun`, creates the first Article and immutable Revision 1, and atomically transitions the Story `assigned` → `in_progress`. A failed model invocation records a failed `AgentRun` and returns success with the failed run (no Article is created).
+- Workflow: `createWriterDraft`. Validates the Story is Assigned with a durable Assignment and no existing Article, resolves the executable Writer model, runs the supervised Writer against the Assignment's evidence snapshot (with newsroom identity and standards injected), records a Writer `AgentRun`, creates the first Article and immutable Revision 1, and atomically transitions the Story `assigned` → `in_progress`. A failed model invocation records a failed `AgentRun` and returns success with the failed run (no Article is created).
 
 | Status | Condition                                                                                                                                          |
 | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -213,13 +228,13 @@ Always returns 200 on success or 500 on internal failure.
 | 500    | `WRITER_MODEL_UNSUPPORTED`, `WRITER_PROFILE_UNAVAILABLE`, missing `STORYRAIL_OPERATOR_ID`, or internal error                                       |
 | 503    | Writer runtime not configured (`WRITER_UNAVAILABLE`) or `WRITER_MODEL_UNAVAILABLE`                                                                 |
 
-## POST /api/stories/[storyId]/writer-revisions — run the Writer revision
+## POST /api/sites/[siteId]/stories/[storyId]/writer-revisions — run the Writer revision
 
-- Route: `src/app/api/stories/[storyId]/writer-revisions/route.ts`
+- Route: `src/app/api/sites/[siteId]/stories/[storyId]/writer-revisions/route.ts`
 - Handler: `src/interfaces/http/create-writer-revision-handler.ts`
 - Provider: `writerRuntimeProvider`
 - Body: `{}` (exactly an empty object). `STORYRAIL_OPERATOR_ID` must be configured or the handler returns 500.
-- Workflow: `createWriterRevision`. Validates the Story is Changes Requested with a durable Assignment, Article, and current Revision that matches the Story's `revisionCycle` and is below 3, resolves the operator `request_changes` ReviewDecision and the matching succeeded Director run, re-resolves the exact historical evidence recorded by the previous Writer run, runs the supervised Writer to produce the next immutable Article Revision, and atomically transitions the Story `changes_requested` → `in_progress`. A failed model invocation records a failed `AgentRun` and returns success with the failed run (no Revision is created).
+- Workflow: `createWriterRevision`. Validates the Story is Changes Requested with a durable Assignment, Article, and current Revision that matches the Story's `revisionCycle` and is below 3, resolves the operator `request_changes` ReviewDecision and the matching succeeded Director run, re-resolves the exact historical evidence recorded by the previous Writer run, runs the supervised Writer to produce the next immutable Article Revision (with newsroom identity and standards injected), and atomically transitions the Story `changes_requested` → `in_progress`. A failed model invocation records a failed `AgentRun` and returns success with the failed run (no Revision is created).
 
 | Status | Condition                                                                                                                                          |
 | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -231,9 +246,9 @@ Always returns 200 on success or 500 on internal failure.
 | 500    | `WRITER_MODEL_UNSUPPORTED`, `WRITER_PROFILE_UNAVAILABLE`, missing `STORYRAIL_OPERATOR_ID`, or internal error                                       |
 | 503    | Writer runtime not configured (`WRITER_UNAVAILABLE`) or `WRITER_MODEL_UNAVAILABLE`                                                                 |
 
-## POST /api/stories/[storyId]/review-submissions — submit an Article for review
+## POST /api/sites/[siteId]/stories/[storyId]/review-submissions — submit an Article for review
 
-- Route: `src/app/api/stories/[storyId]/review-submissions/route.ts`
+- Route: `src/app/api/sites/[siteId]/stories/[storyId]/review-submissions/route.ts`
 - Handler: `src/interfaces/http/submit-story-review-handler.ts`
 - Provider: `storyRuntimeProvider`
 - Body: `{}` (exactly an empty object). `STORYRAIL_OPERATOR_ID` must be configured or the handler returns 500.
@@ -248,13 +263,13 @@ Always returns 200 on success or 500 on internal failure.
 | 415/400| Media type / JSON / shape errors                                                                                                |
 | 500    | Missing `STORYRAIL_OPERATOR_ID` or internal error                                                                              |
 
-## POST /api/stories/[storyId]/director-reviews — run the Director review
+## POST /api/sites/[siteId]/stories/[storyId]/director-reviews — run the Director review
 
-- Route: `src/app/api/stories/[storyId]/director-reviews/route.ts`
+- Route: `src/app/api/sites/[siteId]/stories/[storyId]/director-reviews/route.ts`
 - Handler: `src/interfaces/http/run-director-review-handler.ts`
 - Provider: `directorRuntimeProvider`
 - Body: `{}` (exactly an empty object). `STORYRAIL_OPERATOR_ID` must be configured or the handler returns 500.
-- Workflow: `runDirectorReview`. Validates the Story is In Review with a durable Assignment, Article, and current Revision, resolves the exact Writer run and its historical evidence, loads the built-in Director Profile, resolves the executable model, and records one advisory Director `AgentRun` (succeeded recommendation or safe failure). The Director never mutates the Article or Story; the Story remains In Review.
+- Workflow: `runDirectorReview`. Validates the Story is In Review with a durable Assignment, Article, and current Revision, resolves the exact Writer run and its historical evidence, loads the built-in Director Profile, resolves the executable model, and records one advisory Director `AgentRun` (succeeded recommendation or safe failure) with newsroom identity and standards injected into the prompt. The Director never mutates the Article or Story; the Story remains In Review.
 
 | Status | Condition                                                                                                                                                |
 | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -265,9 +280,9 @@ Always returns 200 on success or 500 on internal failure.
 | 500    | `DIRECTOR_PROFILE_UNAVAILABLE`, `DIRECTOR_MODEL_UNSUPPORTED`, missing `STORYRAIL_OPERATOR_ID`, or internal error                                          |
 | 503    | Director runtime not configured (`DIRECTOR_UNAVAILABLE`) or `DIRECTOR_MODEL_UNAVAILABLE`                                                                  |
 
-## POST /api/stories/[storyId]/review-decisions — record an operator review decision
+## POST /api/sites/[siteId]/stories/[storyId]/review-decisions — record an operator review decision
 
-- Route: `src/app/api/stories/[storyId]/review-decisions/route.ts`
+- Route: `src/app/api/sites/[siteId]/stories/[storyId]/review-decisions/route.ts`
 - Handler: `src/interfaces/http/record-story-review-decision-handler.ts`
 - Provider: `storyRuntimeProvider`
 - Body: `{ "directorRunId": string, "decision": "approve" | "request_changes", "reason": string }` (exactly three properties). `STORYRAIL_OPERATOR_ID` must be configured or the handler returns 500.
@@ -282,9 +297,9 @@ Always returns 200 on success or 500 on internal failure.
 | 415/400| Media type / JSON / shape errors                                                                                                                                                      |
 | 500    | Missing `STORYRAIL_OPERATOR_ID` or internal error                                                                                                                                     |
 
-## POST /api/stories/[storyId]/rejections — reject a Story
+## POST /api/sites/[siteId]/stories/[storyId]/rejections — reject a Story
 
-- Route: `src/app/api/stories/[storyId]/rejections/route.ts`
+- Route: `src/app/api/sites/[siteId]/stories/[storyId]/rejections/route.ts`
 - Handler: `src/interfaces/http/reject-story-handler.ts`
 - Provider: `storyRuntimeProvider`
 - Body: `{ "reason": string }` (exactly one string property). `STORYRAIL_OPERATOR_ID` must be configured or the handler returns 500.
@@ -298,13 +313,13 @@ Always returns 200 on success or 500 on internal failure.
 | 415/400| Media type / JSON / shape errors                                                                           |
 | 500    | Missing `STORYRAIL_OPERATOR_ID` or internal error                                                          |
 
-## POST /api/stories/[storyId]/deliveries — deliver a published Story
+## POST /api/sites/[siteId]/stories/[storyId]/deliveries — deliver a published Story
 
-- Route: `src/app/api/stories/[storyId]/deliveries/route.ts`
+- Route: `src/app/api/sites/[siteId]/stories/[storyId]/deliveries/route.ts`
 - Handler: `src/interfaces/http/deliver-story-handler.ts`
 - Provider: `storyRuntimeProvider`
 - Body: `{}` (empty object).
-- Workflow: `deliverStory`. Validates that the Story is published and has an Article Revision, resolves the external delivery destination and credentials, records a `running` delivery row before the external request, dispatches to the destination (StudioCMS POST or PATCH), and updates the row to `succeeded` or `failed`.
+- Workflow: `deliverStory`. Validates that the Story is published and has an Article Revision, resolves the external delivery destination (StudioCMS or WordPress) and credentials, records a `running` delivery row before the external request, dispatches to the destination (StudioCMS POST/PATCH or WordPress POST Gutenberg blocks), and updates the row to `succeeded` or `failed`.
 
 | Status | Condition |
 | ------ | --------- |
@@ -315,9 +330,24 @@ Always returns 200 on success or 500 on internal failure.
 | 415/400| Media type / JSON / shape errors |
 | 500    | Internal error |
 
-## GET /api/model-catalog — list compatible LLM models
+## GET /api/sites/[siteId]/newsroom-standards — read newsroom standards
 
-- Route: `src/app/api/model-catalog/route.ts`
+- Route: `src/app/api/sites/[siteId]/newsroom-standards/route.ts`
+- Handler: `src/interfaces/http/newsroom-standards-handlers.ts`
+- Provider: `storyRuntimeProvider`
+- Response: `{ "ok": true, "standards": NewsroomStandards | null }`
+
+## PUT /api/sites/[siteId]/newsroom-standards — update newsroom standards
+
+- Route: `src/app/api/sites/[siteId]/newsroom-standards/route.ts`
+- Handler: `src/interfaces/http/newsroom-standards-handlers.ts`
+- Provider: `storyRuntimeProvider`
+- Body: `{ "text": string }`
+- Response: `{ "ok": true, "standards": NewsroomStandards }`
+
+## GET /api/sites/[siteId]/model-catalog — list compatible LLM models
+
+- Route: `src/app/api/sites/[siteId]/model-catalog/route.ts`
 - Handler: `src/interfaces/http/model-catalog-handlers.ts`
 - Provider: `modelCatalogProvider`
 - Workflow: Fetches models supporting structured outputs from OpenRouter, caching results in memory for 15 minutes.

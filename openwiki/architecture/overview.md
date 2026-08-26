@@ -9,7 +9,7 @@ tags: [architecture, overview, hexagonal]
 
 StoryRail is an open-source, agent-first editorial control plane. It is deliberately **not** a page-building CMS. It manages editorial state and is designed to publish through replaceable adapters in the future; Postgres is intended to be authoritative for editorial state, and agent memory must never become the database.
 
-Each newsroom operates within a site (tenant boundary) identified by `STORYRAIL_SITE_ID`. Stories, Sources, standards, and other editorial entities are scoped to their site, so a second newsroom with a different site ID sees an independent set of data.
+Each newsroom operates within a site (tenant boundary) identified in URLs via `/s/[siteId]` and `/api/sites/[siteId]`. Operators can switch between newsrooms or create a new one directly from the newsroom UI. Stories, Sources, Agent Profiles, standards, and other editorial entities are scoped to their site, so independent newsrooms see strictly separated data.
 
 ## Core editorial model
 
@@ -17,7 +17,7 @@ Three terms are kept strictly distinct (see `docs/product/terminology.md` and `A
 
 - **Source** — preserved evidence or input, such as a URL and its extracted contents.
 - **Story** — the central editorial object used to assess, organize, assign, and track coverage.
-- **Article** — a versioned editorial work product that may be reviewed and eventually published.
+- **Article** — a versioned editorial work product that may be reviewed, revised, and eventually published and delivered.
 
 Multiple Sources can inform one Story, and a Story can be rejected or merged without ever becoming an Article.
 
@@ -29,11 +29,11 @@ The codebase under `src/` is organized as a hexagonal architecture with the doma
 flowchart TD
     UI["Newsroom UI (src/features/newsroom)"]
     HTTP["HTTP Interface (src/interfaces/http)"]
+    SRV["Server providers & site routing (src/server)"]
+    RT["Runtime composition (src/runtime)"]
     APP["Application workflows (src/application)"]
     DOM["Domain (src/domain/editorial)"]
     ADP["Adapters (src/adapters)"]
-    RT["Runtime composition (src/runtime)"]
-    SRV["Server providers (src/server)"]
     PG[("PostgreSQL (storyrail schema)")]
 
     UI --> HTTP
@@ -47,27 +47,28 @@ flowchart TD
 
 | Layer            | Path                    | Responsibility                                                                                                                                                              |
 | ---------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Domain           | `src/domain/editorial`  | Pure editorial types, validation, and the Story state machine. No I/O.                                                                                                      |
+| Domain           | `src/domain/editorial`  | Pure editorial types, validation, site domain rules, and the Story state machine. No I/O.                                                                                  |
 | Application      | `src/application`       | Use-case workflows that orchestrate domain rules with repository ports.                                                                                                     |
-| Adapters         | `src/adapters`          | PostgreSQL persistence, Firecrawl extraction, and LangChain/OpenRouter structured-model implementations of the ports.                                                       |
-| Runtime          | `src/runtime`           | Composes adapters and application services into focused frozen runtimes with injectable external seams.                                                                     |
-| Server providers | `src/server`            | Lazy singletons that build runtimes from environment on first use.                                                                                                          |
+| Adapters         | `src/adapters`          | PostgreSQL persistence, Firecrawl extraction, delivery destinations (WordPress, StudioCMS), and OpenRouter structured-model implementations of ports.                       |
+| Runtime          | `src/runtime`           | Composes adapters and application services into focused site-scoped frozen runtimes with injectable external seams and newsroom identity context.                           |
+| Server providers | `src/server`            | Lazy singletons and site-keyed providers that build runtimes per site ID from environment and resolve routes via `withSite`.                                                |
 | HTTP interface   | `src/interfaces/http`   | Hand-rolled request/response handlers that validate JSON and map workflow results to status codes.                                                                          |
-| Next.js routes   | `src/app/api`           | Thin Next.js route handlers binding HTTP handlers to providers.                                                                                                             |
-| Newsroom UI      | `src/features/newsroom` | React client shell with Story desk, Source-evidence intake, Source inbox, Agent Profiles, and a Story workspace covering assignment, Writer execution, and Article reading. |
+| Next.js routes   | `src/app/api`           | Thin Next.js route handlers binding site-scoped and collection HTTP handlers to providers.                                                                                 |
+| Newsroom UI      | `src/features/newsroom` | React client shell at `/s/[siteId]` with Site Switcher, Story desk, Source intake, Source inbox, Agent Profiles, Settings, and Story workspace (prose reader, delivery).   |
 
-## Six composed runtimes
+## Composed runtimes
 
-StoryRail composes six independent runtimes rather than one global container:
+StoryRail composes focused runtimes rather than one global container:
 
-1. **Source-evidence runtime** (`src/runtime/source-evidence-runtime.ts`) — requires `STORYRAIL_DATABASE_URL` and `FIRECRAWL_API_KEY`. Owns one `pg.Pool`. Exposes `preserveUrlSource`, `extractPersistedSource`, and the combined `preserveAndExtractUrlSource`.
-2. **Evidence-preparation runtime** (`src/runtime/evidence-preparation-runtime.ts`) — requires `STORYRAIL_DATABASE_URL`, `OPENROUTER_API_KEY`, and `STORYRAIL_EVIDENCE_PREPARATION_MODEL`. Uses LangChain's OpenRouter adapter to create one immutable Prepared Evidence attempt from a successful raw extraction.
-3. **Story runtime** (`src/runtime/story-runtime.ts`) — requires only `STORYRAIL_DATABASE_URL`. Owns a separate `pg.Pool`. Exposes Story creation, Source attachment, Story inspection, Story listing, pending Source inbox listing, Source triage decision recording, Agent Profile listing and custom Writer creation, manual `assignStory`, `submitStoryReview` (`in_progress` → `in_review`), `recordStoryReviewDecision` (`in_review` → `approved`/`changes_requested`), `rejectStory`, and `deliverStory` (delivering a published Story's latest Revision to a configured external destination).
-4. **Assignment-editor runtime** (`src/runtime/assignment-editor-runtime.ts`) — requires `STORYRAIL_DATABASE_URL`, `OPENROUTER_API_KEY`, and `STORYRAIL_ASSIGNMENT_EDITOR_MODEL`. Generates one supervised Assignment Editor proposal `AgentRun` for an Intake Story; it records the run but cannot create an Assignment or transition Story state.
-5. **Writer runtime** (`src/runtime/writer-runtime.ts`) — requires `STORYRAIL_DATABASE_URL` and `OPENROUTER_API_KEY`, plus either the assigned Writer Profile's OpenRouter model or `STORYRAIL_WRITER_MODEL` as a default. Runs the assigned Writer against an Assigned Story to create the first Article and immutable Revision 1 and atomically transition the Story to `in_progress`, and runs supervised Writer revisions after an operator requests changes to append immutable Revision 2 or 3 and return the Story to `in_progress`.
-6. **Director runtime** (`src/runtime/director-runtime.ts`) — requires `STORYRAIL_DATABASE_URL` and `OPENROUTER_API_KEY`, plus either the built-in Director Profile's OpenRouter model or `STORYRAIL_DIRECTOR_MODEL` as a default. Runs the supervised advisory Director review against an In Review Story and records a Director `AgentRun` (succeeded recommendation or safe failure). The Director cannot mutate the Article or Story state; only the operator's [review decision](application-workflows.md) transitions the Story.
+1. **Site Directory runtime** (`src/runtime/site-directory-runtime.ts`) — requires `STORYRAIL_DATABASE_URL`. Resolves, lists, and creates Sites (`storyrail.sites`) and seeds built-in Agent Profiles (`storyrail.agent_profiles`).
+2. **Source-evidence runtime** (`src/runtime/source-evidence-runtime.ts`) — requires `STORYRAIL_DATABASE_URL` and `FIRECRAWL_API_KEY`. Scoped by `siteId`. Exposes `preserveUrlSource`, `extractPersistedSource`, and the combined `preserveAndExtractUrlSource`.
+3. **Evidence-preparation runtime** (`src/runtime/evidence-preparation-runtime.ts`) — requires `STORYRAIL_DATABASE_URL`, `OPENROUTER_API_KEY`, and `STORYRAIL_EVIDENCE_PREPARATION_MODEL`. Scoped by `siteId`. Uses OpenRouter adapter to create one immutable Prepared Evidence attempt from a raw extraction.
+4. **Story runtime** (`src/runtime/story-runtime.ts`) — requires only `STORYRAIL_DATABASE_URL`. Scoped by `siteId`. Exposes Story creation, Source attachment, Story inspection (including deliveries), Story listing, pending Source inbox listing, Source triage, Agent Profile listing and custom Writer creation, manual `assignStory`, `submitStoryReview` (`in_progress` → `in_review`), `recordStoryReviewDecision` (`in_review` → `approved`/`changes_requested`), `rejectStory`, and `deliverStory` (delivering a published Story's latest Revision to StudioCMS or WordPress).
+5. **Assignment-editor runtime** (`src/runtime/assignment-editor-runtime.ts`) — requires `STORYRAIL_DATABASE_URL`, `OPENROUTER_API_KEY`, and `STORYRAIL_ASSIGNMENT_EDITOR_MODEL`. Injects newsroom identity and standards into the prompt to generate a supervised Assignment Editor proposal `AgentRun` for an Intake Story.
+6. **Writer runtime** (`src/runtime/writer-runtime.ts`) — requires `STORYRAIL_DATABASE_URL` and `OPENROUTER_API_KEY`, plus either the assigned Writer Profile's OpenRouter model or `STORYRAIL_WRITER_MODEL` as a default. Injects newsroom identity and standards to create the first Article and Revision 1 (`assigned` → `in_progress`), and runs supervised Writer revisions after changes are requested (`changes_requested` → `in_progress`).
+7. **Director runtime** (`src/runtime/director-runtime.ts`) — requires `STORYRAIL_DATABASE_URL` and `OPENROUTER_API_KEY`, plus either the Director Profile's OpenRouter model or `STORYRAIL_DIRECTOR_MODEL` as a default. Injects newsroom identity and standards to run supervised advisory Director reviews against In Review Stories.
 
-Each runtime owns and closes only the `Pool` it creates. The integration test suite and a composed server runtime each own their own pools independently.
+Each runtime owns and closes only the `Pool` it creates. Server providers use `site-keyed-runtime-provider.ts` to cache composed runtimes per resolved `siteId`.
 
 ## Editorial lifecycle
 

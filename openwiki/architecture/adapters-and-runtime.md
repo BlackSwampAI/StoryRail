@@ -78,20 +78,33 @@ All PostgreSQL adapters share a defensive pattern: they serialize the domain obj
 - Returns models sorted by display name.
 - The catalog is never stored in Postgres to avoid state drift with upstream providers.
 
-### Story delivery destinations: StudioCMS
+### Story delivery destinations: StudioCMS and WordPress
 
-`src/adapters/story-delivery/studiocms-destination.ts` implements `DeliveryDestination` for StudioCMS:
-- Generates `POST /pages` (for initial creation) and `PATCH /pages/:id` (for revision updates) requests.
-- Maps HTTP status codes to domain `DeliveryFailureCode`s (`401`/`403` → `DESTINATION_UNAUTHORIZED`, `5xx`/`408`/`429` → `DESTINATION_UNREACHABLE`, other → `DESTINATION_REJECTED`).
-- Parses the created page ID from the success message (`"Page created successfully with id: <id>"`) to track `remoteId`.
-- Encodes boolean flags as numbers (`wireBoolean(draft)`: 1 or 0).
-- `site-delivery-destination-directory.ts` provides a `DeliveryDestinationDirectory` that resolves site settings and credentials (token in slot `studiocms_api_token`) to construct destination instances.
+StoryRail implements replaceable delivery destinations under `src/adapters/story-delivery/`:
 
-`postgres-source-extraction-decoder.ts` decodes a persisted extraction row back into the `SuccessfulSourceExtraction` / `FailedSourceExtraction` union and is shared by the inspection and inbox adapters. `postgres-assignment-decoder.ts`, `postgres-agent-run-decoder.ts`, `postgres-article-decoder.ts`, and `postgres-review-decision-decoder.ts` perform the same strict-shape decoding for their respective payloads; the AgentRun decoder must handle the discriminated `assignment_proposal` / `article_draft` / `article_revision` / `article_review` union and its succeeded/failed variants, and the review-decision decoder re-validates the payload through the domain `createReviewDecision`. The review persistence adapters are transactional: both lock and recheck the expected Story under `FOR UPDATE` before persisting the transition, and the decision adapter verifies the current Article Revision matches and that no decision exists for that revision before inserting. The Story rejection persistence adapter (`postgres-story-rejection-persistence.ts`) follows the same transactional pattern: it pre-validates that the expected Story is in one of the rejectable states (`intake`, `assigned`, `in_progress`, `in_review`, `changes_requested`), the next state is `rejected`, and the receipt's actor is an `operator`, then `BEGIN`s, selects the Story `FOR UPDATE`, deep-compares the decoded row against the expected Story (`isDeepStrictEqual`), `UPDATE`s the Story, inserts the transition receipt, and verifies the durable result is byte-for-byte equal to the command before `COMMIT`. A changed Story returns `STORY_REJECTION_CONFLICT`; a unique/foreign-key violation (`23505`/`23503`) is also treated as a conflict. It reuses the existing `stories` and `story_transition_receipts` tables and the shared `decodePostgresTransitionReceipt` — no new migration is required. The Writer revision persistence adapter is similarly transactional: it locks and deep-compares the expected Story and current Article Revision under `FOR UPDATE`, takes a `FOR SHARE` lock on the matching ReviewDecision and its Director `AgentRun`, verifies they are byte-for-byte consistent with the run's input snapshot, then inserts the Writer revision `AgentRun`, the next `article_revisions` row, the updated Story, and the transition receipt in one transaction, returning `WRITER_REVISION_CONFLICT` if any expected row changed or a unique/foreign-key violation occurs.
+1. **StudioCMS** (`studiocms-destination.ts`):
+   - Generates `POST /pages` (for initial creation) and `PATCH /pages/:id` (for revision updates) requests.
+   - Maps HTTP status codes to domain `DeliveryFailureCode`s (`401`/`403` → `DESTINATION_UNAUTHORIZED`, `5xx` → `DESTINATION_REJECTED`, `408`/`429` → `DESTINATION_UNREACHABLE`).
+   - Parses created page IDs from success messages to track `remoteId`.
+   - Encodes boolean flags as numbers (`wireBoolean(draft)`: 1 or 0).
+
+2. **WordPress** (`wordpress-destination.ts`):
+   - Generates `POST /wp/v2/posts` with Basic authentication (`username` + encrypted application password from slot `wordpress_application_password`).
+   - Serializes article blocks into Gutenberg comments markup (`gutenberg-blocks.ts`): paragraphs (`<!-- wp:paragraph -->...<!-- /wp:paragraph -->`) and headings (`<!-- wp:heading {"level":n} -->...<!-- /wp:heading -->`).
+   - Handles slug collision: if WordPress assigns a modified slug, both requested and assigned slugs are recorded in the delivery response.
+   - Updates existing posts via `POST /wp/v2/posts/:id` using stored `remoteId`.
+
+`site-delivery-destination-directory.ts` provides a `DeliveryDestinationDirectory` that resolves site settings and credentials (from slots `studiocms_api_token` or `wordpress_application_password`) to construct the appropriate destination instance based on `kind`.
+
+### Newsroom Identity and Standards Injection
+
+`newsroom-identity.ts` defines `formatNewsroomIdentity` and `readNewsroomIdentity`, which fetch a Site's configured name and description dynamically at run start. In conjunction with `newsroom-standards.ts` (`withNewsroomStandards`), all five supervised agent roles (Assignment Editor, Writer draft, Writer revision, Director review, and Source Researcher) receive the newsroom's identity and editorial standards cleanly injected into their system prompts in canonical order: (1) core role rules, (2) newsroom identity, (3) newsroom standards.
+
+`postgres-source-extraction-decoder.ts` decodes a persisted extraction row back into the `SuccessfulSourceExtraction` / `FailedSourceExtraction` union and is shared by the inspection and inbox adapters. `postgres-assignment-decoder.ts`, `postgres-agent-run-decoder.ts`, `postgres-article-decoder.ts`, `postgres-story-delivery-decoder.ts`, and `postgres-review-decision-decoder.ts` perform the same strict-shape decoding for their respective payloads; the AgentRun decoder must handle the discriminated `assignment_proposal` / `article_draft` / `article_revision` / `article_review` union and its succeeded/failed variants, and the review-decision decoder re-validates the payload through the domain `createReviewDecision`. The review persistence adapters are transactional: both lock and recheck the expected Story under `FOR UPDATE` before persisting the transition, and the decision adapter verifies the current Article Revision matches and that no decision exists for that revision before inserting. The Story rejection persistence adapter (`postgres-story-rejection-persistence.ts`) follows the same transactional pattern: it pre-validates that the expected Story is in one of the rejectable states (`intake`, `assigned`, `in_progress`, `in_review`, `changes_requested`), the next state is `rejected`, and the receipt's actor is an `operator`, then `BEGIN`s, selects the Story `FOR UPDATE`, deep-compares the decoded row against the expected Story (`isDeepStrictEqual`), `UPDATE`s the Story, inserts the transition receipt, and verifies the durable result is byte-for-byte equal to the command before `COMMIT`. A changed Story returns `STORY_REJECTION_CONFLICT`; a unique/foreign-key violation (`23505`/`23503`) is also treated as a conflict. It reuses the existing `stories` and `story_transition_receipts` tables and the shared `decodePostgresTransitionReceipt` — no new migration is required. The Writer revision persistence adapter is similarly transactional: it locks and deep-compares the expected Story and current Article Revision under `FOR UPDATE`, takes a `FOR SHARE` lock on the matching ReviewDecision and its Director `AgentRun`, verifies they are byte-for-byte consistent with the run's input snapshot, then inserts the Writer revision `AgentRun`, the next `article_revisions` row, the updated Story, and the transition receipt in one transaction, returning `WRITER_REVISION_CONFLICT` if any expected row changed or a unique/foreign-key violation occurs.
 
 ## Runtime composition (`src/runtime`)
 
-`src/runtime/index.ts` exports the Source-evidence, evidence-preparation, Story, Assignment-editor, Writer, and Director runtime factories and their configuration loaders.
+`src/runtime/index.ts` exports the Source-evidence, evidence-preparation, Story, Assignment-editor, Writer, Director, and Site-directory runtime factories and their configuration loaders. Every tenant-aware runtime factory takes a required `siteId: SiteId` parameter.
 
 ### Source-evidence runtime
 
@@ -133,4 +146,7 @@ All six runtimes accept optional `createPool`, `createUuid`, and `now` overrides
 
 ## Server providers (`src/server`)
 
-`src/server/*-runtime-provider.ts` are lazy singletons: `get()` builds the runtime from environment on first call and caches it. Next.js route handlers receive `getRuntime: provider.get`, so the pool is created only when a request first needs it. Providers exist for the Source-evidence, evidence-preparation, Story, Assignment-editor (`assignment-editor-runtime-provider.ts`), Writer (`writer-runtime-provider.ts`), Director (`director-runtime-provider.ts`), and Model-catalog (`model-catalog-provider.ts`) runtimes.
+Runtime providers in `src/server/` manage lazy runtime creation:
+- Multi-tenant runtimes are wrapped with `createSiteKeyedRuntimeProvider` (`site-keyed-runtime-provider.ts`), creating and caching independent runtime instances keyed by `SiteId`. Unknown sites are never cached.
+- Providers include `sourceEvidenceRuntimeProvider`, `evidencePreparationRuntimeProvider`, `storyRuntimeProvider`, `assignmentEditorRuntimeProvider`, `writerRuntimeProvider`, `directorRuntimeProvider`, and `siteDirectoryProvider` (`site-directory-provider.ts`).
+- `site-route.ts` provides the `withSite` higher-order wrapper, resolving `siteId` from URL route params and returning `404` early if the site does not exist before invoking the HTTP handler.
