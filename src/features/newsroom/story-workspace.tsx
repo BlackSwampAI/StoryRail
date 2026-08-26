@@ -49,6 +49,7 @@ const GROUNDING_FINDING_LABELS = {
   CITATION_QUOTE_UNSUPPORTED: "Not found in the cited evidence",
 } as const;
 import { autopilotProgress, resolveAutopilotFollow } from "./autopilot-follow";
+import { withRun } from "./agent-run-list";
 import { STORY_STATE_LABELS } from "./newsroom-state";
 import { WRITER_ASSIGNMENT_DROP_ID, WRITER_DRAG_TYPE, type StaffState } from "./newsroom-staff";
 import styles from "./newsroom-shell.module.css";
@@ -1027,7 +1028,7 @@ export function StoryWorkspace({
         );
         return;
       }
-      setRuns((current) => [...current, result.value]);
+      setRuns((current) => withRun(current, result.value));
       if (result.value.role !== "assignment_editor") {
         setProposalStatus("The Assignment Editor returned an invalid execution record.");
         return;
@@ -1099,7 +1100,7 @@ export function StoryWorkspace({
         );
         return;
       }
-      setRuns((current) => [...current, result.value]);
+      setRuns((current) => withRun(current, result.value));
       if (result.value.role !== "writer" || result.value.outcome === "failed") {
         if (result.value.role === "writer")
           setWriterStatus(modelFailureMessage("Writer", result.value.failure));
@@ -1130,7 +1131,7 @@ export function StoryWorkspace({
         );
         return;
       }
-      setRuns((current) => [...current, result.value]);
+      setRuns((current) => withRun(current, result.value));
       if (
         result.value.role !== "writer" ||
         result.value.operation !== "article_revision" ||
@@ -1373,7 +1374,7 @@ export function StoryWorkspace({
         );
         return;
       }
-      setRuns((current) => [...current, result.value]);
+      setRuns((current) => withRun(current, result.value));
       if (result.value.role !== "editor_in_chief") {
         setReviewStatus("The Director returned an invalid execution record.");
         return;
