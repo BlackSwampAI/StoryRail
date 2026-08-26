@@ -1,8 +1,9 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   agentProfileId,
+  articleBodyMarkdown,
   agentRunId,
   articleId,
   articleRevisionId,
@@ -139,6 +140,95 @@ describe("reading an Article with its support attached", () => {
     renderReader();
     expect(screen.getByRole("heading", { name: "What happened", level: 3 })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /source/i })).toHaveLength(1);
+  });
+
+  it("opens annotated, because reading the piece as prose is the deliberate act", () => {
+    renderReader();
+    expect(screen.getByRole("button", { name: "Annotated" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Plain text" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(screen.getByRole("button", { name: /show 1 source/i })).toBeInTheDocument();
+  });
+
+  it("shows the article's own derived text rather than a second rendering of it", () => {
+    renderReader();
+    fireEvent.click(screen.getByRole("button", { name: "Plain text" }));
+
+    expect(
+      screen.getByText(articleBodyMarkdown(revision.blocks), { collapseWhitespace: false }),
+    ).toBeInTheDocument();
+    // The attributions are what the operator asked to be able to read past.
+    expect(screen.queryByRole("button", { name: /show 1 source/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Writer's own framing/)).not.toBeInTheDocument();
+  });
+
+  it("shows the Revision it was given rather than whichever is newest", () => {
+    // A Story holds up to three Revisions; a later one existing must not change what is read.
+    const secondRevision: ArticleRevision = {
+      ...revision,
+      id: articleRevisionId("revision-reader-2"),
+      revisionNumber: 2,
+      headline: "The release is out, revised",
+      blocks: [{ kind: "context", markdown: "A later thought entirely.", citations: [] }],
+    };
+    expect(secondRevision.revisionNumber).toBe(2);
+    render(
+      <ArticleReader
+        revision={revision}
+        writerName="General Writer"
+        headingId="heading"
+        measurement={measurement}
+        inspection={inspection}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Plain text" }));
+
+    expect(screen.getByRole("heading", { name: "The release is out" })).toBeInTheDocument();
+    expect(
+      screen.getByText(articleBodyMarkdown(revision.blocks), { collapseWhitespace: false }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/A later thought/)).not.toBeInTheDocument();
+  });
+
+  it("offers the article text to the clipboard so it need not be selected by hand", async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    renderReader();
+    fireEvent.click(screen.getByRole("button", { name: "Plain text" }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy article text" }));
+
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith(articleBodyMarkdown(revision.blocks)),
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent("Copied the article text.");
+  });
+
+  it("says the clipboard was refused rather than implying the copy took", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      value: {
+        writeText: async () => {
+          throw new Error("denied");
+        },
+      },
+      configurable: true,
+    });
+    renderReader();
+    fireEvent.click(screen.getByRole("button", { name: "Plain text" }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy article text" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(/clipboard is unavailable/i);
+  });
+
+  it("marks the Writer's unattributed prose and leaves an attributed claim unmarked", () => {
+    renderReader();
+    const marks = screen.getAllByText(/Writer's own framing · not attributed/);
+    expect(marks).toHaveLength(1);
+    expect(marks[0]?.previousSibling).toHaveTextContent("Adoption will take time.");
   });
 
   it("says when a citation cannot be resolved rather than hiding it", () => {

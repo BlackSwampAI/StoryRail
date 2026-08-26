@@ -4,10 +4,11 @@ import { useState } from "react";
 
 import { citationProvenance, type CitationProvenance } from "@/application/article-grounding";
 import type { StoryInspection } from "@/application/story-inspection";
-import type {
-  ArticleBlock,
-  ArticleGroundingMeasurement,
-  ArticleRevision,
+import {
+  articleBodyMarkdown,
+  type ArticleBlock,
+  type ArticleGroundingMeasurement,
+  type ArticleRevision,
 } from "@/domain/editorial";
 
 import { GroundingSummary } from "./grounding-summary";
@@ -83,6 +84,44 @@ function Claim({
   );
 }
 
+/**
+ * The article's text as the system derived it, shown verbatim rather than re-rendered. A second
+ * rendering could quietly disagree with the one the grounding check ran against; this is that
+ * exact string, so what the operator reads and what was measured cannot come apart.
+ */
+function PlainArticle({ revision }: Readonly<{ revision: ArticleRevision }>) {
+  const [copyStatus, setCopyStatus] = useState<string | null>(null);
+  const text = articleBodyMarkdown(revision.blocks);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyStatus("Copied the article text.");
+    } catch {
+      // The clipboard is refused in plenty of ordinary situations, so say so rather than
+      // leaving the operator to wonder whether the copy took.
+      setCopyStatus("The clipboard is unavailable. Select the text to copy it.");
+    }
+  }
+
+  return (
+    <div className={styles.articlePlain}>
+      <p className={styles.articlePlainNote}>
+        The article&apos;s text, derived from the same blocks a delivery is built from.
+      </p>
+      <button type="button" className={styles.citationToggle} onClick={() => void copy()}>
+        Copy article text
+      </button>
+      {copyStatus ? (
+        <p role="status" className={styles.articlePlainNote}>
+          {copyStatus}
+        </p>
+      ) : null}
+      <pre className={styles.articlePlainText}>{text}</pre>
+    </div>
+  );
+}
+
 export function ArticleReader({
   revision,
   writerName,
@@ -96,6 +135,9 @@ export function ArticleReader({
   measurement: ArticleGroundingMeasurement;
   inspection: Pick<StoryInspection, "sources">;
 }>) {
+  // Annotated is the default: opening a Story is editorial work, and reading it as prose is the
+  // deliberate act rather than the other way round.
+  const [plain, setPlain] = useState(false);
   return (
     <article className={styles.articleReader} aria-labelledby={headingId}>
       <header className={styles.articleHeader}>
@@ -105,28 +147,52 @@ export function ArticleReader({
         <p className={styles.articleByline}>
           Revision {revision.revisionNumber} · {writerName}
         </p>
+        <div className={styles.articleViewToggle} role="group" aria-label="Article view">
+          <button
+            type="button"
+            className={styles.articleViewOption}
+            aria-pressed={!plain}
+            onClick={() => setPlain(false)}
+          >
+            Annotated
+          </button>
+          <button
+            type="button"
+            className={styles.articleViewOption}
+            aria-pressed={plain}
+            onClick={() => setPlain(true)}
+          >
+            Plain text
+          </button>
+        </div>
       </header>
-      <GroundingSummary measurement={measurement} />
-      <div className={styles.articleBody}>
-        {revision.blocks.map((block, index) => {
-          const key = `${index}-${block.kind}`;
-          if (block.kind === "heading")
-            return (
-              <h3 key={key} className={styles.articleSection}>
-                {block.markdown}
-              </h3>
-            );
-          if (block.kind === "claim")
-            return <Claim key={key} block={block} inspection={inspection} index={index} />;
-          // Uncited prose is labelled rather than left to pass as reporting.
-          return (
-            <div key={key} className={styles.articleContext}>
-              <SafeMarkdown markdown={block.markdown} />
-              <p className={styles.contextLabel}>Writer&apos;s own framing · not attributed</p>
-            </div>
-          );
-        })}
-      </div>
+      {plain ? (
+        <PlainArticle revision={revision} />
+      ) : (
+        <>
+          <GroundingSummary measurement={measurement} />
+          <div className={styles.articleBody}>
+            {revision.blocks.map((block, index) => {
+              const key = `${index}-${block.kind}`;
+              if (block.kind === "heading")
+                return (
+                  <h3 key={key} className={styles.articleSection}>
+                    {block.markdown}
+                  </h3>
+                );
+              if (block.kind === "claim")
+                return <Claim key={key} block={block} inspection={inspection} index={index} />;
+              // Uncited prose is labelled rather than left to pass as reporting.
+              return (
+                <div key={key} className={styles.articleContext}>
+                  <SafeMarkdown markdown={block.markdown} />
+                  <p className={styles.contextLabel}>Writer&apos;s own framing · not attributed</p>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </article>
   );
 }
