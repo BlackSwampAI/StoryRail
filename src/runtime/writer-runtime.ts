@@ -29,6 +29,7 @@ import {
   type SiteId,
   type StoryId,
 } from "@/domain/editorial";
+import { createNewsroomIdentityReader } from "./newsroom-identity";
 import { createSiteStore } from "./site-store";
 import {
   loadWriterRuntimeConfiguration,
@@ -91,6 +92,7 @@ export function createWriterRuntime(options: {
     }).list();
     return history.at(-1)?.text ?? null;
   };
+  const readNewsroomIdentity = createNewsroomIdentityReader({ pool, siteId: options.siteId });
   const uuid = options.createUuid ?? randomUUID;
   const store = createSiteStore({
     pool,
@@ -113,6 +115,7 @@ export function createWriterRuntime(options: {
   };
   const workflow = createWriterDraft({
     readNewsroomStandards,
+    readNewsroomIdentity,
     inspections: createPostgresStoryInspectionRepository({ pool, siteId: options.siteId }),
     runs: createPostgresAgentRunRepository({ pool }),
     persistence: createPostgresWriterDraftPersistence({ pool }),
@@ -125,6 +128,7 @@ export function createWriterRuntime(options: {
   });
   const revisionWorkflow = createWriterRevision({
     readNewsroomStandards,
+    readNewsroomIdentity,
     inspections: createPostgresStoryInspectionRepository({ pool, siteId: options.siteId }),
     runs: createPostgresAgentRunRepository({ pool }),
     persistence: createPostgresWriterRevisionPersistence({ pool }),

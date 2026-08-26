@@ -15,6 +15,7 @@ import {
   storyId,
   type AgentProfile,
   type AgentRun,
+  type NewsroomIdentity,
 } from "@/domain/editorial";
 
 import { createResearchStorySources } from "./research-story-sources";
@@ -103,10 +104,13 @@ function workflow(options: {
   readonly state?: "intake" | "assigned";
   readonly attachOk?: boolean;
   readonly archive?: ArchiveRepository;
+  readonly readNewsroomIdentity?: () => Promise<NewsroomIdentity | null>;
+  readonly readNewsroomStandards?: () => Promise<string | null>;
 }) {
   const attach = vi.fn(async () => ({ ok: options.attachOk !== false }) as never);
   const completed: AgentRun[] = [];
   const offered: string[][] = [];
+  const prompts: string[] = [];
   let turn = 0;
   let ids = 0;
   const run = createResearchStorySources({
@@ -148,26 +152,31 @@ function workflow(options: {
       model: {
         descriptor: { provider: "openrouter", model: "researcher" },
         supportsTools: true,
-        generateWithTools: vi.fn(async (request: { tools: readonly { name: string }[] }) => {
-          offered.push(request.tools.map(({ name }) => name));
-          const next = options.turns[turn];
-          turn += 1;
-          return next === undefined
-            ? {
-                ok: false as const,
-                failure: { code: "MODEL_REQUEST_FAILED" as const, retryable: true },
-              }
-            : { ok: true as const, output: next };
-        }),
+        generateWithTools: vi.fn(
+          async (request: { tools: readonly { name: string }[]; systemPrompt: string }) => {
+            offered.push(request.tools.map(({ name }) => name));
+            prompts.push(request.systemPrompt);
+            const next = options.turns[turn];
+            turn += 1;
+            return next === undefined
+              ? {
+                  ok: false as const,
+                  failure: { code: "MODEL_REQUEST_FAILED" as const, retryable: true },
+                }
+              : { ok: true as const, output: next };
+          },
+        ),
       } as unknown as ToolAssistedModel,
     }),
     createAgentRunId: () => agentRunId("run-research"),
     createToolCallId: () => agentToolCallId(`tool-${(ids += 1)}`),
     createSourceId: () => sourceId(`found-${(ids += 1)}`),
     createExtractionId: () => sourceExtractionId(`extraction-${(ids += 1)}`),
+    readNewsroomIdentity: options.readNewsroomIdentity,
+    readNewsroomStandards: options.readNewsroomStandards,
     now: () => "now",
   });
-  return { run, attach, completed, offered };
+  return { run, attach, completed, offered, prompts };
 }
 
 const fetched = {
@@ -176,6 +185,24 @@ const fetched = {
 };
 
 describe("sending the Researcher out to widen a Story's evidence", () => {
+  it("tells the Researcher which newsroom it is finding sources for", async () => {
+    // Which sources matter depends on what this publication is for, so the Researcher is told.
+    const test = workflow({
+      turns: [{ kind: "output", output: { attach: [], reasoning: "Nothing to add." } }],
+      readNewsroomIdentity: async () => ({
+        name: "Black Swamp AI",
+        description: "Guides, Tips and News from the AI World",
+      }),
+      readNewsroomStandards: async () => "Headlines are sentence case.",
+    });
+
+    await settleAgentRun(test.run({ storyId: STORY, requestedBy: OPERATOR }) as never);
+
+    expect(test.prompts[0]).toContain("Black Swamp AI");
+    expect(test.prompts[0]).toContain("Guides, Tips and News from the AI World");
+    expect(test.prompts[0]).toContain("Headlines are sentence case.");
+  });
+
   it("attaches what it retrieved and records which Sources it added", async () => {
     const test = workflow({
       turns: [

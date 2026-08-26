@@ -7,6 +7,7 @@ import {
   type CredentialUnavailableCode,
   type CredentialUnavailableError,
   withNewsroomStandards,
+  type NewsroomIdentity,
   ARTICLE_BLOCK_KINDS,
   createArticle,
   createFirstArticleRevision,
@@ -164,6 +165,8 @@ export function createWriterDraft(dependencies: {
   readonly createTransitionId: () => TransitionId;
   /** The newsroom's standards, in force when the run starts. Absent is normal. */
   readonly readNewsroomStandards?: () => Promise<string | null>;
+  /** Who this newsroom is, read when the run starts. A newsroom that has said nothing is normal. */
+  readonly readNewsroomIdentity?: () => Promise<NewsroomIdentity | null>;
   readonly now: () => string;
 }) {
   return async (command: {
@@ -319,6 +322,7 @@ export function createWriterDraft(dependencies: {
     // completion it produces continue past this point.
     const completion = (async (): Promise<CreateWriterDraftResult> => {
       const standards = (await dependencies.readNewsroomStandards?.()) ?? null;
+      const newsroom = (await dependencies.readNewsroomIdentity?.()) ?? null;
       const modelInput = {
         story: {
           id: story.id,
@@ -340,6 +344,7 @@ export function createWriterDraft(dependencies: {
           systemPrompt: withNewsroomStandards(
             writerSystemPrompt(writerProfile.instructions),
             standards,
+            newsroom,
           ),
           input: modelInput,
           schema: writerDraftOutputSchema,
@@ -361,6 +366,7 @@ export function createWriterDraft(dependencies: {
             systemPrompt: withNewsroomStandards(
               writerSystemPrompt(writerProfile.instructions),
               standards,
+              newsroom,
             ),
             input: modelInput,
             schema: writerDraftOutputSchema,

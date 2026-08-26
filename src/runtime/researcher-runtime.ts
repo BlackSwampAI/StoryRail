@@ -30,6 +30,7 @@ import {
   type StoryId,
 } from "@/domain/editorial";
 
+import { createNewsroomIdentityReader } from "./newsroom-identity";
 import { createSiteStore } from "./site-store";
 import {
   loadResearcherRuntimeConfiguration,
@@ -63,6 +64,7 @@ export function createResearcherRuntime(options: {
     }).list();
     return history.at(-1)?.text ?? null;
   };
+  const readNewsroomIdentity = createNewsroomIdentityReader({ pool, siteId: options.siteId });
   const uuid = options.createUuid ?? randomUUID;
   const store = createSiteStore({
     pool,
@@ -104,6 +106,7 @@ export function createResearcherRuntime(options: {
 
   const workflow = createResearchStorySources({
     readNewsroomStandards,
+    readNewsroomIdentity,
     inspections: createPostgresStoryInspectionRepository({ pool, siteId: options.siteId }),
     profiles: createPostgresAgentProfileRepository({ pool, siteId: options.siteId }),
     runs: createPostgresAgentRunRepository({ pool }),

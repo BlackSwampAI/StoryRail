@@ -6,6 +6,7 @@ import type { StructuredModel } from "@/application/model";
 import type { StoryInspectionRepository } from "@/application/story-inspection";
 import {
   withNewsroomStandards,
+  type NewsroomIdentity,
   agentProfileId,
   createAssignmentProposal,
   recordAgentRun,
@@ -128,6 +129,8 @@ export function createGenerateAssignmentProposal(dependencies: {
   readonly createAgentRunId: () => AgentRunId;
   /** The newsroom's standards, in force when the run starts. Absent is normal. */
   readonly readNewsroomStandards?: () => Promise<string | null>;
+  /** Who this newsroom is, read when the run starts. A newsroom that has said nothing is normal. */
+  readonly readNewsroomIdentity?: () => Promise<NewsroomIdentity | null>;
   readonly now: () => string;
 }) {
   return async (
@@ -274,11 +277,13 @@ export function createGenerateAssignmentProposal(dependencies: {
     // completion it produces continue past this point.
     const completion = (async (): Promise<GenerateAssignmentProposalResult> => {
       const standards = (await dependencies.readNewsroomStandards?.()) ?? null;
+      const newsroom = (await dependencies.readNewsroomIdentity?.()) ?? null;
       const generated = await model
         .generateStructured({
           systemPrompt: withNewsroomStandards(
             assignmentEditorSystemPrompt(editor.instructions),
             standards,
+            newsroom,
           ),
           input: {
             story: {

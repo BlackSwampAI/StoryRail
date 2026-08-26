@@ -225,6 +225,81 @@ function fixture(): StoryInspection {
 }
 
 describe("createWriterRevision", () => {
+  it("tells the Writer which newsroom it is revising for", async () => {
+    // A revision is written for the same readers as the draft, so the same context reaches it.
+    const inspection = fixture();
+    const generateStructured = vi.fn(async () => ({
+      ok: true as const,
+      output: {
+        headline: "Revised headline",
+        dek: null,
+        blocks: [
+          {
+            kind: "claim",
+            markdown: "The supplied date is August 13.",
+            citations: [
+              {
+                sourceId: "source-41",
+                evidenceId: "preparation-41",
+                quote: "The supplied date is August 13.",
+              },
+            ],
+          },
+        ],
+      },
+    }));
+    const workflow = createWriterRevision({
+      inspections: { inspect: vi.fn(async () => ({ ok: true as const, inspection })) },
+      runs: {
+        append: vi.fn(async (run) => ({ ok: true as const, run })),
+        complete: vi.fn(async (run) => ({ ok: true as const, run })),
+        listByStoryId: vi.fn(),
+      },
+      persistence: {
+        persist: vi.fn<WriterRevisionPersistence["persist"]>(async (command) => ({
+          ok: true as const,
+          run: command.run,
+          revision: command.revision,
+          story: command.story,
+          transitionReceipt: command.transitionReceipt,
+        })),
+      },
+      resolveModel: async () => ({
+        ok: true,
+        model: {
+          descriptor: { provider: "openrouter", model: "writer" },
+          limits: { maximumInputCharacters: 60_000 },
+          generateStructured:
+            generateStructured as unknown as StructuredModel["generateStructured"],
+        },
+      }),
+      createAgentRunId: () => agentRunId("writer-run-2-41"),
+      createRevisionId: () => articleRevisionId("revision-2-41"),
+      createTransitionId: () => transitionId("transition-41"),
+      readNewsroomIdentity: async () => ({
+        name: "Black Swamp AI",
+        description: "Guides, Tips and News from the AI World",
+      }),
+      readNewsroomStandards: async () => "Headlines are sentence case.",
+      now: () => "now",
+    });
+
+    await settleAgentRun(
+      workflow({
+        storyId: inspection.story.id,
+        requestedBy: { type: "operator", operatorId: operatorId("operator-41") },
+      }),
+    );
+
+    const prompt = (
+      generateStructured.mock.calls[0] as unknown as [StructuredModelRequest<unknown>]
+    )[0].systemPrompt;
+    expect(prompt).toContain("Black Swamp AI");
+    expect(prompt).toContain("Guides, Tips and News from the AI World");
+    expect(prompt).toContain("never relaxes the rules above about evidence");
+    expect(prompt).toContain("Headlines are sentence case.");
+  });
+
   it("uses the operator decision and exact historical evidence to persist Revision 2", async () => {
     const inspection = fixture();
     let generatedInput: unknown = null;

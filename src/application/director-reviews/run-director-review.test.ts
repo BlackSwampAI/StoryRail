@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { settleAgentRun } from "@/test/settle-agent-run";
-import type { StructuredModel } from "@/application/model";
+import type { StructuredModel, StructuredModelRequest } from "@/application/model";
 import {
   agentProfileId,
   agentRunId,
@@ -175,6 +175,72 @@ function fixture() {
 }
 
 describe("run Director review", () => {
+  it("tells the Director which newsroom it is judging for", async () => {
+    // Whether a piece belongs here is a judgement about the publication, so the Director is told
+    // what this one is — under the same guard that it may not soften evidence or citation rules.
+    const facts = fixture();
+    const generateStructured = vi.fn(async () => ({
+      ok: true as const,
+      output: {
+        recommendation: "approve",
+        summary: "Ready.",
+        checks: {
+          assignment: { status: "pass", note: "Aligned.", quoted: "Body" },
+          support: { status: "pass", note: "Each claim follows.", quoted: "Body" },
+          accuracy: { status: "pass", note: "Supported.", quoted: "Body" },
+          headline: { status: "pass", note: "Supported.", quoted: "Body" },
+          structure: { status: "pass", note: "Coherent.", quoted: "Body" },
+          style: { status: "pass", note: "Clear.", quoted: "Body" },
+        },
+        revisionInstructions: null,
+      },
+    }));
+    const workflow = createRunDirectorReview({
+      inspections: {
+        inspect: vi.fn(async () => ({ ok: true as const, inspection: facts.inspection })),
+      },
+      profiles: {
+        findById: vi.fn(async () => facts.director),
+        findBuiltIn: vi.fn(async () => facts.director),
+        list: vi.fn(),
+        append: vi.fn(),
+      },
+      runs: {
+        append: vi.fn(async (run) => ({ ok: true as const, run })),
+        complete: vi.fn(async (run) => ({ ok: true as const, run })),
+        listByStoryId: vi.fn(),
+      },
+      resolveModel: async () => ({
+        ok: true,
+        model: {
+          descriptor: { provider: "openrouter", model: "director-model" },
+          limits: { maximumInputCharacters: 60_000 },
+          generateStructured:
+            generateStructured as unknown as StructuredModel["generateStructured"],
+        },
+      }),
+      createAgentRunId: () => agentRunId("director-run-38"),
+      readNewsroomIdentity: async () => ({
+        name: "Black Swamp AI",
+        description: "Guides, Tips and News from the AI World",
+      }),
+      readNewsroomStandards: async () => "Headlines are sentence case.",
+      now: () => "now",
+    });
+
+    await settleAgentRun(
+      workflow({ storyId: facts.inspection.story.id, requestedBy: facts.actor }),
+    );
+
+    const prompt = (
+      generateStructured.mock.calls[0] as unknown as [StructuredModelRequest<unknown>]
+    )[0].systemPrompt;
+    expect(prompt).toContain("Black Swamp AI");
+    expect(prompt).toContain("Guides, Tips and News from the AI World");
+    expect(prompt).toContain("never relaxes the rules above about evidence");
+    expect(prompt).toContain("Headlines are sentence case.");
+  });
+
   it("resolves the Writer run's exact historical evidence and stores references without bodies", async () => {
     const facts = fixture();
     const generateStructured = vi.fn(async () => ({
