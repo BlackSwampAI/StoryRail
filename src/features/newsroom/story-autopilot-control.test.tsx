@@ -75,7 +75,9 @@ describe("the research option on autopilot", () => {
     expect(
       within(control).getByRole("checkbox", { name: /Research first, when autopilot runs/ }),
     ).toBeTruthy();
-    expect(within(control).getByRole("button", { name: "Run autopilot" })).toBeTruthy();
+    expect(
+      within(control).getByRole("button", { name: "Run this Story to publication" }),
+    ).toBeTruthy();
   });
 
   it("says where to research a Story now, so the option is not mistaken for that action", () => {

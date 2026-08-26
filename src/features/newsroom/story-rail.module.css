@@ -1,0 +1,168 @@
+/*
+ * The rail has a stylesheet of its own rather than more rules in newsroom-shell.module.css.
+ * That file is one flat namespace of ~4,300 lines in which several class names are already
+ * defined more than once, and a CSS Module scopes a class to its file rather than to the
+ * component using it — so a name added there can silently take over a rule somewhere else. The
+ * rail is a self-contained feature, which makes it the right place to stop growing that file.
+ */
+
+.rail {
+  border: 1px solid var(--tone-45);
+  border-radius: 1.1rem;
+  background: var(--tone-14);
+  padding: clamp(1rem, 2.5vw, 1.5rem);
+}
+
+/*
+ * The heading names the object for a screen reader and for anyone meeting the product for the
+ * first time; the rail itself is legible without it, so it is not shouted.
+ */
+.railHeading {
+  margin: 0 0 0.9rem;
+  color: var(--tone-89);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.railStops {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/*
+ * Every stop is on screen at once, which is the point: the shape of the whole journey is what
+ * teaches a first-time operator what StoryRail does. Below the width where seven columns stay
+ * readable the rail turns vertical rather than dropping stops.
+ */
+@container (width < 46rem) {
+  .railStops {
+    grid-auto-flow: row;
+    grid-auto-columns: auto;
+  }
+}
+
+.railStop {
+  position: relative;
+  padding: 0 0.6rem 0 0;
+  color: var(--tone-89);
+}
+
+/* The track between two stops, which is what makes the stops read as one journey. */
+.railStop::before {
+  position: absolute;
+  top: 0.34rem;
+  right: 0;
+  left: 0.7rem;
+  border-top: 1px solid var(--tone-48);
+  content: "";
+}
+
+.railStop:last-child::before {
+  content: none;
+}
+
+.railMark {
+  display: block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border: 1px solid var(--tone-48);
+  border-radius: 50%;
+  background: var(--tone-14);
+}
+
+.railLabel {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.railSummary {
+  display: block;
+  margin-top: 0.25rem;
+  padding-right: 0.5rem;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+/* A stop already travelled is settled, so it is filled in and stated rather than emphasised. */
+.railStop[data-position="behind"] .railMark {
+  border-color: var(--tone-96);
+  background: var(--tone-96);
+}
+
+/*
+ * Where the Story is now has to be unmistakable from across the room, so the current stop is the
+ * only one carrying full contrast and a ring.
+ */
+.railStop[data-position="current"] {
+  color: var(--tone-152);
+}
+
+.railStop[data-position="current"] .railMark {
+  border-color: var(--tone-152);
+  background: var(--tone-152);
+  box-shadow: 0 0 0 3px rgb(var(--veil-11) / 22%);
+}
+
+.railStop[data-position="current"] .railLabel {
+  font-size: 0.95rem;
+}
+
+/* Ahead is named and dimmed: the operator learns the shape of the work before starting it. */
+.railStop[data-position="ahead"] {
+  color: var(--tone-79);
+}
+
+.railVisuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/*
+ * A rejected Story is not standing at a station. It is said in words underneath the track, so
+ * "left the rail" cannot be misread as a point between Approved and Published.
+ */
+.railLeft {
+  margin: 1rem 0 0;
+  border-left: 0.2rem solid var(--signal-12);
+  background: var(--signal-04);
+  padding: 0.8rem 1rem;
+  color: var(--signal-15);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+/*
+ * What is happening inside the current stop. It sits on the rail rather than in a panel because
+ * the watcher cannot go looking: this is a thing people leave running and glance at.
+ */
+.railActivity {
+  margin: 1rem 0 0;
+  border-top: 1px solid var(--tone-45);
+  padding-top: 0.8rem;
+  color: var(--tone-149);
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+
+.railFailure {
+  margin: 0.75rem 0 0;
+  border-left: 0.2rem solid var(--signal-12);
+  background: var(--signal-04);
+  padding: 0.8rem 1rem;
+  color: var(--signal-15);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}

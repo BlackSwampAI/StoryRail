@@ -469,7 +469,7 @@ function TriageItem({
       title: "Enter a non-empty Story title.",
       story: "Choose an existing Story.",
       relevance: "Explain why this Source is relevant.",
-      reason: "Enter a non-empty editorial decision reason.",
+      reason: "Say why you are making this call.",
     };
     const next: Record<string, string> = {};
     for (const field of fields)
@@ -801,18 +801,29 @@ function TriageItem({
             <input value={title} onChange={(event) => setTitle(event.currentTarget.value)} />
           </label>
           {field("title")}
-          <label>
-            Source relevance
-            <textarea
-              value={relevance}
-              onChange={(event) => setRelevance(event.currentTarget.value)}
-            />
-          </label>
+          <label htmlFor="triage-relevance">What this Source gives the Story</label>
+          <p id="triage-relevance-purpose" className={styles.fieldPurpose}>
+            Carried on the Story and read by the Assignment Editor and the Writer when they decide
+            what this Source can be used for.
+          </p>
+          <textarea
+            id="triage-relevance"
+            aria-describedby="triage-relevance-purpose"
+            value={relevance}
+            onChange={(event) => setRelevance(event.currentTarget.value)}
+          />
           {field("relevance")}
-          <label>
-            Editorial decision reason
-            <textarea value={reason} onChange={(event) => setReason(event.currentTarget.value)} />
-          </label>
+          <label htmlFor="triage-reason">Why you are making this call</label>
+          <p id="triage-reason-purpose" className={styles.fieldPurpose}>
+            Kept for good under your name. It is the answer to anyone who later asks why this Source
+            was taken up or passed over.
+          </p>
+          <textarea
+            id="triage-reason"
+            aria-describedby="triage-reason-purpose"
+            value={reason}
+            onChange={(event) => setReason(event.currentTarget.value)}
+          />
           {field("reason")}
           <button
             type="submit"
@@ -839,18 +850,29 @@ function TriageItem({
             </select>
           </label>
           {field("story")}
-          <label>
-            Source relevance
-            <textarea
-              value={relevance}
-              onChange={(event) => setRelevance(event.currentTarget.value)}
-            />
-          </label>
+          <label htmlFor="triage-relevance">What this Source gives the Story</label>
+          <p id="triage-relevance-purpose" className={styles.fieldPurpose}>
+            Carried on the Story and read by the Assignment Editor and the Writer when they decide
+            what this Source can be used for.
+          </p>
+          <textarea
+            id="triage-relevance"
+            aria-describedby="triage-relevance-purpose"
+            value={relevance}
+            onChange={(event) => setRelevance(event.currentTarget.value)}
+          />
           {field("relevance")}
-          <label>
-            Editorial decision reason
-            <textarea value={reason} onChange={(event) => setReason(event.currentTarget.value)} />
-          </label>
+          <label htmlFor="triage-reason">Why you are making this call</label>
+          <p id="triage-reason-purpose" className={styles.fieldPurpose}>
+            Kept for good under your name. It is the answer to anyone who later asks why this Source
+            was taken up or passed over.
+          </p>
+          <textarea
+            id="triage-reason"
+            aria-describedby="triage-reason-purpose"
+            value={reason}
+            onChange={(event) => setReason(event.currentTarget.value)}
+          />
           {field("reason")}
           <button
             type="submit"
@@ -862,10 +884,17 @@ function TriageItem({
       ) : null}
       {action === "skip" ? (
         <form className={styles.storyCreationForm} onSubmit={skip} aria-busy={pending}>
-          <label>
-            Editorial decision reason
-            <textarea value={reason} onChange={(event) => setReason(event.currentTarget.value)} />
-          </label>
+          <label htmlFor="triage-reason">Why you are making this call</label>
+          <p id="triage-reason-purpose" className={styles.fieldPurpose}>
+            Kept for good under your name. It is the answer to anyone who later asks why this Source
+            was taken up or passed over.
+          </p>
+          <textarea
+            id="triage-reason"
+            aria-describedby="triage-reason-purpose"
+            value={reason}
+            onChange={(event) => setReason(event.currentTarget.value)}
+          />
           {field("reason")}
           <button type="submit" disabled={pending}>
             Record skip decision

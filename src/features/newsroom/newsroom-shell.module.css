@@ -221,14 +221,37 @@
   background-size: 100% 4rem;
 }
 
+/*
+ * The account and settings control is pinned here because it is the only way out of a Story and
+ * it used to scroll away: reaching Settings from the foot of a long Article meant scrolling all
+ * the way back up. It is the band the page already had rather than a second one — pinning
+ * something that was always at the top costs no vertical space that was not already spent — and
+ * it was made shallower on becoming permanent, since fixed furniture should ask for less than
+ * furniture that scrolls away.
+ */
 .workspaceNavigation {
+  position: sticky;
+  z-index: 2;
+  top: 0;
   display: flex;
-  min-height: 5.5rem;
+  min-height: 3.5rem;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
   border-bottom: 1px solid var(--tone-35);
-  padding: 1.25rem clamp(1.25rem, 4vw, 3.5rem);
+  background: var(--tone-05);
+  padding: 0.6rem clamp(1.25rem, 4vw, 3.5rem);
+}
+
+/*
+ * Where the open Story stands, in the width the pinned band already has. The rail carries the
+ * whole journey and scrolls with the workspace; this is the one word that survives the scroll.
+ */
+.workspaceBreadcrumbStop {
+  margin-left: 0.6rem;
+  border-left: 1px solid var(--tone-45);
+  padding-left: 0.6rem;
+  color: var(--tone-152);
 }
 
 .workspaceSwitch {
@@ -272,8 +295,6 @@
 .articleReviewWorkspace {
   display: grid;
   gap: 1.5rem;
-  /* Room for the pinned review action, so the end of the Article can still be scrolled clear. */
-  padding-bottom: 4rem;
 }
 
 .reviewTask,
@@ -286,21 +307,13 @@
 }
 
 /*
- * The Article is the reference material and the review action is the job. Reading before acting
- * is right, but the action was landing about three screens down and had to be scrolled back to
- * for every step of the review, so it stays pinned to the foot of the Article it belongs to.
+ * Nothing covers the Article. Pinning the review action to the foot of the viewport kept it in
+ * reach but hid a strip of the Article at every scroll position, in exactly the state where an
+ * operator is most likely to be reading closely. The Article is what they came to read, so the
+ * task scrolls with it; the rail above says what the Story is waiting for.
  */
 .reviewTask {
-  position: sticky;
-  bottom: 0.75rem;
-  z-index: 1;
-  box-shadow: 0 0.75rem 2rem rgb(var(--veil-01) / 45%);
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .reviewTask {
-    transition: box-shadow 140ms ease;
-  }
+  position: static;
 }
 
 .reviewTask h2,
@@ -311,12 +324,20 @@
 }
 
 /*
- * A published Story has no pending decision to keep in reach, and pinned to the foot of the
- * viewport this card covered about 200px of the Article at every scroll position — the operator
- * read the finished piece through a letterbox. It scrolls with the Article it belongs to.
+ * Every free-text reason on these screens is the audit trail, and read as an unexplained form
+ * field it looks like busywork. The line under the label says what it is for and who reads it
+ * later, in the same small voice everywhere it appears.
  */
-.publishedTask {
-  position: static;
+.fieldPurpose {
+  display: block;
+  max-width: 44rem;
+  margin: 0.2rem 0 0.45rem;
+  color: var(--tone-89);
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.5;
+  text-transform: none;
+  letter-spacing: normal;
 }
 
 /*

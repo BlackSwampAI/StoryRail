@@ -28,6 +28,7 @@ import { SourceEvidenceWorkspace } from "./source-evidence-workspace";
 import type { RequestSourceEvidenceUrl } from "./source-evidence-url-client";
 import { SitesWorkspace } from "./sites-workspace";
 import { SiteSwitcher } from "./site-switcher";
+import { railPositionLabel } from "./story-rail-stops";
 import { SourceInboxWorkspace } from "./source-inbox-workspace";
 import type { SourceInboxClient } from "./source-inbox-client";
 import { StoryWorkspace } from "./story-workspace";
@@ -412,6 +413,21 @@ export function NewsroomShell({
                 {workspaceMode === "profile" || workspaceMode === "settings"
                   ? "Account"
                   : "Newsroom"}
+                {/*
+                 * The band is pinned, so the one thing worth spending its width on is where the
+                 * open Story stands. Scrolled down a long Article the rail itself is off screen,
+                 * and this is a watcher's answer to "where is it?" at any scroll position.
+                 */}
+                {workspaceMode === "story" && storySelection.kind === "loaded" ? (
+                  <span className={styles.workspaceBreadcrumbStop}>
+                    {railPositionLabel({
+                      state: storySelection.inspection.story.state,
+                      delivered: storySelection.inspection.deliveries.some(
+                        (delivery) => delivery.outcome === "succeeded",
+                      ),
+                    })}
+                  </span>
+                ) : null}
               </p>
               <AccountMenu
                 activeItem={
