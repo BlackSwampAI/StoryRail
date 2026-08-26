@@ -3,6 +3,7 @@ import {
   type RecordSiteSettingsResult,
   type SiteDestinationSettings,
   type SiteModelIds,
+  type SiteSearchSettings,
   type SiteSettings,
 } from "./site-settings-types";
 
@@ -58,15 +59,42 @@ function readDestination(
 }
 
 /**
+ * Search configuration is optional, and a half-filled one is refused for the same reason a
+ * half-filled destination is: a missing username discovered when the Researcher is already in
+ * flight costs an operator a run to find out about, and the instance answers 401 rather than
+ * saying which half was wrong.
+ */
+function readSearch(
+  value: unknown,
+): { readonly ok: true; readonly search: SiteSearchSettings } | { readonly ok: false } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return { ok: false };
+  const candidate = value as Record<string, unknown>;
+  if (Object.keys(candidate).length !== 2) return { ok: false };
+  if (!trimmedString(candidate.baseUrl) || !trimmedString(candidate.username)) return { ok: false };
+
+  const baseUrl = candidate.baseUrl.trim().replace(/\/+$/, "");
+  if (!/^https?:\/\/[^\s]+$/.test(baseUrl)) return { ok: false };
+  return { ok: true, search: { baseUrl, username: candidate.username.trim() } };
+}
+
+/**
  * Settings are validated before they are stored rather than when a run reaches for them, because
  * a blank model id discovered mid-run costs an operator an Agent Run to find out about.
  */
 export function recordSiteSettings(candidate: unknown): RecordSiteSettingsResult {
   if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate))
     return invalid("Settings name a model for every agent role.");
-  const supplied = candidate as { readonly models?: unknown; readonly destination?: unknown };
-  if (Object.keys(supplied).some((key) => key !== "models" && key !== "destination"))
-    return invalid("Settings hold the agent models and, at most, a destination.");
+  const supplied = candidate as {
+    readonly models?: unknown;
+    readonly destination?: unknown;
+    readonly search?: unknown;
+  };
+  if (
+    Object.keys(supplied).some(
+      (key) => key !== "models" && key !== "destination" && key !== "search",
+    )
+  )
+    return invalid("Settings hold the agent models and, at most, a destination and a search.");
   const models = supplied.models;
   if (typeof models !== "object" || models === null || Array.isArray(models))
     return invalid("Settings name a model for every agent role.");
@@ -100,11 +128,26 @@ export function recordSiteSettings(candidate: unknown): RecordSiteSettingsResult
       },
     };
 
+  // Absent and explicitly null both mean this newsroom cannot search, which is how every
+  // newsroom that has run so far has run.
+  const suppliedSearch = supplied.search;
+  const search =
+    suppliedSearch === undefined || suppliedSearch === null ? null : readSearch(suppliedSearch);
+  if (search !== null && !search.ok)
+    return {
+      ok: false,
+      error: {
+        code: "SITE_SETTINGS_SEARCH_INVALID",
+        message: "Search names an absolute base URL and the username its password belongs to.",
+      },
+    };
+
   return {
     ok: true,
     settings: {
       models: trimmed as unknown as SiteModelIds,
       destination: destination === null ? null : destination.destination,
+      search: search === null ? null : search.search,
     } satisfies SiteSettings,
   };
 }

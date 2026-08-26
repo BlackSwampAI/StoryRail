@@ -51,7 +51,7 @@ describe("per-Site settings", () => {
   it("accepts a model for every role and trims what it stores", () => {
     expect(recordSiteSettings({ models: { ...models, writer: "  provider/three  " } })).toEqual({
       ok: true,
-      settings: { models, destination: null },
+      settings: { models, destination: null, search: null },
     });
   });
 
@@ -100,6 +100,7 @@ describe("per-Site settings", () => {
           package: "studiocms/markdown",
           draft: true,
         },
+        search: null,
       },
     });
   });
@@ -125,6 +126,7 @@ describe("per-Site settings", () => {
           username: "storyrail",
           draft: false,
         },
+        search: null,
       },
     });
   });
@@ -202,6 +204,56 @@ describe("per-Site settings", () => {
     expect(recordSiteSettings({ models, destination: null })).toMatchObject({
       ok: true,
       settings: { destination: null },
+    });
+  });
+
+  it("accepts a search instance and normalises the address it will query", () => {
+    expect(
+      recordSiteSettings({
+        models,
+        search: { baseUrl: "  https://search.newsroom.test/  ", username: "  storyrail  " },
+      }),
+    ).toEqual({
+      ok: true,
+      settings: {
+        models,
+        destination: null,
+        search: { baseUrl: "https://search.newsroom.test", username: "storyrail" },
+      },
+    });
+  });
+
+  it("refuses a search instance named without the user its password belongs to", () => {
+    expect(
+      recordSiteSettings({ models, search: { baseUrl: "https://search.newsroom.test" } }),
+    ).toMatchObject({ ok: false, error: { code: "SITE_SETTINGS_SEARCH_INVALID" } });
+  });
+
+  it("refuses a search instance reached at an address that is not absolute", () => {
+    expect(
+      recordSiteSettings({ models, search: { baseUrl: "/search", username: "storyrail" } }),
+    ).toMatchObject({ ok: false, error: { code: "SITE_SETTINGS_SEARCH_INVALID" } });
+  });
+
+  it("refuses a search instance carrying the password it must never store", () => {
+    // The secret belongs in the encrypted store. A settings shape that accepted one would put a
+    // password somewhere every settings read returns in plaintext.
+    expect(
+      recordSiteSettings({
+        models,
+        search: {
+          baseUrl: "https://search.newsroom.test",
+          username: "storyrail",
+          password: "hunter2",
+        },
+      }),
+    ).toMatchObject({ ok: false, error: { code: "SITE_SETTINGS_SEARCH_INVALID" } });
+  });
+
+  it("treats a newsroom that cannot search as configured rather than broken", () => {
+    expect(recordSiteSettings({ models })).toMatchObject({
+      ok: true,
+      settings: { search: null },
     });
   });
 

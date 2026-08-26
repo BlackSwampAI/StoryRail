@@ -12,6 +12,8 @@ import { createOpenRouterStructuredModel, withOpenRouterTools } from "@/adapters
 import { createFirecrawlSourceExtractor } from "@/adapters/source-extraction";
 import { createPostgresResearchPersistence } from "@/adapters/source-research-persistence";
 import { createPostgresStoryInspectionRepository } from "@/adapters/story-inspection";
+import { createPostgresSiteSettingsRepository } from "@/adapters/site-settings-persistence";
+import { createSiteWebSearchDirectory } from "@/adapters/web-search";
 import {
   createResearchStorySources,
   type ResearcherModelResolution,
@@ -116,6 +118,10 @@ export function createResearcherRuntime(options: {
       resolveApiKey: () => store.resolveApiKey(FIRECRAWL_API_KEY_SLOT),
     }),
     archive: createPostgresArchiveRepository({ pool, siteId: options.siteId }),
+    resolveWebSearch: createSiteWebSearchDirectory({
+      settings: createPostgresSiteSettingsRepository({ pool, siteId: options.siteId }),
+      resolveApiKey: (slot) => store.resolveApiKey(slot),
+    }),
     resolveModel,
     createAgentRunId: () => agentRunId(uuid()),
     createToolCallId: () => agentToolCallId(uuid()),

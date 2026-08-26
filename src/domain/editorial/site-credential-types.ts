@@ -20,6 +20,11 @@ export const STUDIOCMS_API_TOKEN_SLOT = "studiocms_api_token" as CredentialSlot;
 export const WORDPRESS_APPLICATION_PASSWORD_SLOT =
   "wordpress_application_password" as CredentialSlot;
 
+// SearXNG authenticates nothing itself, so this is whatever sits in front of an instance — a
+// reverse proxy's Basic password in the known case. It is a credential rather than a setting
+// because it is the half of the header that must never be read back out.
+export const SEARXNG_PASSWORD_SLOT = "searxng_password" as CredentialSlot;
+
 export const MAXIMUM_CREDENTIAL_SLOT_LENGTH = 64;
 export const MAXIMUM_CREDENTIAL_SECRET_LENGTH = 4_096;
 export const CREDENTIAL_HINT_LENGTH = 4;
