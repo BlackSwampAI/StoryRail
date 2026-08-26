@@ -172,17 +172,9 @@ export function railFailure(runs: readonly AgentRun[]): string | null {
 }
 
 /**
- * Where the Story stands, in one word, for somewhere too small to draw the whole rail.
- *
- * The rail itself scrolls with the workspace, so an operator reading down a long Article would
- * otherwise lose sight of the Story's position exactly when they are least likely to be looking
- * for it. This is what the pinned band carries instead.
+ * The height the pinned band occupies, shared with the observer that decides when the compact
+ * rail is needed. The band sits over the top of the scrolling workspace, so the full rail counts
+ * as gone once it has passed behind the band rather than once it has left the viewport — measured
+ * from the same number the stylesheet uses so the two cannot drift apart.
  */
-export function railPositionLabel(input: {
-  readonly state: StoryState;
-  readonly delivered: boolean;
-}): string {
-  const reading = resolveStoryRail(input);
-  if (reading.offRail) return "Off the rail";
-  return reading.stops.find((stop) => stop.position === "current")?.label ?? "Intake";
-}
+export const PINNED_BAND_HEIGHT_PX = 56;

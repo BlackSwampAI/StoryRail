@@ -228,6 +228,11 @@
  * something that was always at the top costs no vertical space that was not already spent — and
  * it was made shallower on becoming permanent, since fixed furniture should ask for less than
  * furniture that scrolls away.
+ *
+ * 3.5rem is only the floor if nothing inside is taller. The account control measures about 47px
+ * (a 2rem avatar in a 0.4rem-padded pill), so the block padding here is cut to 0.2rem to leave
+ * it room inside the 56px rather than pushing the band past it. The compact rail added beside
+ * the breadcrumb is around 17px and never contends for that height.
  */
 .workspaceNavigation {
   position: sticky;
@@ -240,18 +245,19 @@
   gap: 1rem;
   border-bottom: 1px solid var(--tone-35);
   background: var(--tone-05);
-  padding: 0.6rem clamp(1.25rem, 4vw, 3.5rem);
+  padding: 0.2rem clamp(1.25rem, 4vw, 3.5rem);
 }
 
 /*
- * Where the open Story stands, in the width the pinned band already has. The rail carries the
- * whole journey and scrolls with the workspace; this is the one word that survives the scroll.
+ * The breadcrumb and the compact rail read as one line, so they are grouped rather than spaced
+ * apart: the rail appearing must not shift the breadcrumb, which would make a scroll look like a
+ * layout change.
  */
-.workspaceBreadcrumbStop {
-  margin-left: 0.6rem;
-  border-left: 1px solid var(--tone-45);
-  padding-left: 0.6rem;
-  color: var(--tone-152);
+.workspaceNavigationLead {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.85rem;
 }
 
 .workspaceSwitch {

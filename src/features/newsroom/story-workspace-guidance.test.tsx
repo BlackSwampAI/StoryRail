@@ -188,3 +188,32 @@ describe("what covers the Article", () => {
     }
   });
 });
+
+/**
+ * The standing complaint about this product is that its headers eat about half the fold, so the
+ * one band that is now permanent is the one place a few pixels must not creep back. Read from
+ * the stylesheet because that is where it would creep.
+ */
+describe("the band pinned above the workspace", () => {
+  it("asks for no more height than the 3.5rem it was cut to", () => {
+    const stylesheet = readFileSync(
+      join(process.cwd(), "src/features/newsroom/newsroom-shell.module.css"),
+      "utf8",
+    );
+
+    const band = /\.workspaceNavigation \{([^}]*)\}/.exec(stylesheet)?.[1] ?? "";
+    expect(band).toMatch(/min-height:\s*3\.5rem/);
+    expect(band).not.toMatch(/(?<!-)height:\s*(?!auto)/);
+  });
+
+  it("adds nothing to the band that contends for its height", () => {
+    const railStyles = readFileSync(
+      join(process.cwd(), "src/features/newsroom/story-rail.module.css"),
+      "utf8",
+    );
+
+    const compact = /\.compactRail \{([^}]*)\}/.exec(railStyles)?.[1] ?? "";
+    expect(compact).not.toMatch(/(min-)?height:/);
+    expect(compact).not.toMatch(/padding/);
+  });
+});

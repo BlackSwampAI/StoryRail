@@ -1,6 +1,7 @@
 import type { StoryState } from "@/domain/editorial";
 
 import { resolveStoryRail } from "./story-rail-stops";
+import { FULL_RAIL_ELEMENT_ID } from "./story-rail-visibility";
 import styles from "./story-rail.module.css";
 
 /**
@@ -29,7 +30,7 @@ export function StoryRail({
 }>) {
   const rail = resolveStoryRail({ state, delivered, leftFrom });
   return (
-    <section className={styles.rail} aria-labelledby="story-rail-heading">
+    <section id={FULL_RAIL_ELEMENT_ID} className={styles.rail} aria-labelledby="story-rail-heading">
       <h2 id="story-rail-heading" className={styles.railHeading}>
         Story rail
       </h2>
@@ -67,6 +68,43 @@ export function StoryRail({
           {failure}
         </p>
       ) : null}
+    </section>
+  );
+}
+
+/**
+ * Where the Story is, and nothing else, for the pinned band.
+ *
+ * This is not a smaller copy of the rail above. That one answers "what is this process?", which
+ * is asked once and needs the line under every stop to answer. This answers "where is it now?",
+ * which a watcher asks constantly and which the full rail stops answering the moment it scrolls
+ * away. Marks carry the shape, the words carry the position, and nothing here teaches.
+ */
+export function CompactStoryRail({
+  state,
+  delivered,
+  leftFrom,
+}: Readonly<{
+  state: StoryState;
+  delivered: boolean;
+  leftFrom?: StoryState;
+}>) {
+  const rail = resolveStoryRail({ state, delivered, leftFrom });
+  const current = rail.stops.find((stop) => stop.position === "current");
+  return (
+    <section className={styles.compactRail} aria-label="Story position">
+      <ol className={styles.compactStops} aria-hidden="true">
+        {rail.stops.map((stop) => (
+          <li key={stop.id} className={styles.compactStop} data-position={stop.position} />
+        ))}
+      </ol>
+      <p className={styles.compactLabel} data-off-rail={rail.offRail || undefined}>
+        {rail.offRail
+          ? rail.leftFrom === null
+            ? "Off the rail"
+            : `Off the rail at ${rail.leftFrom.label}`
+          : (current?.label ?? "Intake")}
+      </p>
     </section>
   );
 }

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentRun } from "@/domain/editorial";
 
 import { railActivity, railFailure, resolveStoryRail } from "./story-rail-stops";
-import { StoryRail } from "./story-rail";
+import { CompactStoryRail, StoryRail } from "./story-rail";
 
 const RAIL_IN_ORDER = [
   "Intake",
@@ -200,5 +200,45 @@ describe("what the rail says is happening", () => {
         run({ id: "run-new", role: "writer", operation: "article_draft", outcome: "succeeded" }),
       ]),
     ).toBeNull();
+  });
+});
+
+describe("the compact rail in the pinned band", () => {
+  it("names where the Story is without teaching what the process is", () => {
+    render(<CompactStoryRail state="in_review" delivered={false} />);
+
+    const compact = screen.getByRole("region", { name: "Story position" });
+    expect(compact).toHaveTextContent("Review");
+    expect(compact).not.toHaveTextContent("The Director reads the draft");
+  });
+
+  it("keeps the shape of the whole journey as marks, so position is read against it", () => {
+    const { container } = render(<CompactStoryRail state="assigned" delivered={false} />);
+
+    expect(container.querySelectorAll("li")).toHaveLength(RAIL_IN_ORDER.length);
+    expect(container.querySelectorAll('li[data-position="current"]')).toHaveLength(1);
+    expect(container.querySelector('li[data-position="behind"]')).not.toBeNull();
+  });
+
+  it("keeps delivery a stop of its own, as the full rail does", () => {
+    const { rerender, container } = render(
+      <CompactStoryRail state="published" delivered={false} />,
+    );
+    expect(screen.getByRole("region", { name: "Story position" })).toHaveTextContent("Published");
+
+    rerender(<CompactStoryRail state="published" delivered />);
+    expect(screen.getByRole("region", { name: "Story position" })).toHaveTextContent("Delivered");
+    expect(container.querySelectorAll('li[data-position="behind"]')).toHaveLength(6);
+  });
+
+  it("says a rejected Story is off the rail rather than lighting a stop on it", () => {
+    const { container } = render(
+      <CompactStoryRail state="rejected" delivered={false} leftFrom="approved" />,
+    );
+
+    expect(screen.getByRole("region", { name: "Story position" })).toHaveTextContent(
+      "Off the rail at Approved",
+    );
+    expect(container.querySelectorAll('li[data-position="current"]')).toHaveLength(0);
   });
 });

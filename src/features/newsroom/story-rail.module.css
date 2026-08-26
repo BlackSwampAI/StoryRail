@@ -166,3 +166,62 @@
   font-size: 0.82rem;
   line-height: 1.55;
 }
+
+/*
+ * The compact rail lives in the pinned band, which is 3.5rem and must stay that way — the
+ * standing complaint about this product is that its headers eat half the fold. Everything here
+ * is therefore sized to fit inside height the band already had: marks the size of a full stop
+ * and one word beside them, well under the height of the account control it sits next to.
+ */
+.compactRail {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.compactStops {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.compactStop {
+  width: 0.4rem;
+  height: 0.4rem;
+  border: 1px solid var(--tone-48);
+  border-radius: 50%;
+}
+
+.compactStop[data-position="behind"] {
+  border-color: var(--tone-96);
+  background: var(--tone-96);
+}
+
+/* The whole point of the compact rail is which one of these is lit, so it is the loudest mark. */
+.compactStop[data-position="current"] {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-color: var(--tone-152);
+  background: var(--tone-152);
+  box-shadow: 0 0 0 2px rgb(var(--veil-11) / 30%);
+}
+
+.compactLabel {
+  margin: 0;
+  overflow: hidden;
+  color: var(--tone-152);
+  font-size: 0.74rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A Story that left the rail has no lit mark, so the words have to carry it on their own. */
+.compactLabel[data-off-rail="true"] {
+  color: var(--signal-15);
+}
