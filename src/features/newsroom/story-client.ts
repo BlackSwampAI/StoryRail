@@ -1,4 +1,6 @@
 import {
+  AGENT_ROLES as EDITORIAL_AGENT_ROLES,
+  STORY_STATES as EDITORIAL_STORY_STATES,
   ARTICLE_BLOCK_KINDS,
   DIRECTOR_CHECK_NAMES,
   SOURCE_EXTRACTION_FAILURE_CODES,
@@ -150,17 +152,11 @@ export interface StoryClient {
   >;
 }
 
-const STORY_STATES = new Set([
-  "intake",
-  "assigned",
-  "in_progress",
-  "in_review",
-  "changes_requested",
-  "approved",
-  "rejected",
-  "published",
-]);
-const AGENT_ROLES = new Set(["assignment_editor", "writer", "fact_checker", "editor_in_chief"]);
+// Which states a Story may hold and which roles an agent may act in are the domain's rules,
+// imported rather than written out again. Restated here as literals, the role list drifted when the
+// Researcher was added, and every Story with a correctly recorded Researcher run became unreadable.
+const STORY_STATES = new Set<string>(EDITORIAL_STORY_STATES);
+const AGENT_ROLES = new Set<string>(EDITORIAL_AGENT_ROLES);
 const EXTRACTION_FAILURE_CODES = new Set<string>(SOURCE_EXTRACTION_FAILURE_CODES);
 const PREPARATION_FAILURE_CODE_SET = new Set<string>(PREPARATION_FAILURE_CODES);
 const GROUNDING_FAILURE_CODES: ReadonlySet<string> = new Set([
@@ -504,6 +500,7 @@ function hasRunTimestamps(value: Record<string, unknown>): boolean {
 function isAgentRun(value: unknown): value is AgentRun {
   if (isDirectorAgentRun(value)) return true;
   if (isWriterAgentRun(value)) return true;
+  if (isResearcherAgentRun(value)) return true;
   if (
     !isRecord(value) ||
     !isString(value.id) ||
@@ -976,6 +973,106 @@ function isWriterAgentRun(value: unknown): value is AgentRun {
     : value.outcome === "failed" &&
         hasExactKeys(value, [...common, "failure"]) &&
         isModelFailure(value.failure);
+}
+
+/**
+ * A Researcher run is validated on its own terms rather than the Assignment Editor's, because the
+ * two differ where it matters: research starts from a Story that may have no evidence at all, and
+ * it succeeds even when it attaches nothing.
+ */
+function isResearcherAgentRun(value: unknown): value is AgentRun {
+  if (
+    !isRecord(value) ||
+    value.role !== "researcher" ||
+    value.operation !== "source_research" ||
+    !isString(value.id) ||
+    value.id.trim().length === 0 ||
+    !isString(value.storyId) ||
+    value.storyId.trim().length === 0 ||
+    !isString(value.profileId) ||
+    value.profileId.trim().length === 0 ||
+    !isRecord(value.model) ||
+    !hasExactKeys(value.model, ["provider", "model"]) ||
+    !isString(value.model.provider) ||
+    value.model.provider.trim().length === 0 ||
+    !isString(value.model.model) ||
+    value.model.model.trim().length === 0 ||
+    !isRecord(value.prompt) ||
+    !hasExactKeys(value.prompt, ["key", "version"]) ||
+    !isString(value.prompt.key) ||
+    value.prompt.key.trim().length === 0 ||
+    !isString(value.prompt.version) ||
+    value.prompt.version.trim().length === 0 ||
+    !isActor(value.requestedBy) ||
+    !hasRunTimestamps(value) ||
+    !isRecord(value.input) ||
+    !hasExactKeys(value.input, ["story", "evidence", "unavailableSourceIds"]) ||
+    !isRecord(value.input.story) ||
+    !hasExactKeys(value.input.story, ["id", "title", "state", "revisionCycle"]) ||
+    value.input.story.id !== value.storyId ||
+    !isString(value.input.story.title) ||
+    value.input.story.title.trim().length === 0 ||
+    !isString(value.input.story.state) ||
+    !STORY_STATES.has(value.input.story.state) ||
+    !Number.isInteger(value.input.story.revisionCycle) ||
+    !Array.isArray(value.input.evidence) ||
+    !value.input.evidence.every(
+      (reference) =>
+        isRecord(reference) &&
+        hasExactKeys(reference, ["sourceId", "relevance", "evidenceKind", "evidenceId"]) &&
+        isString(reference.sourceId) &&
+        reference.sourceId.trim().length > 0 &&
+        isString(reference.relevance) &&
+        reference.relevance.trim().length > 0 &&
+        (reference.evidenceKind === "prepared" || reference.evidenceKind === "raw") &&
+        isString(reference.evidenceId) &&
+        reference.evidenceId.trim().length > 0,
+    ) ||
+    !Array.isArray(value.input.unavailableSourceIds) ||
+    !value.input.unavailableSourceIds.every(
+      (identity) => isString(identity) && identity.trim().length > 0,
+    )
+  )
+    return false;
+  const common = [
+    "id",
+    "storyId",
+    "profileId",
+    "role",
+    "operation",
+    "model",
+    "prompt",
+    "requestedBy",
+    "startedAt",
+    "completedAt",
+    "input",
+    "outcome",
+  ];
+  if (value.outcome === "running") return hasExactKeys(value, common);
+  if (value.outcome === "succeeded") {
+    return (
+      hasExactKeys(value, [...common, "attached"]) &&
+      Array.isArray(value.attached) &&
+      // Attaching nothing is a real answer, so an empty list is a complete run rather than a
+      // malformed one.
+      value.attached.every(
+        (attached) =>
+          isRecord(attached) &&
+          hasExactKeys(attached, ["sourceId", "url", "relevance"]) &&
+          isString(attached.sourceId) &&
+          attached.sourceId.trim().length > 0 &&
+          isString(attached.url) &&
+          attached.url.trim().length > 0 &&
+          isString(attached.relevance) &&
+          attached.relevance.trim().length > 0,
+      )
+    );
+  }
+  return (
+    value.outcome === "failed" &&
+    hasExactKeys(value, [...common, "failure"]) &&
+    isModelFailure(value.failure)
+  );
 }
 
 function isArticleBlock(value: unknown): value is ArticleBlock {
