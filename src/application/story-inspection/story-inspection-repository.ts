@@ -1,6 +1,7 @@
 import type {
   AgentProfile,
   AgentRun,
+  AgentToolCall,
   Article,
   ArticleRevision,
   Assignment,
@@ -43,6 +44,13 @@ export interface StoryInspection {
    * answered "published and nowhere".
    */
   readonly deliveries: readonly StoryDelivery[];
+  /**
+   * Every tool call this Story's runs made, in the order they were made. They travel with the
+   * rest of the record because the screen is the operator's only account of what a run did: a
+   * fetch a site refused is otherwise invisible, and a Story that found one Source looks the
+   * same whether it spent one call or all of them.
+   */
+  readonly toolCalls: readonly AgentToolCall[];
 }
 
 export interface StoryInspectionNotFoundError {

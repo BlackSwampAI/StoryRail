@@ -148,6 +148,7 @@ function clients() {
         agentRuns: [],
         reviewDecisions: [],
         deliveries: [],
+        toolCalls: [],
         article: null,
       },
     })),

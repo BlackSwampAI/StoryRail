@@ -32,6 +32,7 @@ function inspection(value: Story): StoryInspection {
     agentRuns: [],
     reviewDecisions: [],
     deliveries: [],
+    toolCalls: [],
     article: null,
   };
 }
@@ -150,6 +151,7 @@ describe("reject Story", () => {
       article: { durable: "Article and immutable revisions" },
       reviewDecisions: [{ durable: "Request Changes ReviewDecision" }],
       deliveries: [],
+      toolCalls: [],
     } as unknown as StoryInspection;
     const before = structuredClone(preservedInspection);
     const persist = vi.fn(async (command) => ({

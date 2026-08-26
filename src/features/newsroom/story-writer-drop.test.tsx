@@ -60,6 +60,7 @@ function inspection(agentRuns: StoryInspection["agentRuns"] = []): StoryInspecti
     agentRuns,
     reviewDecisions: [],
     deliveries: [],
+    toolCalls: [],
     article: null,
   };
 }

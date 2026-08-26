@@ -453,6 +453,7 @@ describe("createInspectStoryHttpHandler", () => {
       agentRuns: [],
       reviewDecisions: [],
       deliveries: [],
+      toolCalls: [],
       article: null,
     };
     const inspectStory = vi.fn<StoryRuntime["inspectStory"]>(async () => ({
@@ -481,6 +482,7 @@ describe("createInspectStoryHttpHandler", () => {
         agentRuns: [],
         reviewDecisions: [],
         deliveries: [],
+        toolCalls: [],
         article: null,
       },
     }));
@@ -503,6 +505,7 @@ describe("createInspectStoryHttpHandler", () => {
         agentRuns: [],
         reviewDecisions: [],
         deliveries: [],
+        toolCalls: [],
         article: null,
       },
     });
@@ -518,6 +521,7 @@ describe("createInspectStoryHttpHandler", () => {
         agentRuns: [],
         reviewDecisions: [],
         deliveries: [],
+        toolCalls: [],
         article: null,
       },
       {
@@ -535,6 +539,7 @@ describe("createInspectStoryHttpHandler", () => {
         agentRuns: [],
         reviewDecisions: [],
         deliveries: [],
+        toolCalls: [],
         article: null,
       },
     ] as const;

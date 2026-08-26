@@ -915,6 +915,63 @@ describePostgres("PostgreSQL persistence repositories", () => {
       ]);
     });
 
+    // The screen is the operator's only account of what a run did, and it reads that account
+    // from the Story's own inspection. A refused fetch that never reaches it is a refusal the
+    // operator can only find in a server log they cannot see.
+    it("reports a Story's tool calls as part of its inspection, in the order they were made", async () => {
+      const story = makeStory("tool-calls-inspected");
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
+      const run = makeAgentRun(story, "tool-calls-inspected");
+      await createPostgresAgentRunRepository({ pool }).append(run);
+      const repository = createPostgresAgentToolCallRepository({ pool });
+      const intent = (sequence: number, id: string, tool: string) =>
+        ({
+          id: agentToolCallId(id),
+          runId: run.id,
+          storyId: story.id,
+          sequence,
+          tool,
+          request: { url: "https://example.test" },
+          requestedAt: `requested-${sequence}`,
+          completedAt: null,
+          outcome: "running",
+        }) as never;
+
+      const first = intent(1, "tool-call-inspected-1", "search_archive");
+      await repository.append(first);
+      await repository.complete({
+        ...(first as object),
+        completedAt: "completed-1",
+        outcome: "succeeded",
+        result: { reports: [] },
+      } as never);
+      const second = intent(2, "tool-call-inspected-2", "fetch_url");
+      await repository.append(second);
+      await repository.complete({
+        ...(second as object),
+        completedAt: "completed-2",
+        outcome: "failed",
+        failure: { code: "TOOL_TARGET_REFUSED", retryable: false, message: "403." },
+      } as never);
+
+      await expect(
+        createPostgresStoryInspectionRepository({ pool, siteId: DEFAULT_SITE }).inspect(story.id),
+      ).resolves.toMatchObject({
+        ok: true,
+        inspection: {
+          toolCalls: [
+            { id: "tool-call-inspected-1", tool: "search_archive", outcome: "succeeded" },
+            {
+              id: "tool-call-inspected-2",
+              tool: "fetch_url",
+              outcome: "failed",
+              failure: { code: "TOOL_TARGET_REFUSED" },
+            },
+          ],
+        },
+      });
+    });
+
     it("refuses a recorded result large enough to be a copy of the material", async () => {
       const story = makeStory("tool-call-size");
       await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
@@ -4993,6 +5050,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           agentRuns: [],
           reviewDecisions: [],
           deliveries: [],
+          toolCalls: [],
           article: null,
         },
       };

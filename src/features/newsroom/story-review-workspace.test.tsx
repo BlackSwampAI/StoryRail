@@ -79,6 +79,7 @@ function inspection(): StoryInspection {
     transitions: [],
     reviewDecisions: [],
     deliveries: [],
+    toolCalls: [],
     article: {
       article: {
         id: "article-38",
@@ -628,6 +629,7 @@ describe("Director review workspace", () => {
       agentRuns: [],
       reviewDecisions: [],
       deliveries: [],
+      toolCalls: [],
     } as StoryInspection;
     const generateAssignmentProposal = vi.fn<StoryClient["generateAssignmentProposal"]>(
       async () => new Promise<never>(() => undefined),

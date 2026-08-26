@@ -143,6 +143,7 @@ function inspection(): StoryInspection {
     agentRuns: [],
     reviewDecisions: [],
     deliveries: [],
+    toolCalls: [],
     article: null,
   };
 }

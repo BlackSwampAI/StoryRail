@@ -277,6 +277,7 @@
 }
 
 .reviewTask,
+.publishedTask,
 .directorReview {
   border: 1px solid var(--tone-45);
   border-radius: 0.9rem;
@@ -303,9 +304,19 @@
 }
 
 .reviewTask h2,
+.publishedTask h2,
 .directorReview h2,
 .directorReview h3 {
   color: var(--tone-149);
+}
+
+/*
+ * A published Story has no pending decision to keep in reach, and pinned to the foot of the
+ * viewport this card covered about 200px of the Article at every scroll position — the operator
+ * read the finished piece through a letterbox. It scrolls with the Article it belongs to.
+ */
+.publishedTask {
+  position: static;
 }
 
 /*
@@ -1835,6 +1846,30 @@
   padding-left: 0.75rem;
 }
 
+/*
+ * Said at the desk, not inside one queue. A listing that failed leaves every count showing a
+ * dash, and a dash on its own reads as "none" rather than "unknown".
+ */
+.deskListingStatus {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0 0 0.5rem;
+  color: var(--tone-80);
+  font-size: 0.72rem;
+}
+
+.deskListingStatus button {
+  border: 0;
+  background: transparent;
+  padding: 0.25rem;
+  color: var(--tone-111);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
 .queueInlineStatus {
   display: flex;
   align-items: center;
@@ -2014,6 +2049,95 @@
   color: var(--signal-15);
   font-size: 0.82rem;
   line-height: 1.55;
+}
+
+/*
+ * The account of what a run reached for. It sits above the task rather than inside a fold: the
+ * operator has no server log, so this is the only place a refused fetch or a spent budget can be
+ * read, and a panel that has to be opened is a panel nobody opens during the run it describes.
+ */
+.toolActivity {
+  border: 1px solid var(--tone-45);
+  border-radius: 1.1rem;
+  background: var(--tone-14);
+  padding: clamp(1rem, 2.5vw, 1.5rem);
+}
+
+.toolActivity h3 {
+  margin: 0.2rem 0 0.6rem;
+  color: var(--tone-149);
+  font-size: 1.05rem;
+}
+
+.toolActivityBudget {
+  margin: 0 0 0.75rem;
+  color: var(--tone-97);
+  font-size: 0.8rem;
+}
+
+.toolCallList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.toolCall {
+  border-left: 2px solid var(--tone-48);
+  padding-left: 0.85rem;
+}
+
+/* A refused call is the one an operator came looking for, so it is marked rather than listed. */
+.toolCall[data-outcome="failed"] {
+  border-left-color: var(--signal-12);
+}
+
+.toolCallHeadline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0;
+  color: var(--tone-149);
+  font-size: 0.9rem;
+}
+
+.toolCallTool {
+  font-weight: 650;
+}
+
+.toolCallArgument {
+  color: var(--tone-97);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.toolCallOutcome {
+  margin-left: auto;
+  color: var(--tone-97);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.toolCall[data-outcome="failed"] .toolCallOutcome {
+  color: var(--signal-15);
+}
+
+.toolCallFailure {
+  margin: 0.3rem 0 0;
+  color: var(--signal-15);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.toolCallMeta {
+  margin: 0.25rem 0 0;
+  color: var(--tone-89);
+  font-size: 0.72rem;
 }
 
 .currentTask {
@@ -2247,6 +2371,30 @@
   letter-spacing: 0.04em;
 }
 
+/*
+ * A claim's attribution mark, at the weight of the note on uncited prose beside it. Rendered as
+ * a button per paragraph it stacked down the page and drowned the article it was annotating; the
+ * grounding still has to be visible, so it is quietened rather than removed.
+ */
+.claimMark {
+  align-self: flex-start;
+  border: 0;
+  background: none;
+  color: var(--tone-97);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.68rem;
+  font-style: italic;
+  letter-spacing: 0.04em;
+  padding: 0;
+  text-align: left;
+}
+
+.claimMark:hover,
+.claimMark:focus-visible {
+  color: var(--tone-152);
+}
+
 .citationToggle {
   align-self: flex-start;
   border: 1px solid var(--tone-48);
@@ -2422,6 +2570,35 @@
 .groundingFindings q {
   font-style: italic;
   overflow-wrap: anywhere;
+}
+
+/*
+ * The autopilot option and the button that consumes it are drawn as one control. Apart, the
+ * checkbox looked like an instruction to research and set an option nothing had yet been asked
+ * to read, which cost an operator a whole run.
+ */
+.autopilotControl {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.85rem;
+  margin: 1rem 0 0;
+  border: 1px solid var(--tone-45);
+  border-radius: 0.85rem;
+  padding: 0.85rem 1.1rem 1.1rem;
+}
+
+.autopilotControl legend {
+  color: var(--tone-97);
+  font-size: 0.7rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  padding: 0 0.35rem;
+  text-transform: uppercase;
+}
+
+.autopilotControl .autopilotOption {
+  margin-top: 0;
 }
 
 /* The cost of asking for research is stated where the choice is made. */

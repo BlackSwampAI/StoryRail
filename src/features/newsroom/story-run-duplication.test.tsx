@@ -80,6 +80,7 @@ function inspection(agentRuns: readonly AgentRun[] = []): StoryInspection {
     agentRuns,
     reviewDecisions: [],
     deliveries: [],
+    toolCalls: [],
     article: null,
   } as unknown as StoryInspection;
 }

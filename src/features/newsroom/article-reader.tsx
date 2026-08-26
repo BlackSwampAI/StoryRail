@@ -49,6 +49,10 @@ function Support({ provenance }: Readonly<{ provenance: CitationProvenance }>) {
  * A claim carries the passage it rests on, one click away. Attribution that a reader cannot
  * follow is a claim about rigour rather than a demonstration of it, so the support is part of
  * the Article rather than buried in an audit panel.
+ *
+ * The mark is deliberately as quiet as the note on uncited prose. Shown as a filled button it
+ * repeated down every paragraph and the piece could not be read at all, which is a way of losing
+ * the attribution rather than showing it.
  */
 function Claim({
   block,
@@ -62,12 +66,12 @@ function Claim({
       <SafeMarkdown markdown={block.markdown} />
       <button
         type="button"
-        className={styles.citationToggle}
+        className={styles.claimMark}
         aria-expanded={open}
         aria-controls={panelId}
         onClick={() => setOpen((shown) => !shown)}
       >
-        {open ? "Hide" : "Show"} {block.citations.length}{" "}
+        <span aria-hidden="true">{open ? "▾" : "▸"}</span> Attributed · {block.citations.length}{" "}
         {block.citations.length === 1 ? "source" : "sources"}
       </button>
       {open ? (

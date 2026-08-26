@@ -8,10 +8,12 @@ import {
   GROUNDING_REFUSAL_CODES,
   MODEL_FAILURE_CODES,
   DELIVERY_FAILURE_CODES,
+  TOOL_FAILURE_CODES,
   type EditorialActor,
   type AgentProfile,
   type Assignment,
   type AgentRun,
+  type AgentToolCall,
   type Article,
   type ArticleBlock,
   type ArticleRevision,
@@ -166,6 +168,7 @@ const GROUNDING_FAILURE_CODES: ReadonlySet<string> = new Set([
 ]);
 const MODEL_FAILURE_CODE_SET = new Set<string>(MODEL_FAILURE_CODES);
 const DELIVERY_FAILURE_CODE_SET = new Set<string>(DELIVERY_FAILURE_CODES);
+const TOOL_FAILURE_CODE_SET = new Set<string>(TOOL_FAILURE_CODES);
 // Which failures may carry findings is the domain's rule, imported rather than restated. Written
 // out here as a literal, it drifted from the domain and made a correctly recorded run unreadable.
 const GROUNDING_REFUSAL_CODE_SET = new Set<string>(GROUNDING_REFUSAL_CODES);
@@ -842,6 +845,46 @@ function isDelivery(value: unknown): value is StoryDelivery {
   );
 }
 
+/**
+ * A tool call as it comes back over the wire. The request is left open because which tools exist
+ * is an operator's decision, but the outcome is checked closed: a failed call whose code the
+ * browser does not recognise would be shown as a bare code, which is exactly the mystery the
+ * activity panel exists to end.
+ */
+function isToolCall(value: unknown): value is AgentToolCall {
+  const common =
+    isRecord(value) &&
+    isString(value.id) &&
+    isString(value.runId) &&
+    isString(value.storyId) &&
+    Number.isInteger(value.sequence) &&
+    (value.sequence as number) >= 1 &&
+    isString(value.tool) &&
+    isRecord(value.request) &&
+    isString(value.requestedAt);
+  if (!common) return false;
+  const record = value as Record<string, unknown>;
+  const base = ["id", "runId", "storyId", "sequence", "tool", "request", "requestedAt"];
+  if (record.outcome === "running")
+    return hasExactKeys(record, [...base, "outcome", "completedAt"]) && record.completedAt === null;
+  if (record.outcome === "succeeded")
+    return (
+      hasExactKeys(record, [...base, "outcome", "completedAt", "result"]) &&
+      isString(record.completedAt)
+    );
+  return (
+    record.outcome === "failed" &&
+    hasExactKeys(record, [...base, "outcome", "completedAt", "failure"]) &&
+    isString(record.completedAt) &&
+    isRecord(record.failure) &&
+    hasExactKeys(record.failure, ["code", "retryable", "message"]) &&
+    isString(record.failure.code) &&
+    TOOL_FAILURE_CODE_SET.has(record.failure.code) &&
+    typeof record.failure.retryable === "boolean" &&
+    isStringOrNull(record.failure.message)
+  );
+}
+
 function isWriterAgentRun(value: unknown): value is AgentRun {
   if (
     !isRecord(value) ||
@@ -1200,6 +1243,7 @@ function isInspection(value: unknown): value is StoryInspection {
       "article",
       "reviewDecisions",
       "deliveries",
+      "toolCalls",
     ]) ||
     !isStory(value.story) ||
     !Array.isArray(value.sources) ||
@@ -1210,7 +1254,9 @@ function isInspection(value: unknown): value is StoryInspection {
     !Array.isArray(value.reviewDecisions) ||
     !value.reviewDecisions.every(isReviewDecision) ||
     !Array.isArray(value.deliveries) ||
-    !value.deliveries.every(isDelivery)
+    !value.deliveries.every(isDelivery) ||
+    !Array.isArray(value.toolCalls) ||
+    !value.toolCalls.every(isToolCall)
   ) {
     return false;
   }
@@ -1232,6 +1278,7 @@ function isInspection(value: unknown): value is StoryInspection {
     value.agentRuns.every((run) => run.storyId === story.id) &&
     value.reviewDecisions.every((decision) => decision.storyId === story.id) &&
     value.deliveries.every((delivery) => delivery.storyId === story.id) &&
+    value.toolCalls.every((call) => call.storyId === story.id) &&
     value.sources.every((item) => {
       if (
         !isRecord(item) ||

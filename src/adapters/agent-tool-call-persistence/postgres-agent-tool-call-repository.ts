@@ -1,61 +1,13 @@
 import type { Pool } from "pg";
-import { z } from "zod";
 
 import type {
   AgentToolCallRepository,
   AppendAgentToolCallResult,
   CompleteAgentToolCallResult,
 } from "@/application/agent-tools";
-import {
-  TOOL_FAILURE_CODES,
-  recordAgentToolCall,
-  type AgentRunId,
-  type AgentToolCall,
-} from "@/domain/editorial";
+import type { AgentRunId, AgentToolCall } from "@/domain/editorial";
 
-export class PostgresAgentToolCallInvariantError extends Error {
-  constructor() {
-    super("PostgreSQL returned an invalid or impossible persisted tool call.");
-    this.name = "PostgresAgentToolCallInvariantError";
-  }
-}
-
-const nonEmpty = z.string().refine((value) => value.trim().length > 0);
-const callSchema = z
-  .object({
-    id: nonEmpty,
-    runId: nonEmpty,
-    storyId: nonEmpty,
-    sequence: z.number().int().min(1),
-    tool: nonEmpty,
-    request: z.record(z.string(), z.unknown()),
-    requestedAt: nonEmpty,
-  })
-  .and(
-    z.union([
-      z.object({ outcome: z.literal("running"), completedAt: z.null() }),
-      z.object({ outcome: z.literal("succeeded"), completedAt: nonEmpty, result: z.unknown() }),
-      z.object({
-        outcome: z.literal("failed"),
-        completedAt: nonEmpty,
-        failure: z
-          .object({
-            code: z.enum(TOOL_FAILURE_CODES),
-            retryable: z.boolean(),
-            message: nonEmpty.nullable(),
-          })
-          .strict(),
-      }),
-    ]),
-  );
-
-function decode(payload: unknown): AgentToolCall {
-  const parsed = callSchema.safeParse(payload);
-  if (!parsed.success) throw new PostgresAgentToolCallInvariantError();
-  const recorded = recordAgentToolCall(parsed.data as unknown as AgentToolCall);
-  if (!recorded.ok) throw new PostgresAgentToolCallInvariantError();
-  return recorded.call;
-}
+import { decodePostgresAgentToolCall } from "./postgres-agent-tool-call-decoder";
 
 export function createPostgresAgentToolCallRepository(dependencies: {
   readonly pool: Pool;
@@ -123,7 +75,7 @@ export function createPostgresAgentToolCallRepository(dependencies: {
          WHERE run_id = $1 ORDER BY append_position`,
         [runId],
       );
-      return rows.map((row) => decode(row.payload));
+      return rows.map((row) => decodePostgresAgentToolCall(row.payload));
     },
   };
 }

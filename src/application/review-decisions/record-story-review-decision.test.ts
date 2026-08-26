@@ -144,6 +144,7 @@ function fixture(revisionCycle = 0) {
       agentRuns: [directorRun],
       reviewDecisions: [],
       deliveries: [],
+      toolCalls: [],
       article: { article, revisions: [revision] },
     },
   };

@@ -1,5 +1,7 @@
 import type { DeliveryFailureCode, StoryDelivery } from "@/domain/editorial";
 
+import { withFailureCode } from "./failure-prose";
+
 /**
  * Where a Story stands with the outside world, read from its delivery record alone.
  *
@@ -80,7 +82,7 @@ export function deliveryFailureExplanation(code: string): string {
  * does not.
  */
 export function deliveryFailureMessage(failure: { readonly code: string }): string {
-  return `Delivery was attempted and refused. ${deliveryFailureExplanation(failure.code)} (${failure.code})`;
+  return `Delivery was attempted and refused. ${withFailureCode(deliveryFailureExplanation(failure.code), failure.code)}`;
 }
 
 /**
@@ -91,5 +93,5 @@ export function deliveryFailureMessage(failure: { readonly code: string }): stri
 export function deliveryNotAttemptedMessage(error: { readonly code: string }): string {
   const explanation =
     DELIVERY_NOT_ATTEMPTED_EXPLANATIONS[error.code] ?? "The newsroom could not attempt a delivery.";
-  return `Nothing was sent. ${explanation} (${error.code})`;
+  return `Nothing was sent. ${withFailureCode(explanation, error.code)}`;
 }

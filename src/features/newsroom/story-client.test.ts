@@ -96,6 +96,7 @@ const INSPECTION = {
   agentRuns: [],
   reviewDecisions: [],
   deliveries: [],
+  toolCalls: [],
   article: null,
 };
 const AGENT_RUN = {
@@ -403,6 +404,7 @@ describe("story-client", () => {
       agentRuns: [],
       reviewDecisions: [],
       deliveries: [],
+      toolCalls: [],
       article: null,
     };
     const timestamps = [
@@ -496,6 +498,7 @@ describe("story-client", () => {
         agentRuns: [],
         reviewDecisions: [],
         deliveries: [],
+        toolCalls: [],
         article: null,
       },
       INSPECTION,
@@ -555,6 +558,7 @@ describe("story-client", () => {
           agentRuns: [],
           reviewDecisions: [],
           deliveries: [],
+          toolCalls: [],
           article: null,
         },
       }),
@@ -1063,6 +1067,57 @@ describe("story-client", () => {
     await expect(
       createStoryClient({ siteId: SITE_ID, fetch }).inspectStory(STORY.id),
     ).resolves.toEqual({ kind: "completed", value: inspection });
+  });
+
+  it("reads back an inspection carrying the tool calls a run made", async () => {
+    const call = {
+      id: "call-0021",
+      runId: "run-0021",
+      storyId: STORY.id,
+      sequence: 1,
+      tool: "fetch_url",
+      request: { url: "https://www.theverge.com/mac-studio" },
+      requestedAt: "2026-08-26T14:54:49.000Z",
+      outcome: "failed",
+      completedAt: "2026-08-26T14:54:52.000Z",
+      failure: {
+        code: "TOOL_TARGET_REFUSED",
+        retryable: false,
+        message: "theverge.com answered 403.",
+      },
+    } as const;
+    const inspection = { ...INSPECTION, toolCalls: [call] };
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(200, { ok: true, inspection }),
+    );
+
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).inspectStory(STORY.id),
+    ).resolves.toEqual({ kind: "completed", value: inspection });
+  });
+
+  // A code the browser does not know would reach the screen as a bare code, which is the mystery
+  // the activity panel exists to end.
+  it("refuses an inspection whose tool call failed for a reason it cannot name", async () => {
+    const call = {
+      id: "call-unknown",
+      runId: "run-0021",
+      storyId: STORY.id,
+      sequence: 1,
+      tool: "fetch_url",
+      request: { url: "https://www.theverge.com/mac-studio" },
+      requestedAt: "2026-08-26T14:54:49.000Z",
+      outcome: "failed",
+      completedAt: "2026-08-26T14:54:52.000Z",
+      failure: { code: "TOOL_SOMETHING_ELSE", retryable: false, message: null },
+    };
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(200, { ok: true, inspection: { ...INSPECTION, toolCalls: [call] } }),
+    );
+
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).inspectStory(STORY.id),
+    ).resolves.toEqual({ kind: "unavailable", message: STORY_REQUEST_UNAVAILABLE_MESSAGE });
   });
 
   it("refuses an inspection whose delivery claims success without naming the page", async () => {

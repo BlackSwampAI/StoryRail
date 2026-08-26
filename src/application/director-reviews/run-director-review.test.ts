@@ -146,6 +146,7 @@ function fixture() {
       agentRuns: [writerRun],
       reviewDecisions: [],
       deliveries: [],
+      toolCalls: [],
       sources: [
         {
           attachment: {
