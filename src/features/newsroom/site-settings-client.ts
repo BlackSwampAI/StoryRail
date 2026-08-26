@@ -1,7 +1,7 @@
 import {
   CREDENTIAL_HINT_LENGTH,
   CREDENTIAL_UNAVAILABLE_REASONS,
-  SITE_MODEL_ROLES,
+  recordSiteSettings,
   type ConfiguredCredential,
   type CredentialSlot,
   type CredentialUnavailableError,
@@ -75,35 +75,19 @@ function exact(value: Record<string, unknown>, keys: readonly string[]): boolean
   return Object.keys(value).sort().join(",") === [...keys].sort().join(",");
 }
 
-function isModelId(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0 && value === value.trim();
-}
-
 /**
- * A destination is one of two closed shapes or nothing at all. The keys are checked exactly so a
- * response carrying a StudioCMS renderer package on a WordPress destination is treated as an
- * unreadable answer rather than rendered into a form that would then save it back.
+ * The browser reads a settings payload through the same domain validator the store writes with,
+ * rather than through a second description of the shape kept here.
+ *
+ * Four times now a settings field has been added and a hand-written reader in this file did not
+ * learn about it, and each time it surfaced as a correct record the screen refused to display.
+ * `recordSiteSettings` is pure and has no I/O, so it runs unchanged in a browser; calling it here
+ * means the shape cannot be extended without this reader following, because there is nothing left
+ * to keep in step. It also normalises, so what the screen renders is what the store would hold.
  */
-function isDestination(value: unknown): boolean {
-  if (value === null) return true;
-  if (!isRecord(value) || !isModelId(value.baseUrl) || typeof value.draft !== "boolean")
-    return false;
-  return value.kind === "studiocms"
-    ? exact(value, ["kind", "baseUrl", "package", "draft"]) && isModelId(value.package)
-    : value.kind === "wordpress" &&
-        exact(value, ["kind", "baseUrl", "username", "draft"]) &&
-        isModelId(value.username);
-}
-
-function isSettings(value: unknown): value is SiteSettings {
-  return (
-    isRecord(value) &&
-    (exact(value, ["models"]) || exact(value, ["models", "destination"])) &&
-    isDestination(value.destination ?? null) &&
-    isRecord(value.models) &&
-    exact(value.models, SITE_MODEL_ROLES) &&
-    SITE_MODEL_ROLES.every((role) => isModelId((value.models as Record<string, unknown>)[role]))
-  );
+function readSettings(value: unknown): SiteSettings | null {
+  const recorded = recordSiteSettings(value);
+  return recorded.ok ? recorded.settings : null;
 }
 
 /**
@@ -202,13 +186,14 @@ export function createSiteSettingsClient(dependencies: {
           method: "GET",
           headers: { Accept: "application/json" },
         });
-        return await parse(response, (body) =>
-          isSettings(body.settings) &&
-          Array.isArray(body.credentials) &&
-          body.credentials.every(isConfiguredCredential)
-            ? { settings: body.settings, credentials: body.credentials }
-            : null,
-        );
+        return await parse(response, (body) => {
+          const settings = readSettings(body.settings);
+          return settings !== null &&
+            Array.isArray(body.credentials) &&
+            body.credentials.every(isConfiguredCredential)
+            ? { settings, credentials: body.credentials }
+            : null;
+        });
       } catch {
         return unavailable();
       }
@@ -220,7 +205,7 @@ export function createSiteSettingsClient(dependencies: {
           headers: JSON_HEADERS,
           body: JSON.stringify({ models }),
         });
-        return await parse(response, (body) => (isSettings(body.settings) ? body.settings : null));
+        return await parse(response, (body) => readSettings(body.settings));
       } catch {
         return unavailable();
       }
@@ -232,7 +217,7 @@ export function createSiteSettingsClient(dependencies: {
           headers: JSON_HEADERS,
           body: JSON.stringify({ models, destination }),
         });
-        return await parse(response, (body) => (isSettings(body.settings) ? body.settings : null));
+        return await parse(response, (body) => readSettings(body.settings));
       } catch {
         return unavailable();
       }

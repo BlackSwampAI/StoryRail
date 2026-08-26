@@ -22,6 +22,9 @@ const MODELS = {
   researcher: "google/gemini-3.7-flash",
 } as const;
 
+/** What the domain fills in for a settings document that names nothing beyond its models. */
+const UNSET = { destination: null, search: null, research: null } as const;
+
 const SETTINGS_RESPONSE = {
   ok: true,
   settings: { models: MODELS },
@@ -45,11 +48,52 @@ describe("site-settings-client", () => {
 
     expect(result).toEqual({
       kind: "completed",
-      value: { settings: { models: MODELS }, credentials: SETTINGS_RESPONSE.credentials },
+      value: { settings: { models: MODELS, ...UNSET }, credentials: SETTINGS_RESPONSE.credentials },
     });
     expect(fetch).toHaveBeenCalledWith("/api/sites/site-second/site-settings", {
       method: "GET",
       headers: { Accept: "application/json" },
+    });
+  });
+
+  it("reads a settings response carrying every field the route now returns", async () => {
+    const settings = {
+      models: MODELS,
+      destination: {
+        kind: "wordpress",
+        baseUrl: "https://blog.example.com",
+        username: "editor",
+        draft: true,
+      },
+      search: { baseUrl: "https://searx.example.com", username: "newsroom" },
+      research: null,
+    } as const;
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
+      response(200, {
+        ok: true,
+        settings,
+        credentials: SETTINGS_RESPONSE.credentials,
+      }),
+    );
+
+    expect(await createSiteSettingsClient({ siteId: SITE_ID, fetch }).readSettings()).toEqual({
+      kind: "completed",
+      value: { settings, credentials: SETTINGS_RESPONSE.credentials },
+    });
+  });
+
+  it("refuses a settings response carrying a field the settings shape does not have", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
+      response(200, {
+        ok: true,
+        settings: { models: MODELS, ...UNSET, retention: { days: 30 } },
+        credentials: SETTINGS_RESPONSE.credentials,
+      }),
+    );
+
+    expect(await createSiteSettingsClient({ siteId: SITE_ID, fetch }).readSettings()).toEqual({
+      kind: "unavailable",
+      message: SITE_SETTINGS_REQUEST_UNAVAILABLE_MESSAGE,
     });
   });
 
@@ -107,7 +151,10 @@ describe("site-settings-client", () => {
       destination,
     );
 
-    expect(result).toEqual({ kind: "completed", value: { models: MODELS, destination } });
+    expect(result).toEqual({
+      kind: "completed",
+      value: { models: MODELS, ...UNSET, destination },
+    });
     expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual({
       models: MODELS,
       destination,
