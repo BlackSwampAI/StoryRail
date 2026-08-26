@@ -22,6 +22,7 @@ const MODELS: SiteModelIds = {
 const CONFIGURED: SiteSettings = {
   models: MODELS,
   destination: null,
+  research: null,
   search: { baseUrl: "https://search.newsroom.test", username: "storyrail" },
 };
 
@@ -58,7 +59,7 @@ describe("Site web search directory", () => {
 
     await expect(
       createSiteWebSearchDirectory({
-        settings: settings({ models: MODELS, destination: null, search: null }),
+        settings: settings({ models: MODELS, destination: null, search: null, research: null }),
         resolveApiKey,
       })(),
     ).resolves.toBeNull();
@@ -78,7 +79,7 @@ describe("Site web search directory", () => {
   it("reads the configuration each time rather than the one the process started with", async () => {
     const find = vi
       .fn<() => Promise<SiteSettings | null>>()
-      .mockResolvedValueOnce({ models: MODELS, destination: null, search: null })
+      .mockResolvedValueOnce({ models: MODELS, destination: null, search: null, research: null })
       .mockResolvedValueOnce(CONFIGURED);
     const resolve = createSiteWebSearchDirectory({
       settings: { find, update: async () => undefined },

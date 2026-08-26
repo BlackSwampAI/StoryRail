@@ -84,18 +84,42 @@ export interface SiteSearchSettings {
   readonly username: string;
 }
 
+/**
+ * How far the Researcher may go when it widens a Story's evidence.
+ *
+ * The two numbers measure different things and are deliberately separate. Calls are money — a
+ * search and a fetch cost one each, so a comparison piece resting on four outside pages spends
+ * eight before the archive is consulted — and turns are latency, because each one is a round
+ * trip to the model whether it asks for one tool or six. An operator who pays per call and an
+ * operator who is waiting want to move different numbers.
+ *
+ * It is per-Site because the right answer depends on what a newsroom pays and what it writes,
+ * which is exactly why it sits beside the model choices rather than in the code.
+ */
+export interface SiteResearchSettings {
+  readonly maximumCalls: number;
+  readonly maximumTurns: number;
+}
+
+/** The widest a newsroom may set either budget. Beyond this a run stops being worth watching. */
+export const MAXIMUM_RESEARCH_CALL_BUDGET = 40;
+export const MAXIMUM_RESEARCH_TURN_BUDGET = 20;
+
 export interface SiteSettings {
   readonly models: SiteModelIds;
   /** Null for a newsroom that has not been given anywhere to deliver, which is most of them. */
   readonly destination: SiteDestinationSettings | null;
   /** Null for a newsroom that cannot search the web, which is the ordinary case. */
   readonly search: SiteSearchSettings | null;
+  /** Null for a newsroom that has not chosen its own budget, which then runs on the defaults. */
+  readonly research: SiteResearchSettings | null;
 }
 
 export type SiteSettingsValidationCode =
   | "SITE_SETTINGS_MODELS_INVALID"
   | "SITE_SETTINGS_DESTINATION_INVALID"
-  | "SITE_SETTINGS_SEARCH_INVALID";
+  | "SITE_SETTINGS_SEARCH_INVALID"
+  | "SITE_SETTINGS_RESEARCH_INVALID";
 
 export type RecordSiteSettingsResult =
   | { readonly ok: true; readonly settings: SiteSettings }

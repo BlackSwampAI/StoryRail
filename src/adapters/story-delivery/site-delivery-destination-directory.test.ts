@@ -32,6 +32,7 @@ const CONFIGURED: SiteSettings = {
     draft: true,
   },
   search: null,
+  research: null,
 };
 
 const WORDPRESS: SiteSettings = {
@@ -43,6 +44,7 @@ const WORDPRESS: SiteSettings = {
     draft: false,
   },
   search: null,
+  research: null,
 };
 
 describe("resolving the destination a newsroom delivers to", () => {
@@ -117,7 +119,7 @@ describe("resolving the destination a newsroom delivers to", () => {
   it("does not read a token for a newsroom with nowhere to deliver", async () => {
     let asked = false;
     const directory = createSiteDeliveryDestinationDirectory({
-      settings: settings({ models: MODELS, destination: null, search: null }),
+      settings: settings({ models: MODELS, destination: null, search: null, research: null }),
       resolveApiKey: async () => {
         asked = true;
         return { ok: true, apiKey: "token-1" };

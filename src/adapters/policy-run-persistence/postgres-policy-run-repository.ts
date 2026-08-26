@@ -27,7 +27,7 @@ export class PostgresPolicyRunInvariantError extends Error {
 const nonEmpty = z.string().refine((value) => value.trim().length > 0);
 const common = {
   id: nonEmpty,
-  storyId: nonEmpty,
+  storyId: nonEmpty.nullable(),
   policy: z.enum(EDITORIAL_POLICIES),
   requestedBy: z.object({ type: z.literal("operator"), operatorId: nonEmpty }).strict(),
   research: z.boolean(),
@@ -110,13 +110,21 @@ export function createPostgresPolicyRunRepository(dependencies: {
     },
 
     async observe(command): Promise<UpdatePolicyRunResult> {
+      // The Story is only ever written where the column is still empty. A run that already names
+      // one keeps it, so the coalesce here and the trigger in the database agree rather than
+      // leaving the database to refuse something this adapter had already decided to do.
       const { rowCount } = await dependencies.pool.query(
         `UPDATE storyrail.policy_runs
          SET step = $2,
              observed_at = $3::timestamptz,
-             payload = payload || jsonb_build_object('step', $2::text, 'observedAt', $3::text)
+             story_id = COALESCE(story_id, $4),
+             payload = payload || jsonb_build_object(
+               'step', $2::text,
+               'observedAt', $3::text,
+               'storyId', COALESCE(story_id, $4::text)
+             )
          WHERE policy_run_id = $1 AND status = 'running'`,
-        [command.id, command.step, command.observedAt],
+        [command.id, command.step, command.observedAt, command.storyId ?? null],
       );
       return rowCount === 0
         ? {
@@ -151,6 +159,14 @@ export function createPostgresPolicyRunRepository(dependencies: {
             },
           }
         : { ok: true, run: await readOne(command.id) };
+    },
+
+    async findById(id: PolicyRunId): Promise<PolicyRun | null> {
+      const { rows } = await dependencies.pool.query<{ payload: unknown }>(
+        "SELECT payload FROM storyrail.policy_runs WHERE policy_run_id = $1",
+        [id],
+      );
+      return rows[0] === undefined ? null : decode(rows[0].payload);
     },
 
     async findByStoryId(storyId: StoryId): Promise<readonly PolicyRun[]> {

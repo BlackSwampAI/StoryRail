@@ -45,6 +45,10 @@ import {
  * Stated where the operator chooses, so the cost of asking for research is not a surprise, and
  * again against what a run has spent, so a thin result can be read as a budget rather than a
  * fault.
+ *
+ * This is what the installation ships with rather than what this Site has chosen. A newsroom that
+ * has set its own budget spends that, and the workspace has no settings to read here; the number
+ * shown is a guide to the cost, not the enforced limit, which lives with the run.
  */
 const RESEARCH_CALL_BUDGET = DEFAULT_RESEARCH_CALL_BUDGET;
 
@@ -2210,9 +2214,9 @@ export function StoryWorkspace({
                     <span>
                       Research first, when autopilot runs
                       <small>
-                        Retrieves up to {RESEARCH_CALL_BUDGET} linked pages and adds a model call
-                        before drafting. Slower, and it costs more per run. It applies only to
-                        autopilot — to research now, use Find more Sources.
+                        Spends up to {RESEARCH_CALL_BUDGET} tool calls looking for further pages and
+                        adds a model call before drafting. Slower, and it costs more per run. It
+                        applies only to autopilot — to research now, use Find more Sources.
                       </small>
                     </span>
                   </label>

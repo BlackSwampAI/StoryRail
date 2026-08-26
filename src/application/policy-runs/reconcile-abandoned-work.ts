@@ -58,8 +58,12 @@ export function createReconcileAbandonedWork(dependencies: {
 
     for (const run of stale) {
       // The runs the policy left behind are closed first, so a settled policy never points at
-      // work still claiming to be in flight.
-      for (const agentRun of await dependencies.agentRuns.listByStoryId(run.storyId)) {
+      // work still claiming to be in flight. A policy that died before it reached a Story left
+      // no AgentRun behind to close: everything before story creation is extraction and
+      // preparation, which are recorded against the Source rather than against a Story.
+      const editorialRuns =
+        run.storyId === null ? [] : await dependencies.agentRuns.listByStoryId(run.storyId);
+      for (const agentRun of editorialRuns) {
         if (agentRun.outcome !== "running") continue;
         const recorded = recordAgentRun({
           ...agentRun,

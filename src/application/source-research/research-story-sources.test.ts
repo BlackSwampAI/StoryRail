@@ -110,10 +110,12 @@ function workflow(options: {
   readonly webSearch?: WebSearchProvider;
   readonly readNewsroomIdentity?: () => Promise<NewsroomIdentity | null>;
   readonly readNewsroomStandards?: () => Promise<string | null>;
+  readonly budget?: { readonly maximumCalls: number; readonly maximumTurns: number };
 }) {
   const attach = vi.fn(async () => ({ ok: options.attachOk !== false }) as never);
   const completed: AgentRun[] = [];
   const openedCalls: AgentToolCall[] = [];
+  const settledCalls: AgentToolCall[] = [];
   const offered: string[][] = [];
   const prompts: string[] = [];
   let turn = 0;
@@ -141,7 +143,10 @@ function workflow(options: {
         openedCalls.push(call);
         return { ok: true as const, call };
       }),
-      complete: vi.fn(async (call) => ({ ok: true as const, call })),
+      complete: vi.fn(async (call) => {
+        settledCalls.push(call);
+        return { ok: true as const, call };
+      }),
       listByRunId: vi.fn(),
     },
     persistence: { attach },
@@ -183,9 +188,19 @@ function workflow(options: {
     createExtractionId: () => sourceExtractionId(`extraction-${(ids += 1)}`),
     readNewsroomIdentity: options.readNewsroomIdentity,
     readNewsroomStandards: options.readNewsroomStandards,
+    readResearchBudget: options.budget === undefined ? undefined : async () => options.budget!,
     now: () => "now",
   });
-  return { run, attach, completed, offered, prompts, openedCalls };
+  return {
+    run,
+    attach,
+    completed,
+    offered,
+    prompts,
+    openedCalls,
+    settledCalls,
+    turnCount: () => turn,
+  };
 }
 
 const fetched = {
@@ -449,5 +464,36 @@ describe("sending the Researcher out to widen a Story's evidence", () => {
       ok: false,
       error: { code: "SOURCE_RESEARCH_NOT_ALLOWED" },
     });
+  });
+
+  it("reads how far it may go from the newsroom rather than from a constant", async () => {
+    // A search and a fetch cost a call each, so what a comparison piece costs depends on what a
+    // newsroom pays. One call buys one retrieval, and the second attempt is refused.
+    const test = workflow({
+      budget: { maximumCalls: 1, maximumTurns: 6 },
+      turns: [fetched, fetched, { kind: "output", output: { attach: [], reasoning: "Done." } }],
+    });
+
+    await settleAgentRun(test.run({ storyId: STORY, requestedBy: OPERATOR }) as never);
+
+    expect(test.openedCalls).toHaveLength(2);
+    expect(test.settledCalls[1]).toMatchObject({
+      outcome: "failed",
+      failure: { code: "TOOL_BUDGET_EXHAUSTED" },
+    });
+  });
+
+  it("stops on turns while it still has calls left to spend", async () => {
+    // Calls are money and turns are latency. A newsroom that will pay for twenty retrievals but
+    // will not wait through twenty round trips has to be able to say so.
+    const test = workflow({
+      budget: { maximumCalls: 20, maximumTurns: 2 },
+      turns: [fetched, fetched, fetched, fetched],
+    });
+
+    await settleAgentRun(test.run({ storyId: STORY, requestedBy: OPERATOR }) as never);
+
+    expect(test.turnCount()).toBe(2);
+    expect(test.openedCalls.length).toBeLessThan(20);
   });
 });

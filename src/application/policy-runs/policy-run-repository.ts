@@ -30,6 +30,11 @@ export interface PolicyRunRepository {
     readonly id: PolicyRunId;
     readonly step: PolicyRunStep;
     readonly observedAt: string;
+    /**
+     * The Story the policy has reached, for a run that began at a URL and did not have one.
+     * Passed once, at the step that creates it; a run may learn its Story but never change it.
+     */
+    readonly storyId?: StoryId;
   }): Promise<UpdatePolicyRunResult>;
   settle(command: {
     readonly id: PolicyRunId;
@@ -37,6 +42,7 @@ export interface PolicyRunRepository {
     readonly reason: string;
     readonly completedAt: string;
   }): Promise<UpdatePolicyRunResult>;
+  findById(id: PolicyRunId): Promise<PolicyRun | null>;
   findByStoryId(storyId: StoryId): Promise<readonly PolicyRun[]>;
   /** Policy runs that have reported nothing since the given moment. */
   listStaleRunning(before: string): Promise<readonly PolicyRun[]>;

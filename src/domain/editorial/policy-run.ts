@@ -18,7 +18,7 @@ function invalid(code: PolicyRunValidationCode, message: string): RecordPolicyRu
 export function recordPolicyRun(candidate: PolicyRun): RecordPolicyRunResult {
   if (
     !nonEmpty(candidate.id) ||
-    !nonEmpty(candidate.storyId) ||
+    !(candidate.storyId === null || nonEmpty(candidate.storyId)) ||
     !nonEmpty(candidate.startedAt) ||
     !nonEmpty(candidate.observedAt) ||
     candidate.requestedBy?.type !== "operator" ||
@@ -26,7 +26,7 @@ export function recordPolicyRun(candidate: PolicyRun): RecordPolicyRunResult {
   )
     return invalid(
       "POLICY_RUN_IDENTITY_INVALID",
-      "A policy run records its identity, its Story, and the operator who authorised it.",
+      "A policy run records its identity, the Story it has reached, and the operator who authorised it.",
     );
 
   if (

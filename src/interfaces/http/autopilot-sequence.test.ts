@@ -9,7 +9,11 @@ import {
   articleRevisionId,
   assignmentId,
   operatorId,
+  policyRunId,
   reviewDecisionId,
+  sourceEvidencePreparationId,
+  sourceExtractionId,
+  sourceId,
   storyId,
   type AgentRun,
   type DirectorReviewRecommendation,
@@ -20,8 +24,10 @@ import {
 
 import {
   AUTOPILOT_ASSIGNMENT_REASON,
-  AUTOPILOT_PUBLICATION_REASON,
   AUTOPILOT_REVIEW_DECISION_REASON,
+  AUTOPILOT_SOURCE_RELEVANCE,
+  AUTOPILOT_TRIAGE_REASON,
+  autopilotPublicationReason,
   createAutopilot,
   type AutopilotRuntimes,
 } from "./autopilot-sequence";
@@ -216,6 +222,7 @@ function runtimes(overrides: {
     readonly submitStoryReview: ReturnType<typeof vi.fn>;
     readonly recordStoryReviewDecision: ReturnType<typeof vi.fn>;
     readonly publishStory: ReturnType<typeof vi.fn>;
+    readonly deliverStory: ReturnType<typeof vi.fn>;
     readonly createWriterRevision: ReturnType<typeof vi.fn>;
   };
 } {
@@ -225,6 +232,7 @@ function runtimes(overrides: {
   const submitStoryReview = vi.fn(async () => ({ ok: true as const }));
   const recordStoryReviewDecision = vi.fn(async () => ({ ok: true as const }));
   const publishStory = vi.fn(async () => ({ ok: true as const }));
+  const deliverStory = vi.fn(async () => ({ ok: true as const, delivery: {} }));
   const createWriterRevision = vi.fn(async () =>
     started(writerRun("run-writer-revision", "article_revision")),
   );
@@ -234,6 +242,7 @@ function runtimes(overrides: {
       submitStoryReview,
       recordStoryReviewDecision,
       publishStory,
+      deliverStory,
       createWriterRevision,
     },
     runtimes: {
@@ -255,6 +264,7 @@ function runtimes(overrides: {
         submitStoryReview,
         recordStoryReviewDecision,
         publishStory,
+        deliverStory,
       },
       assignmentEditor: {
         generateAssignmentProposal: vi.fn(async () =>
@@ -354,6 +364,7 @@ describe("autopilot with research", () => {
         ok: true,
         storyId: identity,
         revisionCycles: 0,
+        delivery: { kind: "delivered" },
       });
     expect(harness.calls.publishStory).toHaveBeenCalledOnce();
   });
@@ -377,7 +388,12 @@ describe("autopilot sequence", () => {
     const { runId, result } = await complete(harness);
 
     expect(runId).toBe(agentRunId("run-proposal-1"));
-    expect(result).toEqual({ ok: true, storyId: identity, revisionCycles: 0 });
+    expect(result).toEqual({
+      ok: true,
+      storyId: identity,
+      revisionCycles: 0,
+      delivery: { kind: "delivered" },
+    });
     // The proposal is adopted verbatim; only the reason states that autopilot, not a human,
     // turned the suggestion into an Assignment.
     expect(harness.calls.assignStory).toHaveBeenCalledWith({
@@ -398,7 +414,7 @@ describe("autopilot sequence", () => {
     });
     expect(harness.calls.publishStory).toHaveBeenCalledWith({
       storyId: identity,
-      reason: AUTOPILOT_PUBLICATION_REASON,
+      reason: autopilotPublicationReason(recommendation("approve")),
       publishedBy: operator,
     });
   });
@@ -413,7 +429,12 @@ describe("autopilot sequence", () => {
     });
     const { result } = await complete(harness);
 
-    expect(result).toEqual({ ok: true, storyId: identity, revisionCycles: 1 });
+    expect(result).toEqual({
+      ok: true,
+      storyId: identity,
+      revisionCycles: 1,
+      delivery: { kind: "delivered" },
+    });
     expect(harness.calls.createWriterRevision).toHaveBeenCalledTimes(1);
     expect(harness.calls.submitStoryReview).toHaveBeenCalledTimes(2);
     expect(harness.calls.publishStory).toHaveBeenCalledTimes(1);
@@ -492,5 +513,402 @@ describe("autopilot sequence", () => {
 
     expect(result.ok).toBe(false);
     expect(harness.calls.assignStory).not.toHaveBeenCalled();
+  });
+});
+
+describe("autopilot from a URL", () => {
+  const source = {
+    id: sourceId("source-autopilot"),
+    type: "url" as const,
+    submittedUrl: "https://newsroom.test/apple-m5-ultra",
+    canonicalUrl: "https://newsroom.test/apple-m5-ultra" as never,
+    submittedBy: operator,
+    receivedAt: common.startedAt,
+  };
+  const extraction = {
+    id: sourceExtractionId("extraction-autopilot"),
+    sourceId: source.id,
+    extractor: { key: "firecrawl", version: "1" },
+    requestedBy: operator,
+    startedAt: common.startedAt,
+    completedAt: common.completedAt,
+    outcome: "succeeded" as const,
+    document: {
+      format: "markdown" as const,
+      content: "The M5 Ultra was announced today.",
+      title: "Apple announces the M5 Ultra",
+      byline: null,
+      publishedAt: null,
+      language: null,
+    },
+  };
+  const preparation = {
+    id: sourceEvidencePreparationId("preparation-autopilot"),
+    sourceId: source.id,
+    extractionId: extraction.id,
+    outcome: "succeeded" as const,
+  };
+
+  function urlHarness(
+    overrides: {
+      readonly extraction?: unknown;
+      readonly preparation?: unknown;
+      readonly deliverStory?: unknown;
+    } = {},
+  ) {
+    const base = runtimes({});
+    const createStory = vi.fn(async () => ({
+      ok: true as const,
+      story: story("intake", 0),
+    }));
+    const attachSourceToStory = vi.fn(async () => ({ ok: true as const }));
+    const recordSourceTriageDecision = vi.fn(async () => ({ ok: true as const }));
+    const preserveAndExtractUrlSource = vi.fn(async () => ({
+      ok: true as const,
+      source,
+      extraction: overrides.extraction ?? extraction,
+    }));
+    const prepareSourceEvidence = vi.fn(async () => ({
+      ok: true as const,
+      preparation: overrides.preparation ?? preparation,
+    }));
+    const calls = {
+      ...base.calls,
+      createStory,
+      attachSourceToStory,
+      recordSourceTriageDecision,
+      preserveAndExtractUrlSource,
+      prepareSourceEvidence,
+    };
+    return {
+      calls,
+      runtimes: {
+        ...base.runtimes,
+        story: {
+          ...base.runtimes.story,
+          createStory,
+          attachSourceToStory,
+          recordSourceTriageDecision,
+          ...(overrides.deliverStory === undefined ? {} : { deliverStory: overrides.deliverStory }),
+        },
+        sourceEvidence: { preserveAndExtractUrlSource },
+        evidencePreparation: { prepareSourceEvidence },
+      } as unknown as AutopilotRuntimes,
+    };
+  }
+
+  async function runFromUrl(harness: ReturnType<typeof urlHarness>) {
+    const started = await createAutopilot(harness.runtimes).startFromUrl({
+      submittedUrl: source.submittedUrl,
+      requestedBy: operator,
+    });
+    if (!started.ok) throw new Error(`autopilot refused to start: ${started.error.code}`);
+    return { source: started.source, result: await started.completion };
+  }
+
+  it("takes a URL and reaches a delivered post without an operator touching it", async () => {
+    const harness = urlHarness();
+    const { result } = await runFromUrl(harness);
+
+    expect(harness.calls.preserveAndExtractUrlSource).toHaveBeenCalledWith({
+      submittedUrl: source.submittedUrl,
+      submittedBy: operator,
+    });
+    expect(harness.calls.prepareSourceEvidence).toHaveBeenCalledWith({
+      sourceId: source.id,
+      extractionId: extraction.id,
+      requestedBy: operator,
+    });
+    expect(harness.calls.createStory).toHaveBeenCalledTimes(1);
+    expect(harness.calls.attachSourceToStory).toHaveBeenCalledTimes(1);
+    expect(harness.calls.recordSourceTriageDecision).toHaveBeenCalledTimes(1);
+    expect(harness.calls.publishStory).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      ok: true,
+      storyId: identity,
+      revisionCycles: 0,
+      delivery: { kind: "delivered" },
+    });
+  });
+
+  it("names the Story after the page it preserved rather than composing one", async () => {
+    const harness = urlHarness();
+    await runFromUrl(harness);
+
+    expect(harness.calls.createStory).toHaveBeenCalledWith({
+      title: "Apple announces the M5 Ultra",
+    });
+  });
+
+  it("falls back to the canonical URL when the page carried no title of its own", async () => {
+    const harness = urlHarness({
+      extraction: { ...extraction, document: { ...extraction.document, title: null } },
+    });
+    await runFromUrl(harness);
+
+    expect(harness.calls.createStory).toHaveBeenCalledWith({ title: source.canonicalUrl });
+  });
+
+  it("says plainly that nobody judged the Source it attached", async () => {
+    const harness = urlHarness();
+    await runFromUrl(harness);
+
+    const [attachment] = harness.calls.attachSourceToStory.mock.calls[0] as unknown as [
+      { readonly relevance: string },
+    ];
+    expect(attachment.relevance).toBe(AUTOPILOT_SOURCE_RELEVANCE);
+    expect(attachment.relevance).toMatch(/No operator has judged its relevance/);
+  });
+
+  it("records a triage nobody made as one nobody made", async () => {
+    const harness = urlHarness();
+    await runFromUrl(harness);
+
+    expect(harness.calls.recordSourceTriageDecision).toHaveBeenCalledWith({
+      sourceId: source.id,
+      decision: "new_story",
+      storyId: identity,
+      reason: AUTOPILOT_TRIAGE_REASON,
+      decidedBy: operator,
+    });
+    expect(AUTOPILOT_TRIAGE_REASON).toMatch(/without triage by an operator/);
+  });
+
+  it("delivers what it published, as a step of its own", async () => {
+    const harness = urlHarness();
+    await runFromUrl(harness);
+
+    expect(harness.calls.publishStory).toHaveBeenCalledTimes(1);
+    expect(harness.calls.deliverStory).toHaveBeenCalledWith({ storyId: identity });
+  });
+
+  it("leaves the Story published when the delivery fails, and retries nothing", async () => {
+    const deliverStory = vi.fn(async () => ({
+      ok: false as const,
+      error: { code: "DESTINATION_REJECTED", message: "The destination refused the page." },
+    }));
+    const harness = urlHarness({ deliverStory });
+    const { result } = await runFromUrl(harness);
+
+    expect(harness.calls.publishStory).toHaveBeenCalledTimes(1);
+    expect(deliverStory).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      ok: true,
+      storyId: identity,
+      revisionCycles: 0,
+      delivery: {
+        kind: "failed",
+        code: "DESTINATION_REJECTED",
+        message: "The destination refused the page.",
+      },
+    });
+  });
+
+  it("treats a newsroom with nowhere to deliver as finished rather than failed", async () => {
+    const deliverStory = vi.fn(async () => ({
+      ok: false as const,
+      error: {
+        code: "DESTINATION_NOT_CONFIGURED",
+        message: "This newsroom has no destination.",
+      },
+    }));
+    const { result } = await runFromUrl(urlHarness({ deliverStory }));
+
+    expect(result).toEqual({
+      ok: true,
+      storyId: identity,
+      revisionCycles: 0,
+      delivery: { kind: "not_configured" },
+    });
+  });
+
+  it("stops before opening a Story when the evidence it would rest on cannot be prepared", async () => {
+    const harness = urlHarness({
+      preparation: {
+        ...preparation,
+        outcome: "failed",
+        failure: { code: "MODEL_OUTPUT_INVALID", retryable: true },
+      },
+    });
+    const { result } = await runFromUrl(harness);
+
+    expect(result).toEqual({
+      ok: false,
+      storyId: null,
+      stoppedAt: "source_preparation",
+      stop: {
+        kind: "workflow_refused",
+        code: "MODEL_OUTPUT_INVALID",
+        message: "The evidence this Story would rest on could not be prepared.",
+      },
+    });
+    expect(harness.calls.createStory).not.toHaveBeenCalled();
+    expect(harness.calls.prepareSourceEvidence).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses the URL at the door rather than automating anything", async () => {
+    const harness = urlHarness();
+    (
+      harness.runtimes.sourceEvidence!.preserveAndExtractUrlSource as ReturnType<typeof vi.fn>
+    ).mockResolvedValueOnce({
+      ok: false,
+      stage: "preservation",
+      error: { code: "DUPLICATE_SOURCE", message: "This newsroom already has that page." },
+    });
+
+    const started = await createAutopilot(harness.runtimes).startFromUrl({
+      submittedUrl: source.submittedUrl,
+      requestedBy: operator,
+    });
+
+    expect(started).toEqual({
+      ok: false,
+      stage: "preservation",
+      error: { code: "DUPLICATE_SOURCE", message: "This newsroom already has that page." },
+    });
+    expect(harness.calls.createStory).not.toHaveBeenCalled();
+  });
+
+  it("records the whole journey against the policy run, learning its Story on the way", async () => {
+    const observed: Array<{ readonly step: string; readonly storyId?: string }> = [];
+    const settled: unknown[] = [];
+    const harness = urlHarness();
+    const withPolicy = {
+      ...harness.runtimes,
+      policyRuns: {
+        append: vi.fn(async (run: unknown) => ({ ok: true as const, run })),
+        observe: vi.fn(async (command: { step: string; storyId?: string }) => {
+          observed.push({ step: command.step, storyId: command.storyId });
+          return { ok: true as const, run: {} };
+        }),
+        settle: vi.fn(async (command: unknown) => {
+          settled.push(command);
+          return { ok: true as const, run: {} };
+        }),
+      },
+    } as unknown as AutopilotRuntimes;
+
+    const started = await createAutopilot(withPolicy).startFromUrl({
+      submittedUrl: source.submittedUrl,
+      requestedBy: operator,
+      createPolicyRunId: () => policyRunId("policy-url-run"),
+    });
+    if (!started.ok) throw new Error("autopilot refused to start");
+    await started.completion;
+
+    expect(observed.map(({ step }) => step)).toEqual([
+      "source_preparation",
+      "story_creation",
+      "source_attachment",
+      "source_triage",
+      "assignment_proposal",
+      "assignment",
+      "writer_draft",
+      "review_submission",
+      "director_review",
+      "review_decision",
+      "publication",
+      "delivery",
+    ]);
+    // The run is written before there is a Story and learns which one it made when it makes it.
+    expect(observed[0]?.storyId).toBeUndefined();
+    expect(observed.at(-1)?.storyId).toBe(identity);
+    expect(settled).toHaveLength(1);
+  });
+
+  it("leaves what the Researcher attaches described in the Researcher's own words", async () => {
+    // The Researcher writes its own relevance for anything it attaches, and that judgement is
+    // about evidence it actually retrieved. Autopilot describes only the page it was handed;
+    // asking for a second account of the rest would be inventing a second opinion.
+    const harness = urlHarness();
+    const researchStorySources = vi.fn(async () => ({
+      ok: true,
+      runId: agentRunId("run-research"),
+      completion: Promise.resolve({}),
+    }));
+    const started = await createAutopilot({
+      ...harness.runtimes,
+      researcher: { researchStorySources },
+    } as unknown as AutopilotRuntimes).startFromUrl({
+      submittedUrl: source.submittedUrl,
+      requestedBy: operator,
+      research: true,
+    });
+    if (!started.ok) throw new Error("autopilot refused to start");
+    await started.completion;
+
+    expect(researchStorySources).toHaveBeenCalledTimes(1);
+    expect(harness.calls.attachSourceToStory).toHaveBeenCalledTimes(1);
+  });
+
+  it("settles the policy run rather than leaving it in flight when the URL is refused", async () => {
+    const settled: Array<{ readonly conclusion: string }> = [];
+    const harness = urlHarness();
+    (
+      harness.runtimes.sourceEvidence!.preserveAndExtractUrlSource as ReturnType<typeof vi.fn>
+    ).mockResolvedValueOnce({
+      ok: false,
+      stage: "preservation",
+      error: { code: "INVALID_SOURCE_URL", message: "That is not a URL." },
+    });
+    const withPolicy = {
+      ...harness.runtimes,
+      policyRuns: {
+        append: vi.fn(async (run: unknown) => ({ ok: true as const, run })),
+        observe: vi.fn(async () => ({ ok: true as const, run: {} })),
+        settle: vi.fn(async (command: { conclusion: string }) => {
+          settled.push(command);
+          return { ok: true as const, run: {} };
+        }),
+      },
+    } as unknown as AutopilotRuntimes;
+
+    await createAutopilot(withPolicy).startFromUrl({
+      submittedUrl: "not-a-url",
+      requestedBy: operator,
+      createPolicyRunId: () => policyRunId("policy-url-refused"),
+    });
+
+    expect(settled).toEqual([expect.objectContaining({ conclusion: "stopped" })]);
+  });
+});
+
+describe("what autopilot may say about itself", () => {
+  it("states the recommendation it followed instead of judging the Article", () => {
+    const reason = autopilotPublicationReason(recommendation("approve"));
+
+    expect(reason).toBe(
+      "Autopilot published this on the Director's approve recommendation; no check failed.",
+    );
+  });
+
+  it("names a check that still wanted changes rather than claiming none did", () => {
+    const review = recommendation("approve");
+    const reason = autopilotPublicationReason({
+      ...review,
+      checks: {
+        ...review.checks,
+        accuracy: { ...review.checks.accuracy, status: "needs_changes" },
+      },
+    });
+
+    expect(reason).toBe(
+      "Autopilot published this on the Director's approve recommendation; accuracy still wanted changes.",
+    );
+  });
+
+  it("writes every reason it needs without asking a model for one", async () => {
+    // Every reason autopilot writes is a module constant or is assembled from records that
+    // already exist. If one of them ever needed a model, this list would have to grow.
+    const reasons = [
+      AUTOPILOT_ASSIGNMENT_REASON,
+      AUTOPILOT_REVIEW_DECISION_REASON,
+      AUTOPILOT_SOURCE_RELEVANCE,
+      AUTOPILOT_TRIAGE_REASON,
+      autopilotPublicationReason(recommendation("approve")),
+    ];
+
+    expect(reasons.every((reason) => reason.trim().length > 0)).toBe(true);
+    expect(reasons.filter((reason) => reason.startsWith("Autopilot"))).toHaveLength(3);
   });
 });

@@ -42,9 +42,20 @@ export const SOURCE_RESEARCH_PROMPT = Object.freeze({
   version: "1",
 });
 
-/** A Story rests on the evidence behind it, so widening it is bounded deliberately. */
-export const DEFAULT_RESEARCH_CALL_BUDGET = 6;
-export const DEFAULT_RESEARCH_TURN_BUDGET = 6;
+/**
+ * What a newsroom that has chosen nothing spends on widening a Story's evidence.
+ *
+ * Twelve calls is derived rather than picked: a search and a fetch cost one each, so four outside
+ * pages cost eight, the archive check costs one, and the rest is what a publisher refusing a
+ * fetch costs — which happens, and cost one real run its second source. Six bought two pages at
+ * best and one in practice, which is not a comparison.
+ *
+ * Turns are separate and lower. A turn is a round trip to the model and may ask for several tools
+ * at once, so turns bound how long an operator waits while calls bound what they pay. They were
+ * the same number until now only because nobody had separated them.
+ */
+export const DEFAULT_RESEARCH_CALL_BUDGET = 12;
+export const DEFAULT_RESEARCH_TURN_BUDGET = 8;
 
 export const sourceResearchOutputSchema = z
   .object({
@@ -153,8 +164,14 @@ export function createResearchStorySources(dependencies: {
   /** Who this newsroom is, read when the run starts. A newsroom that has said nothing is normal. */
   readonly readNewsroomIdentity?: () => Promise<NewsroomIdentity | null>;
   readonly now: () => string;
-  readonly maximumCalls?: number;
-  readonly maximumTurns?: number;
+  /**
+   * The budget, read when a run starts rather than when the workflow is built, so an operator
+   * who widens it in the settings screen reaches the next run rather than the next restart.
+   */
+  readonly readResearchBudget?: () => Promise<{
+    readonly maximumCalls: number;
+    readonly maximumTurns: number;
+  }>;
 }) {
   return async (command: {
     readonly storyId: StoryId;
@@ -303,6 +320,10 @@ export function createResearchStorySources(dependencies: {
         }),
       ]);
 
+      const budget = (await dependencies.readResearchBudget?.()) ?? {
+        maximumCalls: DEFAULT_RESEARCH_CALL_BUDGET,
+        maximumTurns: DEFAULT_RESEARCH_TURN_BUDGET,
+      };
       const standards = (await dependencies.readNewsroomStandards?.()) ?? null;
       const newsroom = (await dependencies.readNewsroomIdentity?.()) ?? null;
       const { result } = await runToolAssisted({
@@ -318,8 +339,8 @@ export function createResearchStorySources(dependencies: {
         schema: sourceResearchOutputSchema,
         runId: id,
         storyId: story.id,
-        maximumCalls: dependencies.maximumCalls ?? DEFAULT_RESEARCH_CALL_BUDGET,
-        maximumTurns: dependencies.maximumTurns ?? DEFAULT_RESEARCH_TURN_BUDGET,
+        maximumCalls: budget.maximumCalls,
+        maximumTurns: budget.maximumTurns,
         createToolCallId: dependencies.createToolCallId,
         now: dependencies.now,
       });

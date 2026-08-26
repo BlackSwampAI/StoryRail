@@ -1,8 +1,11 @@
 import {
+  MAXIMUM_RESEARCH_CALL_BUDGET,
+  MAXIMUM_RESEARCH_TURN_BUDGET,
   SITE_MODEL_ROLES,
   type RecordSiteSettingsResult,
   type SiteDestinationSettings,
   type SiteModelIds,
+  type SiteResearchSettings,
   type SiteSearchSettings,
   type SiteSettings,
 } from "./site-settings-types";
@@ -78,6 +81,37 @@ function readSearch(
 }
 
 /**
+ * A research budget is both numbers or neither.
+ *
+ * They are checked as whole numbers within a ceiling rather than accepted as typed: a fractional
+ * budget would compare against a running count that only ever moves by one, and a budget of a
+ * thousand is a run nobody would sit through and a bill nobody meant to authorise. Zero is
+ * refused because a Researcher with no calls cannot retrieve the page it would attach, and a run
+ * that can only fail is worse than one an operator never started.
+ */
+function readResearch(
+  value: unknown,
+): { readonly ok: true; readonly research: SiteResearchSettings } | { readonly ok: false } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return { ok: false };
+  const candidate = value as Record<string, unknown>;
+  if (Object.keys(candidate).length !== 2) return { ok: false };
+  const { maximumCalls, maximumTurns } = candidate;
+  if (
+    !Number.isInteger(maximumCalls) ||
+    !Number.isInteger(maximumTurns) ||
+    (maximumCalls as number) < 1 ||
+    (maximumTurns as number) < 1 ||
+    (maximumCalls as number) > MAXIMUM_RESEARCH_CALL_BUDGET ||
+    (maximumTurns as number) > MAXIMUM_RESEARCH_TURN_BUDGET
+  )
+    return { ok: false };
+  return {
+    ok: true,
+    research: { maximumCalls: maximumCalls as number, maximumTurns: maximumTurns as number },
+  };
+}
+
+/**
  * Settings are validated before they are stored rather than when a run reaches for them, because
  * a blank model id discovered mid-run costs an operator an Agent Run to find out about.
  */
@@ -88,13 +122,16 @@ export function recordSiteSettings(candidate: unknown): RecordSiteSettingsResult
     readonly models?: unknown;
     readonly destination?: unknown;
     readonly search?: unknown;
+    readonly research?: unknown;
   };
   if (
     Object.keys(supplied).some(
-      (key) => key !== "models" && key !== "destination" && key !== "search",
+      (key) => key !== "models" && key !== "destination" && key !== "search" && key !== "research",
     )
   )
-    return invalid("Settings hold the agent models and, at most, a destination and a search.");
+    return invalid(
+      "Settings hold the agent models and, at most, a destination, a search, and a research budget.",
+    );
   const models = supplied.models;
   if (typeof models !== "object" || models === null || Array.isArray(models))
     return invalid("Settings name a model for every agent role.");
@@ -142,12 +179,29 @@ export function recordSiteSettings(candidate: unknown): RecordSiteSettingsResult
       },
     };
 
+  // Absent and explicitly null both mean this newsroom has not chosen a budget, and a newsroom
+  // that has not chosen one runs on what the installation shipped with rather than on nothing.
+  const suppliedResearch = supplied.research;
+  const research =
+    suppliedResearch === undefined || suppliedResearch === null
+      ? null
+      : readResearch(suppliedResearch);
+  if (research !== null && !research.ok)
+    return {
+      ok: false,
+      error: {
+        code: "SITE_SETTINGS_RESEARCH_INVALID",
+        message: `A research budget names whole numbers of calls and turns, each at least one and at most ${MAXIMUM_RESEARCH_CALL_BUDGET} calls and ${MAXIMUM_RESEARCH_TURN_BUDGET} turns.`,
+      },
+    };
+
   return {
     ok: true,
     settings: {
       models: trimmed as unknown as SiteModelIds,
       destination: destination === null ? null : destination.destination,
       search: search === null ? null : search.search,
+      research: research === null ? null : research.research,
     } satisfies SiteSettings,
   };
 }
