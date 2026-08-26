@@ -248,6 +248,7 @@ export function describeStoryInspectionRepositoryContract(
           transitions: [],
           agentRuns: [],
           reviewDecisions: [],
+          deliveries: [],
           article: null,
         },
       });
@@ -268,6 +269,7 @@ export function describeStoryInspectionRepositoryContract(
           transitions: [],
           agentRuns: [],
           reviewDecisions: [],
+          deliveries: [],
           article: null,
         },
       });
@@ -383,6 +385,7 @@ export function describeStoryInspectionRepositoryContract(
           transitions: [],
           agentRuns: [],
           reviewDecisions: [],
+          deliveries: [],
           article: null,
         },
       });
@@ -421,6 +424,7 @@ export function describeStoryInspectionRepositoryContract(
           transitions: [],
           agentRuns: [],
           reviewDecisions: [],
+          deliveries: [],
           article: null,
         },
       });
@@ -445,6 +449,7 @@ export function describeStoryInspectionRepositoryContract(
           sources: [{ extractions: [extraction] }],
           agentRuns: [first, second],
           reviewDecisions: [],
+          deliveries: [],
           article: null,
         },
       });
@@ -483,6 +488,7 @@ export function describeStoryInspectionRepositoryContract(
           transitions: [],
           agentRuns: [],
           reviewDecisions: [],
+          deliveries: [],
           article: null,
         },
       });
@@ -582,6 +588,7 @@ export function describeStoryInspectionRepositoryContract(
         transitions: [],
         agentRuns: [],
         reviewDecisions: [],
+        deliveries: [],
         article: null,
       });
       expect(second.inspection).not.toBe(first.inspection);
@@ -669,6 +676,7 @@ export function createReferenceStoryInspectionRepositoryHarness(): StoryInspecti
               transitions: [],
               agentRuns: agentRuns.get(storyIdentity) ?? [],
               reviewDecisions: [],
+              deliveries: [],
               article: null,
             }),
           };

@@ -147,6 +147,7 @@ function clients() {
         transitions: [],
         agentRuns: [],
         reviewDecisions: [],
+        deliveries: [],
         article: null,
       },
     })),
@@ -191,6 +192,10 @@ function clients() {
       message: "The Story request could not be completed.",
     })),
     recordReviewDecision: vi.fn<StoryClient["recordReviewDecision"]>(async () => ({
+      kind: "unavailable",
+      message: "The Story request could not be completed.",
+    })),
+    deliverStory: vi.fn<StoryClient["deliverStory"]>(async () => ({
       kind: "unavailable",
       message: "The Story request could not be completed.",
     })),

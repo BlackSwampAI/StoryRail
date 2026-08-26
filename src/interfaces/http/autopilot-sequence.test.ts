@@ -248,6 +248,7 @@ function runtimes(overrides: {
             agentRuns: [],
             article: null,
             reviewDecisions: [],
+            deliveries: [],
           },
         })),
         assignStory,

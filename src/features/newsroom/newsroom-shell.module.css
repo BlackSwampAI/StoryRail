@@ -308,6 +308,29 @@
   color: var(--tone-149);
 }
 
+/*
+ * Delivery state sits inside the published task card, so it is set apart from the prose around
+ * it rather than styled as another paragraph: it is a record of what happened outside StoryRail.
+ */
+.deliveryRecord {
+  margin: 0.75rem 0 1rem;
+  border-left: 3px solid var(--tone-45);
+  padding-left: 0.9rem;
+  color: var(--tone-149);
+}
+
+.deliveryRecord p {
+  margin: 0 0 0.4rem;
+}
+
+/*
+ * A destination that renamed the page is the operator's only warning that the post is at a
+ * different address than the headline implies, so it is marked rather than merely mentioned.
+ */
+.deliverySlugWarning {
+  color: var(--signal-15);
+}
+
 .reviewChecks {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));

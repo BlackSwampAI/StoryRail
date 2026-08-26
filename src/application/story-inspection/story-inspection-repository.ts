@@ -8,6 +8,7 @@ import type {
   SourceExtraction,
   SourceEvidencePreparation,
   Story,
+  StoryDelivery,
   StoryId,
   StorySourceAttachment,
   StoryTransitionReceipt,
@@ -35,6 +36,13 @@ export interface StoryInspection {
     readonly revisions: readonly ArticleRevision[];
   } | null;
   readonly reviewDecisions: readonly ReviewDecision[];
+  /**
+   * Every attempt to put this Story somewhere outside StoryRail, in the order they were made.
+   * Delivery travels with the rest of the Story's record rather than through a route of its own,
+   * because a second read model of the same Story could answer "delivered" while this one still
+   * answered "published and nowhere".
+   */
+  readonly deliveries: readonly StoryDelivery[];
 }
 
 export interface StoryInspectionNotFoundError {

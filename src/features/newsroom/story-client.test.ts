@@ -95,6 +95,7 @@ const INSPECTION = {
   transitions: [],
   agentRuns: [],
   reviewDecisions: [],
+  deliveries: [],
   article: null,
 };
 const AGENT_RUN = {
@@ -257,6 +258,7 @@ describe("story-client", () => {
       transitions: [],
       agentRuns: [],
       reviewDecisions: [],
+      deliveries: [],
       article: null,
     };
     const timestamps = [
@@ -349,6 +351,7 @@ describe("story-client", () => {
         transitions: [],
         agentRuns: [],
         reviewDecisions: [],
+        deliveries: [],
         article: null,
       },
       INSPECTION,
@@ -407,6 +410,7 @@ describe("story-client", () => {
           transitions: [],
           agentRuns: [],
           reviewDecisions: [],
+          deliveries: [],
           article: null,
         },
       }),
@@ -881,6 +885,147 @@ describe("story-client", () => {
     ).resolves.toEqual({
       kind: "completed",
       value: { story: rejected, transitionReceipt },
+    });
+  });
+
+  it("reads back an inspection carrying deliveries intact", async () => {
+    const delivery = {
+      id: "delivery-0021",
+      storyId: STORY.id,
+      revisionId: "revision-0021",
+      destination: "wordpress",
+      remoteId: "412",
+      request: {
+        operation: "create",
+        slug: "a-real-newsroom-story",
+        draft: true,
+        bodyCharacters: 640,
+      },
+      startedAt: "2026-08-25T09:00:00.000Z",
+      outcome: "succeeded",
+      completedAt: "2026-08-25T09:00:04.000Z",
+      result: {
+        status: 201,
+        message: null,
+        requestedSlug: "a-real-newsroom-story",
+        assignedSlug: "a-real-newsroom-story-2",
+      },
+    } as const;
+    const inspection = { ...INSPECTION, deliveries: [delivery] };
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(200, { ok: true, inspection }),
+    );
+
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).inspectStory(STORY.id),
+    ).resolves.toEqual({ kind: "completed", value: inspection });
+  });
+
+  it("refuses an inspection whose delivery claims success without naming the page", async () => {
+    const nameless = {
+      id: "delivery-nameless",
+      storyId: STORY.id,
+      revisionId: "revision-0021",
+      destination: "wordpress",
+      remoteId: null,
+      request: {
+        operation: "create",
+        slug: "a-real-newsroom-story",
+        draft: true,
+        bodyCharacters: 640,
+      },
+      startedAt: "2026-08-25T09:00:00.000Z",
+      outcome: "succeeded",
+      completedAt: "2026-08-25T09:00:04.000Z",
+      result: { status: 201, message: null },
+    };
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(200, { ok: true, inspection: { ...INSPECTION, deliveries: [nameless] } }),
+    );
+
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).inspectStory(STORY.id),
+    ).resolves.toEqual({ kind: "unavailable", message: STORY_REQUEST_UNAVAILABLE_MESSAGE });
+  });
+
+  it("reports an accepted delivery with the record the newsroom wrote for it", async () => {
+    const delivery = {
+      id: "delivery-accepted",
+      storyId: STORY.id,
+      revisionId: "revision-0021",
+      destination: "wordpress",
+      remoteId: "412",
+      request: {
+        operation: "update",
+        slug: "a-real-newsroom-story",
+        draft: false,
+        bodyCharacters: 640,
+      },
+      startedAt: "2026-08-25T09:00:00.000Z",
+      outcome: "succeeded",
+      completedAt: "2026-08-25T09:00:04.000Z",
+      result: { status: 200, message: null },
+    } as const;
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(201, { ok: true, delivery }),
+    );
+
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).deliverStory(STORY.id),
+    ).resolves.toEqual({ kind: "delivered", delivery });
+    expect(fetch).toHaveBeenCalledWith(`/api/sites/${SITE_ID}/stories/${STORY.id}/deliveries`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: "{}",
+    });
+  });
+
+  it("keeps a delivery the destination refused apart from one that was never attempted", async () => {
+    const refused = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(502, {
+        ok: false,
+        error: { code: "DESTINATION_REJECTED", message: "The destination declined the page." },
+      }),
+    );
+    const neverAttempted = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(503, {
+        ok: false,
+        error: {
+          code: "CREDENTIAL_NOT_CONFIGURED",
+          reason: "CREDENTIAL_NOT_CONFIGURED",
+          slot: "wordpress_application_password",
+          message: "No WordPress credential is configured.",
+        },
+      }),
+    );
+
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch: refused }).deliverStory(STORY.id),
+    ).resolves.toMatchObject({ kind: "refused", error: { code: "DESTINATION_REJECTED" } });
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch: neverAttempted }).deliverStory(STORY.id),
+    ).resolves.toMatchObject({
+      kind: "not-attempted",
+      error: { code: "CREDENTIAL_NOT_CONFIGURED" },
+    });
+  });
+
+  it("reports a Story that is not published as a refusal the operator can read", async () => {
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(409, {
+        ok: false,
+        error: {
+          code: "STORY_NOT_PUBLISHED",
+          message: "Only a published Story is delivered to a destination.",
+        },
+      }),
+    );
+
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).deliverStory(STORY.id),
+    ).resolves.toMatchObject({
+      kind: "application-failure",
+      error: { code: "STORY_NOT_PUBLISHED" },
     });
   });
 

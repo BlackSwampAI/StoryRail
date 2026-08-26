@@ -1970,6 +1970,62 @@ describePostgres("PostgreSQL persistence repositories", () => {
       });
     });
 
+    // The screen answers "did it send?" from the Story's own inspection, so the deliveries have
+    // to arrive with everything else. A separate read would be a second account of the same
+    // Story, able to say "delivered" while the first still said "published and nowhere".
+    it("reports a Story's deliveries as part of its inspection, oldest first", async () => {
+      const published = await publishReport("delivery-inspected", {
+        headline: "A delivered headline",
+        body: "The body of a delivered report.",
+        publishedAt: "2026-08-24T09:00:00.000Z",
+      });
+      const repository = createPostgresStoryDeliveryRepository({ pool });
+      const first = intent({
+        id: "delivery-inspected-first",
+        storyId: published.storyId,
+        revisionId: "revision-delivery-inspected",
+        remoteId: null,
+      });
+      await repository.append(first);
+      await repository.complete({
+        ...(first as object),
+        outcome: "failed",
+        completedAt: "2026-08-24T10:00:01.000Z",
+        failure: { code: "DESTINATION_UNREACHABLE", message: null },
+      } as never);
+      const second = {
+        ...(intent({
+          id: "delivery-inspected-second",
+          storyId: published.storyId,
+          revisionId: "revision-delivery-inspected",
+          remoteId: null,
+        }) as object),
+        startedAt: "2026-08-24T11:00:00.000Z",
+      } as never;
+      await repository.append(second);
+      await repository.complete({
+        ...(second as object),
+        remoteId: "412",
+        outcome: "succeeded",
+        completedAt: "2026-08-24T11:00:02.000Z",
+        result: { status: 201, message: null },
+      } as never);
+
+      await expect(
+        createPostgresStoryInspectionRepository({ pool, siteId: DEFAULT_SITE }).inspect(
+          published.storyId,
+        ),
+      ).resolves.toMatchObject({
+        ok: true,
+        inspection: {
+          deliveries: [
+            { id: "delivery-inspected-first", outcome: "failed" },
+            { id: "delivery-inspected-second", outcome: "succeeded", remoteId: "412" },
+          ],
+        },
+      });
+    });
+
     it("refuses to call a delivery accepted when it cannot name the page it wrote", async () => {
       const published = await publishReport("delivery-nameless", {
         headline: "A delivered headline",
@@ -4926,6 +4982,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           transitions: [],
           agentRuns: [],
           reviewDecisions: [],
+          deliveries: [],
           article: null,
         },
       };
