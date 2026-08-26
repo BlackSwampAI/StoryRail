@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { settleAgentRun } from "@/test/settle-agent-run";
 import type { SourceExtractor } from "@/adapters/source-extraction";
 import type { ArchiveRepository } from "@/application/archive";
+import type { WebSearchProvider } from "@/application/web-search";
 import type { ToolAssistedModel } from "@/application/model";
 import {
   agentProfileId,
@@ -15,6 +16,7 @@ import {
   storyId,
   type AgentProfile,
   type AgentRun,
+  type AgentToolCall,
   type NewsroomIdentity,
 } from "@/domain/editorial";
 
@@ -104,11 +106,13 @@ function workflow(options: {
   readonly state?: "intake" | "assigned";
   readonly attachOk?: boolean;
   readonly archive?: ArchiveRepository;
+  readonly webSearch?: WebSearchProvider;
   readonly readNewsroomIdentity?: () => Promise<NewsroomIdentity | null>;
   readonly readNewsroomStandards?: () => Promise<string | null>;
 }) {
   const attach = vi.fn(async () => ({ ok: options.attachOk !== false }) as never);
   const completed: AgentRun[] = [];
+  const openedCalls: AgentToolCall[] = [];
   const offered: string[][] = [];
   const prompts: string[] = [];
   let turn = 0;
@@ -132,12 +136,16 @@ function workflow(options: {
       listByStoryId: vi.fn(),
     },
     toolCalls: {
-      append: vi.fn(async (call) => ({ ok: true as const, call })),
+      append: vi.fn(async (call) => {
+        openedCalls.push(call);
+        return { ok: true as const, call };
+      }),
       complete: vi.fn(async (call) => ({ ok: true as const, call })),
       listByRunId: vi.fn(),
     },
     persistence: { attach },
     archive: options.archive,
+    resolveWebSearch: async () => options.webSearch ?? null,
     extractor: {
       descriptor: { key: "test", version: "1" },
       extract:
@@ -176,7 +184,7 @@ function workflow(options: {
     readNewsroomStandards: options.readNewsroomStandards,
     now: () => "now",
   });
-  return { run, attach, completed, offered, prompts };
+  return { run, attach, completed, offered, prompts, openedCalls };
 }
 
 const fetched = {
@@ -331,6 +339,96 @@ describe("sending the Researcher out to widen a Story's evidence", () => {
 
     expect(test.offered[0]).toEqual(["search_archive", "fetch_url"]);
     expect(search).toHaveBeenCalledWith(expect.objectContaining({ excludeStoryId: STORY }));
+  });
+
+  it("offers web search to a newsroom that has configured somewhere to search", async () => {
+    const test = workflow({
+      webSearch: { search: async () => ({ ok: true, results: [] }) },
+      turns: [{ kind: "output", output: { attach: [], reasoning: "Nothing to add." } }],
+    });
+
+    await settleAgentRun(test.run({ storyId: STORY, requestedBy: OPERATOR }) as never);
+
+    expect(test.offered[0]).toEqual(["web_search", "fetch_url"]);
+  });
+
+  it("leaves a newsroom with no search instance without the tool", async () => {
+    const test = workflow({
+      turns: [{ kind: "output", output: { attach: [], reasoning: "Nothing to add." } }],
+    });
+
+    await settleAgentRun(test.run({ storyId: STORY, requestedBy: OPERATOR }) as never);
+
+    expect(test.offered[0]).not.toContain("web_search");
+  });
+
+  it("records the search before the query leaves the process", async () => {
+    let openWhenAsked: readonly AgentToolCall[] = [];
+    const test = workflow({
+      webSearch: {
+        search: async () => {
+          openWhenAsked = [...test.openedCalls];
+          return { ok: true as const, results: [] };
+        },
+      },
+      turns: [
+        {
+          kind: "tools",
+          calls: [
+            { callId: "a", name: "web_search", arguments: { query: "unified memory bandwidth" } },
+          ],
+        },
+        { kind: "output", output: { attach: [], reasoning: "Nothing worth attaching." } },
+      ],
+    });
+
+    await settleAgentRun(test.run({ storyId: STORY, requestedBy: OPERATOR }) as never);
+
+    expect(openWhenAsked).toMatchObject([
+      {
+        tool: "web_search",
+        outcome: "running",
+        request: { query: "unified memory bandwidth" },
+      },
+    ]);
+  });
+
+  it("never lets a search result reach the Story as evidence", async () => {
+    // Search offers a place to look. Only fetch_url retrieves a page, and only a retrieved page
+    // becomes a Source, so a candidate the Researcher tries to attach without reading is refused
+    // by the same rule that refuses a URL it invented.
+    const test = workflow({
+      webSearch: {
+        search: async () => ({
+          ok: true as const,
+          results: [
+            {
+              title: "A promising page",
+              url: "https://example.test/unread",
+              snippet: "It says the memory bandwidth is higher.",
+              engine: "duckduckgo",
+            },
+          ],
+        }),
+      },
+      turns: [
+        {
+          kind: "tools",
+          calls: [{ callId: "a", name: "web_search", arguments: { query: "memory bandwidth" } }],
+        },
+        {
+          kind: "output",
+          output: {
+            attach: [{ url: "https://example.test/unread", relevance: "The search found it." }],
+            reasoning: "The snippet says so.",
+          },
+        },
+      ],
+    });
+
+    await settleAgentRun(test.run({ storyId: STORY, requestedBy: OPERATOR }) as never);
+
+    expect(test.attach).not.toHaveBeenCalled();
   });
 
   it("runs without an archive rather than offering a tool it cannot answer", async () => {

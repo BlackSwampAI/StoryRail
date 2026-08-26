@@ -31,6 +31,7 @@ const CONFIGURED: SiteSettings = {
     package: "studiocms/markdown",
     draft: true,
   },
+  search: null,
 };
 
 const WORDPRESS: SiteSettings = {
@@ -41,6 +42,7 @@ const WORDPRESS: SiteSettings = {
     username: "storyrail",
     draft: false,
   },
+  search: null,
 };
 
 describe("resolving the destination a newsroom delivers to", () => {
@@ -115,7 +117,7 @@ describe("resolving the destination a newsroom delivers to", () => {
   it("does not read a token for a newsroom with nowhere to deliver", async () => {
     let asked = false;
     const directory = createSiteDeliveryDestinationDirectory({
-      settings: settings({ models: MODELS, destination: null }),
+      settings: settings({ models: MODELS, destination: null, search: null }),
       resolveApiKey: async () => {
         asked = true;
         return { ok: true, apiKey: "token-1" };

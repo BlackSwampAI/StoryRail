@@ -306,7 +306,7 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
         siteCredentials.listConfigured(),
       ]);
       return {
-        settings: stored ?? { models: DEFAULT_SITE_MODEL_IDS, destination: null },
+        settings: stored ?? { models: DEFAULT_SITE_MODEL_IDS, destination: null, search: null },
         credentials,
       };
     },

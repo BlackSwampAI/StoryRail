@@ -9,6 +9,7 @@ import {
   type AgentToolCallRepository,
 } from "@/application/agent-tools";
 import { createSearchArchiveTool, type ArchiveRepository } from "@/application/archive";
+import { createWebSearchTool, type WebSearchProvider } from "@/application/web-search";
 import type { ToolAssistedModel } from "@/application/model";
 import type { StoryInspectionRepository } from "@/application/story-inspection";
 import type { SourceExtractor } from "@/adapters/source-extraction";
@@ -65,6 +66,8 @@ export function researcherSystemPrompt(profileInstructions: string): string {
   return `You are StoryRail's supervised Researcher. Your job is to widen the evidence behind one Story before anyone writes about it.
 
 You are given the Story and the evidence already gathered. Start by using the search_archive tool to find out whether this newsroom has already reported on the subject. What it returns is this newsroom's own earlier work, not evidence: read it to learn what has already been said and which Sources that reporting rested on, and never treat it as support for anything. Then use the fetch_url tool to retrieve pages that the evidence points at or plainly depends on: the announcement it summarises, the specification it cites, the earlier report it corrects. Retrieve before you judge; never attach a page you did not retrieve.
+
+When a web_search tool is offered, use it to find pages nobody handed you: what is already attached rarely names every source worth setting beside it. What it returns is a list of places to look — titles, addresses and engine-written snippets — and none of it is evidence. A snippet supports nothing and may never be cited; a result becomes citable only once you retrieve it with fetch_url, which is what makes it a Source. Search widely, then retrieve the few that are worth reading.
 
 Attach only what a reporter would actually cite, and say in one sentence what each retrieved page adds that the existing evidence does not. Prefer a page that corroborates, dates, or complicates the existing evidence over one that repeats it, and prefer what is new since the newsroom last covered this over what its earlier reporting already established. Attaching nothing is a valid answer when nothing further is worth citing.
 
@@ -132,6 +135,12 @@ export function createResearchStorySources(dependencies: {
   readonly extractor: SourceExtractor;
   /** What the newsroom has already published. Absent leaves the run without an archive. */
   readonly archive?: ArchiveRepository;
+  /**
+   * Somewhere to look for pages nobody handed the Researcher, resolved when the run starts
+   * because both halves of it are per-Site configuration. Answering null is ordinary and leaves
+   * the run without the tool.
+   */
+  readonly resolveWebSearch?: () => Promise<WebSearchProvider | null>;
   // Resolution is asynchronous because the model identifier is per-Site configuration read
   // from the store when the run starts, not a value the process was started with.
   readonly resolveModel: (descriptor: ModelDescriptor | null) => Promise<ResearcherModelResolution>;
@@ -267,6 +276,9 @@ export function createResearchStorySources(dependencies: {
       // Everything the tool retrieves is kept, so a page the Researcher chooses to attach can be
       // persisted as evidence rather than fetched a second time.
       const retrieved = new Map<string, ExtractedSourceDocument>();
+      // A newsroom with no search instance gets a Researcher without the tool rather than one
+      // that fails every time it reaches for it, exactly as an absent archive works.
+      const webSearch = (await dependencies.resolveWebSearch?.()) ?? null;
       const registry = createToolRegistry([
         ...(dependencies.archive === undefined
           ? []
@@ -276,6 +288,7 @@ export function createResearchStorySources(dependencies: {
                 excludeStoryId: story.id,
               }),
             ]),
+        ...(webSearch === null ? [] : [createWebSearchTool({ provider: webSearch })]),
         createFetchUrlTool({
           extractor: {
             descriptor: dependencies.extractor.descriptor,

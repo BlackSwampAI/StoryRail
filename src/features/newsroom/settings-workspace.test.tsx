@@ -46,10 +46,14 @@ function client(overrides: Partial<SiteSettingsClient> = {}): SiteSettingsClient
   return {
     readSettings: () =>
       Promise.resolve(
-        completed({ settings: { models: MODELS, destination: null }, credentials: [] }),
+        completed({
+          settings: { models: MODELS, destination: null, search: null },
+          credentials: [],
+        }),
       ),
-    saveModels: (models) => Promise.resolve(completed({ models, destination: null })),
-    saveDestination: (models, destination) => Promise.resolve(completed({ models, destination })),
+    saveModels: (models) => Promise.resolve(completed({ models, destination: null, search: null })),
+    saveDestination: (models, destination) =>
+      Promise.resolve(completed({ models, destination, search: null })),
     setCredential: (slot, secret) => Promise.resolve(completed({ slot, hint: secret.slice(-4) })),
     removeCredential: (slot) => Promise.resolve(completed(slot)),
     ...overrides,
@@ -119,7 +123,7 @@ describe("settings workspace", () => {
         readSettings: () =>
           Promise.resolve(
             completed({
-              settings: { models: MODELS, destination: null },
+              settings: { models: MODELS, destination: null, search: null },
               credentials: [
                 {
                   slot: OPENROUTER_API_KEY_SLOT,
@@ -273,6 +277,7 @@ describe("settings workspace", () => {
               settings: {
                 models: { ...MODELS, writer: "vendor/retired-model" },
                 destination: null,
+                search: null,
               },
               credentials: [],
             }),
@@ -380,7 +385,7 @@ function withDestination(
     readSettings: () =>
       Promise.resolve(
         completed({
-          settings: { models: MODELS, destination },
+          settings: { models: MODELS, destination, search: null },
           credentials: [
             {
               slot: STUDIOCMS_API_TOKEN_SLOT,
@@ -501,7 +506,7 @@ describe("publishing destination settings", () => {
 
   it("clears the destination to null and says nothing is delivered until one is set", async () => {
     const saveDestination = vi.fn(() =>
-      Promise.resolve(completed({ models: MODELS, destination: null })),
+      Promise.resolve(completed({ models: MODELS, destination: null, search: null })),
     );
     renderSettings(withDestination(WORDPRESS_DESTINATION, { saveDestination }));
 

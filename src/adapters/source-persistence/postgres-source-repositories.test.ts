@@ -195,6 +195,10 @@ const siteSwitchingMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0070-site-switching.sql",
 );
+const searchSettingsMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0071-search-settings.sql",
+);
 
 const DEFAULT_SITE = siteId("site-default");
 const OTHER_SITE = siteId("site-other");
@@ -428,6 +432,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let destinationSettingsMigrationSql: string;
   let destinationKindMigrationSql: string;
   let siteSwitchingMigrationSql: string;
+  let searchSettingsMigrationSql: string;
 
   /** Every migration, in order. One list so a rebuild can never drift from the first build. */
   const orderedMigrations = (): readonly string[] => [
@@ -461,6 +466,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     destinationSettingsMigrationSql,
     destinationKindMigrationSql,
     siteSwitchingMigrationSql,
+    searchSettingsMigrationSql,
   ];
   let destructiveSetupAllowed = false;
 
@@ -538,6 +544,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     destinationSettingsMigrationSql = await readFile(destinationSettingsMigrationPath, "utf8");
     destinationKindMigrationSql = await readFile(destinationKindMigrationPath, "utf8");
     siteSwitchingMigrationSql = await readFile(siteSwitchingMigrationPath, "utf8");
+    searchSettingsMigrationSql = await readFile(searchSettingsMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -4189,7 +4196,10 @@ describePostgres("PostgreSQL persistence repositories", () => {
       // The database is put back into the state 0070 actually meets by replaying every migration
       // before it against an empty schema, rather than by removing the things 0070 creates. A
       // test that undoes the migration under test proves only that it can be run twice.
-      const before = orderedMigrations().slice(0, -1);
+      const before = orderedMigrations().slice(
+        0,
+        orderedMigrations().indexOf(siteSwitchingMigrationSql),
+      );
       try {
         await pool.query("DROP SCHEMA storyrail CASCADE");
         for (const migration of before) await pool.query(migration);
@@ -6155,6 +6165,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
         },
         // Nowhere to deliver, because no migration can invent an address for a newsroom.
         destination: null,
+        // And nowhere to search, for the same reason.
+        search: null,
       });
     });
 
@@ -6298,6 +6310,121 @@ describePostgres("PostgreSQL persistence repositories", () => {
       }
     });
 
+    it("keeps a newsroom's search instance and refuses a half-filled one", async () => {
+      const before = await settings(DEFAULT_SITE).find();
+      const searching = {
+        models: {
+          evidencePreparation: "chosen/one",
+          assignmentEditor: "chosen/two",
+          writer: "chosen/three",
+          director: "chosen/four",
+          researcher: "chosen/five",
+        },
+        destination: null,
+        search: { baseUrl: "https://search.newsroom.test", username: "storyrail" },
+      };
+
+      try {
+        await settings(DEFAULT_SITE).update({
+          settings: searching,
+          updatedAt: "2026-08-26T00:00:00.000Z",
+        });
+
+        await expect(settings(DEFAULT_SITE).find()).resolves.toEqual(searching);
+
+        // A base URL with no username is a request the instance answers 401 to without saying
+        // which half was missing, so the database refuses it rather than storing it.
+        await expect(
+          pool.query(
+            `UPDATE storyrail.site_settings
+             SET payload = jsonb_set(payload, '{search}', $2::jsonb)
+             WHERE site_id = $1`,
+            [DEFAULT_SITE, JSON.stringify({ baseUrl: "https://search.newsroom.test" })],
+          ),
+        ).rejects.toMatchObject({ constraint: "site_settings_search_shape_check" });
+      } finally {
+        if (before)
+          await settings(DEFAULT_SITE).update({
+            settings: before,
+            updatedAt: "2026-08-26T00:00:00.000Z",
+          });
+      }
+    });
+
+    it("refuses a search instance carrying the password that belongs in the credential store", async () => {
+      await expect(
+        pool.query(
+          `UPDATE storyrail.site_settings
+           SET payload = jsonb_set(payload, '{search}', $2::jsonb)
+           WHERE site_id = $1`,
+          [
+            DEFAULT_SITE,
+            JSON.stringify({
+              baseUrl: "https://search.newsroom.test",
+              username: "storyrail",
+              password: "hunter2",
+            }),
+          ],
+        ),
+      ).rejects.toMatchObject({ constraint: "site_settings_search_shape_check" });
+    });
+
+    it("meets a database that had refused a search and leaves it able to store one", async () => {
+      // The database is put back into the state 0071 actually meets by replaying every migration
+      // before it against an empty schema, rather than by dropping the constraint under test. A
+      // test that removes what it is testing proves only that the migration can be run twice.
+      const before = orderedMigrations().slice(
+        0,
+        orderedMigrations().indexOf(searchSettingsMigrationSql),
+      );
+      const search = JSON.stringify({
+        baseUrl: "https://search.newsroom.test",
+        username: "storyrail",
+      });
+      const store = () =>
+        pool.query(
+          `UPDATE storyrail.site_settings
+           SET payload = jsonb_set(payload, '{search}', $2::jsonb)
+           WHERE site_id = $1`,
+          [DEFAULT_SITE, search],
+        );
+
+      try {
+        await pool.query("DROP SCHEMA storyrail CASCADE");
+        for (const migration of before) await pool.query(migration);
+
+        // 0068 pinned the payload to exactly `models` and `destination`, so a third key is a
+        // shape violation until this migration widens it.
+        await expect(store()).rejects.toMatchObject({
+          constraint: "site_settings_payload_exact_shape_check",
+        });
+
+        await pool.query(searchSettingsMigrationSql);
+        await store();
+
+        const { rows } = await pool.query<{ search: unknown }>(
+          "SELECT payload -> 'search' AS search FROM storyrail.site_settings WHERE site_id = $1",
+          [DEFAULT_SITE],
+        );
+        expect(rows[0]?.search).toEqual({
+          baseUrl: "https://search.newsroom.test",
+          username: "storyrail",
+        });
+
+        // Nothing is backfilled: a newsroom that was given no instance still has none.
+        const others = await pool.query<{ count: string }>(
+          "SELECT count(*) AS count FROM storyrail.site_settings WHERE site_id <> $1 AND payload ? 'search'",
+          [DEFAULT_SITE],
+        );
+        expect(others.rows[0]?.count).toBe("0");
+      } finally {
+        await pool.query("DROP SCHEMA storyrail CASCADE");
+        for (const migration of orderedMigrations()) await pool.query(migration);
+        await addSecondSite(pool);
+        await addSecondSiteWriter(pool);
+      }
+    });
+
     it("keeps one Site's chosen models away from another's", async () => {
       const before = await settings(DEFAULT_SITE).find();
       const chosen = {
@@ -6309,6 +6436,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           researcher: "chosen/five",
         },
         destination: null,
+        search: null,
       };
 
       try {

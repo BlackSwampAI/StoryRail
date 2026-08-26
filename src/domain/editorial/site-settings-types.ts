@@ -71,14 +71,31 @@ export type SiteDestinationSettings =
 
 export const DEFAULT_DESTINATION_DRAFT = true;
 
+/**
+ * The SearXNG instance a newsroom discovers candidate pages through.
+ *
+ * SearXNG has no authentication of its own — `secret_key` governs sessions, not access — so
+ * whatever protects an instance sits in front of it. The username is half of an HTTP Basic
+ * header and is not a secret; the password it pairs with lives in the encrypted credential
+ * store and is deliberately not a field here, so nothing that reads settings can serialise it.
+ */
+export interface SiteSearchSettings {
+  readonly baseUrl: string;
+  readonly username: string;
+}
+
 export interface SiteSettings {
   readonly models: SiteModelIds;
   /** Null for a newsroom that has not been given anywhere to deliver, which is most of them. */
   readonly destination: SiteDestinationSettings | null;
+  /** Null for a newsroom that cannot search the web, which is the ordinary case. */
+  readonly search: SiteSearchSettings | null;
 }
 
 export type SiteSettingsValidationCode =
-  "SITE_SETTINGS_MODELS_INVALID" | "SITE_SETTINGS_DESTINATION_INVALID";
+  | "SITE_SETTINGS_MODELS_INVALID"
+  | "SITE_SETTINGS_DESTINATION_INVALID"
+  | "SITE_SETTINGS_SEARCH_INVALID";
 
 export type RecordSiteSettingsResult =
   | { readonly ok: true; readonly settings: SiteSettings }
