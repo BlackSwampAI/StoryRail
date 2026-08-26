@@ -968,13 +968,11 @@ function isWriterAgentRun(value: unknown): value is AgentRun {
         directorReview.recommendation !== "request_changes") ||
       !isString(directorReview.summary) ||
       !isRecord(directorReview.checks) ||
-      !hasExactKeys(directorReview.checks, [
-        "assignment",
-        "accuracy",
-        "headline",
-        "structure",
-        "style",
-      ]) ||
+      // Which checks a Director review carries is the domain's rule, imported rather than named
+      // here. Written out as a literal it fell a check behind the domain, and because the very
+      // next condition reads the domain list the two could not both hold: no Writer revision run
+      // validated at all, and every Story that had been through a revision cycle was unopenable.
+      !hasExactKeys(directorReview.checks, [...DIRECTOR_CHECK_NAMES]) ||
       ![...DIRECTOR_CHECK_NAMES].every((name) =>
         isReviewCheck((directorReview.checks as Record<string, unknown>)[name]),
       ) ||
