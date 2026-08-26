@@ -30,6 +30,10 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 ### `src/domain/editorial` — pure domain
 
 - `types.ts` — branded identifiers, `Story`, `StoryState`, `EditorialActor`, transition result/error types
+- `site-types.ts`, `site-domain.ts` — `Site`, `SiteDomain`, `canonicalizeSiteDomain`
+- `built-in-agent-profiles.ts` — `builtInAgentProfilesForSite`, `findBuiltInAgentProfile`
+- `newsroom-standards-types.ts`, `newsroom-standards.ts` — `recordNewsroomStandards`, `withNewsroomStandards`
+- `article-grounding.ts` — markdown-agnostic quote normalization and fact-checking checks
 - `state-machine.ts` — `PERMITTED_STORY_TRANSITIONS`, `MAX_REVISION_CYCLES`, `transitionStory`
 - `source-types.ts` — `UrlSource`, `CanonicalSourceUrl`, intake/error types
 - `source-url.ts` — `canonicalizeSourceUrl`
@@ -47,12 +51,13 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `review-decision-types.ts`, `review-decision.ts` — `createReviewDecision` (operator decision validation)
 - `article-types.ts`, `article.ts` — `createArticle`, `createFirstArticleRevision`, `createArticleRevision`
 - `story-delivery-types.ts`, `story-delivery.ts` — `recordStoryDelivery`, `storyDeliverySlug`
-- `site-settings-types.ts`, `site-settings.ts` — site model configuration and destination settings
+- `site-settings-types.ts`, `site-settings.ts` — site model configuration and destination settings (StudioCMS & WordPress)
 - `site-credential-types.ts`, `site-credential.ts` — encrypted credential storage
 - `index.ts` — barrel re-export
 
 ### `src/application` — use-case workflows + repository ports
 
+- `sites/` — `create-site.ts`, `site-repository.ts`
 - `source-evidence/` — `preserve-url-source.ts`, `extract-persisted-source.ts`, `preserve-and-extract-url-source.ts`
 - `source-evidence-preparation/` — explicit model-backed preparation workflow and persistence port
 - `model/` — provider-neutral structured-model port
@@ -83,6 +88,7 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 
 ### `src/adapters` — PostgreSQL + Firecrawl implementations
 
+- `site-persistence/` — `postgres-site-repository.ts`
 - `source-extraction/` — `source-extractor.ts` (port), `firecrawl-source-extractor.ts`
 - `source-persistence/` — `postgres-source-repositories.ts`, `postgres-source-extraction-decoder.ts`, `.test.ts`
 - `source-inbox/` — `postgres-source-inbox-repository.ts`
@@ -100,14 +106,16 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `story-inspection/` — `postgres-story-inspection-repository.ts`
 - `story-listing/` — `postgres-story-listing-repository.ts`, `.test.ts`
 - `story-rejection-persistence/` — `postgres-story-rejection-persistence.ts`, `.test.ts`
-- `story-delivery-persistence/` — `postgres-story-delivery-repository.ts`
-- `story-delivery/` — `studiocms-destination.ts`, `site-delivery-destination-directory.ts`
+- `story-delivery-persistence/` — `postgres-story-delivery-repository.ts`, `postgres-story-delivery-decoder.ts`
+- `story-delivery/` — `studiocms-destination.ts`, `wordpress-destination.ts`, `gutenberg-blocks.ts`, `site-delivery-destination-directory.ts`
 - `site-settings-persistence/` — `postgres-site-settings-repository.ts`
 - `site-credential-persistence/` — `postgres-site-credential-repository.ts`
 - `index.ts` — barrel re-export
 
 ### `src/runtime` — composed runtimes
 
+- `newsroom-identity.ts` — newsroom identity resolution and formatting
+- `site-directory-runtime.ts` — multi-site directory runtime
 - `source-evidence-configuration.ts` — env validation
 - `source-evidence-runtime.ts` — `createSourceEvidenceRuntime` / `...FromEnvironment`
 - `evidence-preparation-runtime.ts` and configuration — explicit OpenRouter preparation composition
@@ -119,6 +127,9 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 
 ### `src/server` — lazy runtime providers
 
+- `site-keyed-runtime-provider.ts` — per-site runtime caching helper
+- `site-route.ts` — `withSite` higher-order wrapper
+- `site-directory-provider.ts` — site directory provider
 - `source-evidence-runtime-provider.ts`
 - `evidence-preparation-runtime-provider.ts`
 - `story-runtime-provider.ts`
@@ -129,6 +140,7 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 
 ### `src/interfaces/http` — HTTP handlers
 
+- `site-handlers.ts` — list and create site HTTP handlers
 - `preserve-and-extract-url-source-handler.ts`
 - `extract-persisted-source-handler.ts`
 - `create-story-handler.ts`, `list-stories-handler.ts`, `inspect-story-handler.ts`
@@ -151,34 +163,42 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 
 ### `src/app` — Next.js routes
 
-- `page.tsx` → `<NewsroomShell />`; `layout.tsx`; `globals.css`
-- `api/source-evidence/url/route.ts` (POST)
-- `api/inbox/route.ts` (GET)
-- `api/sources/[sourceId]/triage/route.ts` (PUT)
-- `api/sources/[sourceId]/preparations/route.ts` (POST)
-- `api/sources/[sourceId]/extractions/route.ts` (POST)
-- `api/stories/route.ts` (GET, POST)
-- `api/stories/[storyId]/route.ts` (GET)
-- `api/stories/[storyId]/sources/route.ts` (POST)
-- `api/stories/[storyId]/assignment-proposals/route.ts` (POST)
-- `api/stories/[storyId]/assignments/route.ts` (POST)
-- `api/stories/[storyId]/writer-drafts/route.ts` (POST)
-- `api/stories/[storyId]/writer-revisions/route.ts` (POST)
-- `api/stories/[storyId]/review-submissions/route.ts` (POST)
-- `api/stories/[storyId]/director-reviews/route.ts` (POST)
-- `api/stories/[storyId]/review-decisions/route.ts` (POST)
-- `api/stories/[storyId]/rejections/route.ts` (POST)
-- `api/agent-profiles/route.ts` (GET, POST)
+- `page.tsx` → redirect to default site; `s/[siteId]/page.tsx` → `<NewsroomShell />`; `layout.tsx`; `globals.css`
+- `api/sites/route.ts` (GET, POST)
+- `api/sites/[siteId]/source-evidence/url/route.ts` (POST)
+- `api/sites/[siteId]/source-inbox/route.ts` (GET)
+- `api/sites/[siteId]/sources/[sourceId]/triage/route.ts` (PUT)
+- `api/sites/[siteId]/sources/[sourceId]/preparations/route.ts` (POST)
+- `api/sites/[siteId]/sources/[sourceId]/extractions/route.ts` (POST)
+- `api/sites/[siteId]/stories/route.ts` (GET, POST)
+- `api/sites/[siteId]/stories/[storyId]/route.ts` (GET)
+- `api/sites/[siteId]/stories/[storyId]/sources/route.ts` (POST)
+- `api/sites/[siteId]/stories/[storyId]/assignment-proposals/route.ts` (POST)
+- `api/sites/[siteId]/stories/[storyId]/assignments/route.ts` (POST)
+- `api/sites/[siteId]/stories/[storyId]/writer-drafts/route.ts` (POST)
+- `api/sites/[siteId]/stories/[storyId]/writer-revisions/route.ts` (POST)
+- `api/sites/[siteId]/stories/[storyId]/review-submissions/route.ts` (POST)
+- `api/sites/[siteId]/stories/[storyId]/director-reviews/route.ts` (POST)
+- `api/sites/[siteId]/stories/[storyId]/review-decisions/route.ts` (POST)
+- `api/sites/[siteId]/stories/[storyId]/rejections/route.ts` (POST)
+- `api/sites/[siteId]/stories/[storyId]/deliveries/route.ts` (POST)
+- `api/sites/[siteId]/agent-profiles/route.ts` (GET, POST)
+- `api/sites/[siteId]/model-catalog/route.ts` (GET)
+- `api/sites/[siteId]/site-settings/route.ts` (GET, PUT)
+- `api/sites/[siteId]/newsroom-standards/route.ts` (GET, PUT)
+- `api/sites/[siteId]/site-credentials/[slot]/route.ts` (PUT, DELETE)
 
 ### `src/features/newsroom` — React UI
 
 - `newsroom-shell.tsx`, `newsroom-shell.module.css`, `newsroom-state.ts`
+- `site-switcher.tsx`, `sites-workspace.tsx`, `site-client.ts`, `site-paths.ts`
 - `resizable-newsroom-layout.tsx` — draggable desk/workspace split with persisted proportions
 - `newsroom-staff.tsx` — Agent Profile roster and Writer drag sources
 - `source-evidence-workspace.tsx`, `source-evidence-url-client.ts` — integrated intake → prepare → review flow
 - `source-inbox-workspace.tsx`, `source-inbox-client.ts`
-- `story-workspace.tsx` — Assignment, Writer execution, Writer revision, review submission, Director review, operator decision, and Article reading workspace
-- `article-reader.tsx`, `safe-markdown.tsx` — dependency-free safe Markdown renderer for untrusted content
+- `story-workspace.tsx`, `delivery-outcome.ts` — Assignment, Writer execution, Writer revision, review submission, Director review, operator decision, operator Story rejection, delivery trigger, and Article reading workspace
+- `article-reader.tsx`, `safe-markdown.tsx` — annotated & plain-reading view, dependency-free safe Markdown renderer
+- `newsroom-standards-editor.tsx`, `newsroom-standards-client.ts`
 - `editorial-task-pending.tsx` — shared accessible pending-status card for Writer, Assignment Editor, and Director tasks
 - `agent-profiles-workspace.tsx`, `agent-profile-client.ts`
 - `story-client.ts`
@@ -198,8 +218,26 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `0028-durable-assignments.sql` — `story_assignments`, `story_transition_receipts`, disjoint-source validation functions
 - `0030-agent-runs.sql` — `agent_runs` with Assignment Editor proposal input/outcome constraints
 - `0031-articles-and-writer-drafts.sql` — extends `agent_runs` for Writer `article_draft` runs; creates `articles` and `article_revisions`
-- `0038-supervised-director-review.sql` — extends `agent_runs` for Director `article_review` runs; creates `review_decisions`; adds `director_review_is_valid` and uniqueness constraints
-- `0041-supervised-writer-revisions.sql` — extends `agent_runs` for Writer `article_revision` runs; broadens `article_revisions.revision_number` to 1–3; links revision runs to the authorizing `review_decisions` row via generated columns and a composite foreign key
+- `0038-supervised-director-review.sql` — Director review agent runs and operator review decisions
+- `0041-supervised-writer-revisions.sql` — Writer revisions bounded at Revision 3
+- `0049-preparation-input-measurement.sql` — raw vs submitted character tracking
+- `0053-model-quota-failure-code.sql` — model failure classification
+- `0054-agent-run-in-flight.sql` — `running` agent run lifecycle state
+- `0055-cited-article-blocks.sql` — cited article blocks for grounding
+- `0056-ungrounded-output-failure-code.sql` — ungrounded output classification
+- `0057-director-support-check.sql` — evidence support checks for director review
+- `0058-agent-tool-calls.sql` / `0062-tool-call-durability.sql` — tool call durability
+- `0059-researcher-role.sql` — researcher agent role and source research
+- `0060-writer-citation-correction.sql` — citation corrections tracking
+- `0061-durable-policy-runs.sql` — policy run execution history
+- `0063-newsroom-standards.sql` — newsroom standards revision tracking
+- `0064-archive-search.sql` — full-text search over archive
+- `0065-site-tenancy.sql` — site multi-tenancy model
+- `0066-site-credentials.sql` — encrypted credential storage
+- `0067-story-deliveries.sql` — story deliveries
+- `0068-destination-settings.sql` — destination configuration
+- `0069-destination-kind.sql` — discriminated destination kinds (StudioCMS, WordPress)
+- `0070-site-switching.sql` — multi-site routing and tenancy constraints
 
 ## Documentation (`docs/`)
 

@@ -249,6 +249,21 @@ It alters the `storyrail.agent_tool_calls` table to:
 - Adds `site_settings_destination_shape_check` requiring `baseUrl` (http/https URL), `package` (non-empty string), and `draft` (boolean).
 - API tokens are kept in encrypted `site_credentials` under slot `studiocms_api_token` rather than in plain settings.
 
+## Migration 0069 — destination kind
+
+`database/migrations/0069-destination-kind.sql` extends destination settings to support multiple destination kinds (StudioCMS and WordPress) via a discriminated `kind` field:
+- Drops the rigid 0068 destination constraint and adds `site_settings_destination_shape_check` supporting discriminated objects:
+  - `kind = 'studiocms'`: requires `baseUrl`, `package`, `draft`.
+  - `kind = 'wordpress'`: requires `baseUrl`, `username`, `draft`.
+- Backfills existing destination records with `kind = 'studiocms'`.
+- Credentials use `studiocms_api_token` or `wordpress_application_password`.
+
+## Migration 0070 — site switching
+
+`database/migrations/0070-site-switching.sql` completes the multi-tenant model for full runtime switching and site management:
+- Modifies foreign key constraints on `agent_profiles` and `story_assignments` to include `site_id`, ensuring assignments reference profiles owned by the same site.
+- Updates built-in profile lookups so each site owns its own set of built-in profiles.
+
 ## Integration test lifecycle
 
-The PostgreSQL integration tests (`src/adapters/source-persistence/postgres-source-repositories.test.ts` and the Story/attachment/assignment/run/article/review/writer-revision/story-rejection suites) connect via `STORYRAIL_TEST_DATABASE_URL`, verify the database name is exactly `storyrail_test`, drop and recreate the `storyrail` schema, apply migrations `0012`, `0017`, `0018`, `0024`, `0025`, `0027`, `0028`, `0030`, `0031`, `0038`, `0041`, `0049`, `0053`, `0054`, `0055`, `0056`, `0057`, `0058`, `0059`, `0060`, `0061`, `0062`, `0063`, `0064`, `0065`, `0066`, `0067`, and `0068` in order, and truncate the editorial tables (plus delete non-built-in Agent Profiles) between cases. The suite never creates or drops a database.
+The PostgreSQL integration tests (`src/adapters/source-persistence/postgres-source-repositories.test.ts` and the Story/attachment/assignment/run/article/review/writer-revision/story-rejection suites) connect via `STORYRAIL_TEST_DATABASE_URL`, verify the database name is exactly `storyrail_test`, drop and recreate the `storyrail` schema, apply migrations `0012`, `0017`, `0018`, `0024`, `0025`, `0027`, `0028`, `0030`, `0031`, `0038`, `0041`, `0049`, `0053`, `0054`, `0055`, `0056`, `0057`, `0058`, `0059`, `0060`, `0061`, `0062`, `0063`, `0064`, `0065`, `0066`, `0067`, `0068`, `0069`, and `0070` in order, and truncate the editorial tables (plus delete non-built-in Agent Profiles) between cases. The suite never creates or drops a database.
