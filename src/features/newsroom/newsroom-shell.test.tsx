@@ -211,8 +211,8 @@ describe("NewsroomShell", () => {
       />,
     );
     fireEvent.click(await screen.findByRole("button", { name: /Persisted Story/ }));
-    expect(await screen.findByRole("heading", { name: "Ready for assignment" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Ask Assignment Editor" }));
+    expect(await screen.findByRole("heading", { name: "Ready to be assigned" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Draw up the Assignment" }));
     const proposal = await screen.findByRole("region", { name: "Suggested Writer" });
     expect(within(proposal).getByText("Recommended Writer")).toBeVisible();
     expect(within(proposal).getByText("Custom")).toBeVisible();
@@ -224,7 +224,9 @@ describe("NewsroomShell", () => {
     expect(within(proposal).getByText("Suggested constraint")).toBeVisible();
     expect(within(proposal).getByRole("heading", { name: "Why this assignment" })).toBeVisible();
     expect(within(proposal).getByText("Suggested reason")).toBeVisible();
-    expect(within(proposal).getByRole("button", { name: "Create Assignment" })).toBeVisible();
+    expect(
+      within(proposal).getByRole("button", { name: "Assign it and write the draft" }),
+    ).toBeVisible();
     expect(within(proposal).getByRole("button", { name: "Edit before assigning" })).toBeVisible();
     expect(within(proposal).getByRole("button", { name: "Regenerate" })).toBeVisible();
     expect(within(proposal).queryByText(run.id)).not.toBeInTheDocument();
@@ -280,14 +282,14 @@ describe("NewsroomShell", () => {
     };
     render(<NewsroomShell storyRequests={requests} sourceInboxRequests={inboxRequests()} />);
     fireEvent.click(await screen.findByRole("button", { name: /Persisted Story/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "Assign manually" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Write the Assignment myself" }));
     fireEvent.change(await screen.findByLabelText("Angle"), { target: { value: "Manual angle" } });
-    fireEvent.click(screen.getByRole("button", { name: "Ask Assignment Editor" }));
+    fireEvent.click(screen.getByRole("button", { name: "Draw up the Assignment" }));
     expect(
       await screen.findByText(/^Assignment Editor failed\..*\(MODEL_REQUEST_FAILED\)$/),
     ).toBeVisible();
     expect(screen.getByDisplayValue("Manual angle")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Ask Assignment Editor" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Draw up the Assignment" })).toBeEnabled();
   });
   it("shows only Writer Profiles and moves a successfully assigned Story to Assigned with activity", async () => {
     const writer = {
@@ -383,17 +385,21 @@ describe("NewsroomShell", () => {
       />,
     );
     fireEvent.click(await screen.findByRole("button", { name: /Persisted Story/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "Assign manually" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Write the Assignment myself" }));
     expect(await screen.findByRole("option", { name: "General Writer" })).toBeVisible();
     expect(screen.queryByRole("option", { name: "Assignment Editor" })).not.toBeInTheDocument();
     expect(
-      screen.getByText("Assignment will snapshot all currently attached Sources: 0"),
+      screen.getByText(/The Assignment takes the 0 Sources attached right now\./),
     ).toBeVisible();
     fireEvent.change(screen.getByLabelText("Angle"), { target: { value: "Angle" } });
     fireEvent.change(screen.getByLabelText("Brief"), { target: { value: "Brief" } });
-    fireEvent.change(screen.getByLabelText("Assignment reason"), { target: { value: "Ready" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create Assignment" }));
-    const activeAssignment = await screen.findByRole("region", { name: "Assignment ready" });
+    fireEvent.change(screen.getByLabelText("Why this Writer and this angle"), {
+      target: { value: "Ready" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Assign it and write the draft" }));
+    const activeAssignment = await screen.findByRole("region", {
+      name: "The Writer has the brief",
+    });
     expect(within(activeAssignment).getByText("General Writer")).toBeVisible();
     expect(within(activeAssignment).getByRole("heading", { name: "Angle" })).toBeVisible();
     expect(within(activeAssignment).getAllByText("Angle")).toHaveLength(2);
@@ -401,7 +407,7 @@ describe("NewsroomShell", () => {
     expect(within(activeAssignment).getAllByText("Brief")).toHaveLength(2);
     fireEvent.click(within(activeAssignment).getByText("Constraints"));
     expect(within(activeAssignment).getByText("None")).toBeVisible();
-    expect(within(activeAssignment).getByRole("button", { name: "Run Writer" })).toBeVisible();
+    expect(within(activeAssignment).getByRole("button", { name: "Write the draft" })).toBeVisible();
     expect(within(activeAssignment).queryByLabelText("Writer")).not.toBeInTheDocument();
     expect(
       within(activeAssignment).queryByRole("heading", { name: "Article" }),
@@ -419,7 +425,9 @@ describe("NewsroomShell", () => {
     });
     expect(movedStory).toHaveAttribute("aria-pressed", "true");
     expect(within(movedStory).getByText("Selected")).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Create Assignment" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Assign it and write the draft" }),
+    ).not.toBeInTheDocument();
     fireEvent.click(screen.getByText("History & Audit"));
     expect(screen.getByText("Intake → Assigned")).toBeVisible();
     expect(screen.getByText(assignment.id)).toBeVisible();
@@ -501,7 +509,7 @@ describe("NewsroomShell", () => {
       "true",
     );
     fireEvent.click(within(storiesRegion).getByRole("button", { name: /Persisted Story/ }));
-    expect(await screen.findByRole("heading", { name: "Ready for assignment" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Ready to be assigned" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Intake, 1 story" }));
     expect(screen.getByRole("button", { name: "Intake, 1 story" })).toHaveAttribute(
       "aria-expanded",
@@ -510,7 +518,7 @@ describe("NewsroomShell", () => {
     expect(
       within(storiesRegion).queryByRole("button", { name: /Persisted Story/ }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Ready for assignment" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Ready to be assigned" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Assigned, 0 stories" }));
     expect(screen.getByRole("button", { name: "Assigned, 0 stories" })).toHaveAttribute(
       "aria-expanded",
@@ -521,7 +529,7 @@ describe("NewsroomShell", () => {
       "aria-expanded",
       "false",
     );
-    expect(screen.getByRole("heading", { name: "Ready for assignment" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Ready to be assigned" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Intake, 1 story" }));
     const selectedStory = within(storiesRegion).getByRole("button", {
       name: /Persisted Story, Intake, 0 sources/,
@@ -540,7 +548,7 @@ describe("NewsroomShell", () => {
       within(storiesRegion).queryByRole("button", { name: /Persisted Story/ }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText(/No Stories in assigned/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Ready for assignment" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Ready to be assigned" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Agents" }));
     expect(screen.getByRole("button", { name: "Assigned, 0 stories" })).toHaveAttribute(
       "aria-expanded",
@@ -926,11 +934,11 @@ describe("NewsroomShell", () => {
     };
     render(<NewsroomShell storyRequests={requests} sourceInboxRequests={inboxRequests()} />);
     fireEvent.click(await screen.findByRole("button", { name: /Persisted Story/ }));
-    const runWriter = await screen.findByRole("button", { name: "Run Writer" });
+    const runWriter = await screen.findByRole("button", { name: "Write the draft" });
     expect(screen.queryByLabelText("Writer")).not.toBeInTheDocument();
     fireEvent.click(runWriter);
     expect(await screen.findByText(/^Writer failed\..*\(MODEL_REQUEST_FAILED\)$/)).toBeVisible();
-    expect(screen.getByRole("button", { name: "Run Writer" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Write the draft" })).toBeEnabled();
     expect(requests.createWriterDraft).toHaveBeenCalledWith(assigned.id);
     fireEvent.click(screen.getByText("History & Audit"));
     expect(screen.getByText(failedRun.id)).toBeVisible();
@@ -1058,7 +1066,7 @@ describe("NewsroomShell", () => {
 
     render(<NewsroomShell storyRequests={requests} sourceInboxRequests={inboxRequests()} />);
     fireEvent.click(await screen.findByRole("button", { name: /Persisted Story, Assigned/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "Run Writer" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Write the draft" }));
 
     expect(await screen.findByRole("heading", { name: "Transition article" })).toBeVisible();
     expect(screen.getByRole("button", { name: "In progress, 1 story" })).toHaveAttribute(
@@ -1161,7 +1169,7 @@ describe("NewsroomShell", () => {
       "rel",
       "noopener noreferrer",
     );
-    expect(screen.getByRole("button", { name: "Send to Review" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Send this draft to the Director" })).toBeVisible();
     expect(screen.getByText("Revision 1 source Markdown")).not.toBeVisible();
     expect(document.querySelector("script")).toBeNull();
 

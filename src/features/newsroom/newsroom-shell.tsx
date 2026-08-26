@@ -28,6 +28,8 @@ import { SourceEvidenceWorkspace } from "./source-evidence-workspace";
 import type { RequestSourceEvidenceUrl } from "./source-evidence-url-client";
 import { SitesWorkspace } from "./sites-workspace";
 import { SiteSwitcher } from "./site-switcher";
+import { CompactStoryRail } from "./story-rail";
+import { useFullRailOutOfView } from "./story-rail-visibility";
 import { SourceInboxWorkspace } from "./source-inbox-workspace";
 import type { SourceInboxClient } from "./source-inbox-client";
 import { StoryWorkspace } from "./story-workspace";
@@ -79,6 +81,11 @@ export function NewsroomShell({
   const [listing, setListing] = useState<StoryListingState>({ kind: "loading" });
   const [storySelection, setStorySelection] = useState<StorySelection>({ kind: "none" });
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("story");
+  // Observed against the open Story, so opening another one starts watching that Story's rail
+  // rather than an element that has since been replaced.
+  const railOutOfView = useFullRailOutOfView(
+    storySelection.kind === "loaded" ? storySelection.inspection.story.id : null,
+  );
   const [sourceInboxRefreshVersion, setSourceInboxRefreshVersion] = useState(0);
   const [sourceInboxCount, setSourceInboxCount] = useState<number | null>(null);
   const [focusedSourceId, setFocusedSourceId] = useState<string | null>(null);
@@ -408,11 +415,32 @@ export function NewsroomShell({
         workspace={
           <main className={styles.workspace}>
             <div className={styles.workspaceNavigation}>
-              <p className={styles.workspaceBreadcrumb}>
-                {workspaceMode === "profile" || workspaceMode === "settings"
-                  ? "Account"
-                  : "Newsroom"}
-              </p>
+              <div className={styles.workspaceNavigationLead}>
+                <p className={styles.workspaceBreadcrumb}>
+                  {workspaceMode === "profile" || workspaceMode === "settings"
+                    ? "Account"
+                    : "Newsroom"}
+                </p>
+                {/*
+                 * The band is pinned, so the one thing worth spending its width on is where the
+                 * open Story stands — and only once the full rail has scrolled behind the band,
+                 * so this appears exactly when it is replacing something the reader has lost and
+                 * the same answer is never on the screen twice.
+                 */}
+                {workspaceMode === "story" && storySelection.kind === "loaded" && railOutOfView ? (
+                  <CompactStoryRail
+                    state={storySelection.inspection.story.state}
+                    delivered={storySelection.inspection.deliveries.some(
+                      (delivery) => delivery.outcome === "succeeded",
+                    )}
+                    leftFrom={
+                      [...storySelection.inspection.transitions]
+                        .reverse()
+                        .find((transition) => transition.nextState === "rejected")?.previousState
+                    }
+                  />
+                ) : null}
+              </div>
               <AccountMenu
                 activeItem={
                   workspaceMode === "profile" || workspaceMode === "settings"

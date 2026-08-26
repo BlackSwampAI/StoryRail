@@ -135,10 +135,10 @@ function renderWorkspace(value: StoryInspection, client: StoryClient) {
 }
 
 describe("delivering a published Story from the screen", () => {
-  it("offers the action and says a published Story has never been delivered", () => {
+  it("offers the action and says a published Story has not been sent anywhere", () => {
     renderWorkspace(inspection({}), requests());
 
-    expect(screen.getByText(/never been delivered/i)).toBeTruthy();
+    expect(screen.getByText(/has not been sent anywhere/i)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Deliver to the destination" })).toBeTruthy();
   });
 

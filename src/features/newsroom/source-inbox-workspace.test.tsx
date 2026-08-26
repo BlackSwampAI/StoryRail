@@ -354,10 +354,10 @@ describe("SourceInboxWorkspace", () => {
     fireEvent.change(screen.getByRole("textbox", { name: /Story title/ }), {
       target: { value: "An operator's own headline" },
     });
-    fireEvent.change(screen.getByRole("textbox", { name: /Source relevance/ }), {
+    fireEvent.change(screen.getByRole("textbox", { name: /What this Source gives the Story/ }), {
       target: { value: "Relevant evidence." },
     });
-    fireEvent.change(screen.getByRole("textbox", { name: /Editorial decision reason/ }), {
+    fireEvent.change(screen.getByRole("textbox", { name: /Why you are making this call/ }), {
       target: { value: "Worth pursuing." },
     });
     fireEvent.click(screen.getByRole("button", { name: "Create, attach, and record decision" }));
@@ -499,8 +499,10 @@ describe("SourceInboxWorkspace", () => {
     renderInbox(inbox, stories, { onStoryLoaded, onPendingCountChange });
     await waitFor(() => expect(onPendingCountChange).toHaveBeenLastCalledWith(1));
     fireEvent.click(await screen.findByRole("button", { name: "Create new Story" }));
-    fireEvent.change(screen.getByLabelText("Source relevance"), { target: { value: "Relevant" } });
-    fireEvent.change(screen.getByLabelText("Editorial decision reason"), {
+    fireEvent.change(screen.getByLabelText("What this Source gives the Story"), {
+      target: { value: "Relevant" },
+    });
+    fireEvent.change(screen.getByLabelText("Why you are making this call"), {
       target: { value: "New subject" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Create, attach, and record decision" }));
@@ -530,10 +532,10 @@ describe("SourceInboxWorkspace", () => {
     renderInbox(inbox, stories, { onPendingCountChange });
     await waitFor(() => expect(onPendingCountChange).toHaveBeenLastCalledWith(1));
     fireEvent.click(await screen.findByRole("button", { name: "Attach to existing Story" }));
-    fireEvent.change(screen.getByLabelText("Source relevance"), {
+    fireEvent.change(screen.getByLabelText("What this Source gives the Story"), {
       target: { value: "Additional facts" },
     });
-    fireEvent.change(screen.getByLabelText("Editorial decision reason"), {
+    fireEvent.change(screen.getByLabelText("Why you are making this call"), {
       target: { value: "Same subject" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Attach and record decision" }));
@@ -558,7 +560,7 @@ describe("SourceInboxWorkspace", () => {
     renderInbox(inbox, stories, { onPendingCountChange });
     await waitFor(() => expect(onPendingCountChange).toHaveBeenLastCalledWith(1));
     fireEvent.click(await screen.findByRole("button", { name: "Skip" }));
-    fireEvent.change(screen.getByLabelText("Editorial decision reason"), {
+    fireEvent.change(screen.getByLabelText("Why you are making this call"), {
       target: { value: "No material facts" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Record skip decision" }));
@@ -597,7 +599,7 @@ describe("SourceInboxWorkspace", () => {
     renderInbox(controlledInbox, stories, { onPendingCountChange });
     await waitFor(() => expect(onPendingCountChange).toHaveBeenLastCalledWith(1));
     fireEvent.click(await screen.findByRole("button", { name: "Skip" }));
-    fireEvent.change(screen.getByLabelText("Editorial decision reason"), {
+    fireEvent.change(screen.getByLabelText("Why you are making this call"), {
       target: { value: "No material facts" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Record skip decision" }));
@@ -623,7 +625,7 @@ describe("SourceInboxWorkspace", () => {
     const view = render(<SourceInboxWorkspace refreshVersion={0} {...props} />);
     await waitFor(() => expect(onPendingCountChange).toHaveBeenLastCalledWith(1));
     fireEvent.click(await screen.findByRole("button", { name: "Skip" }));
-    fireEvent.change(screen.getByLabelText("Editorial decision reason"), {
+    fireEvent.change(screen.getByLabelText("Why you are making this call"), {
       target: { value: "No material facts" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Record skip decision" }));
@@ -649,8 +651,10 @@ describe("SourceInboxWorkspace", () => {
     renderInbox(inbox, failedStories, { onStoryKnown });
 
     fireEvent.click(await screen.findByRole("button", { name: "Create new Story" }));
-    fireEvent.change(screen.getByLabelText("Source relevance"), { target: { value: "Relevant" } });
-    fireEvent.change(screen.getByLabelText("Editorial decision reason"), {
+    fireEvent.change(screen.getByLabelText("What this Source gives the Story"), {
+      target: { value: "Relevant" },
+    });
+    fireEvent.change(screen.getByLabelText("Why you are making this call"), {
       target: { value: "New subject" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Create, attach, and record decision" }));
@@ -674,10 +678,10 @@ describe("SourceInboxWorkspace", () => {
     renderInbox(inbox, failedStories, { sourceCount: 4, onStoryKnown });
 
     fireEvent.click(await screen.findByRole("button", { name: "Attach to existing Story" }));
-    fireEvent.change(screen.getByLabelText("Source relevance"), {
+    fireEvent.change(screen.getByLabelText("What this Source gives the Story"), {
       target: { value: "Additional facts" },
     });
-    fireEvent.change(screen.getByLabelText("Editorial decision reason"), {
+    fireEvent.change(screen.getByLabelText("Why you are making this call"), {
       target: { value: "Same subject" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Attach and record decision" }));

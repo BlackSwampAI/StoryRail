@@ -182,7 +182,7 @@ describe("Director review workspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Reject Story" }));
     const confirm = screen.getByRole("button", { name: "Reject Story" });
     expect(confirm).toBeDisabled();
-    fireEvent.change(screen.getByLabelText("Rejection reason"), {
+    fireEvent.change(screen.getByLabelText("Why this Story is being dropped"), {
       target: { value: "The reporting no longer supports this Story." },
     });
     expect(confirm).toBeEnabled();
@@ -211,15 +211,15 @@ describe("Director review workspace", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Reject Story" }));
-    fireEvent.change(screen.getByLabelText("Rejection reason"), {
+    fireEvent.change(screen.getByLabelText("Why this Story is being dropped"), {
       target: { value: "Draft reason" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     expect(rejectStory).not.toHaveBeenCalled();
-    expect(screen.queryByLabelText("Rejection reason")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Why this Story is being dropped")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Reject Story" }));
-    expect(screen.getByLabelText("Rejection reason")).toHaveValue("");
+    expect(screen.getByLabelText("Why this Story is being dropped")).toHaveValue("");
   });
 
   it("reports the rejected Story and receipt immediately while authoritative refresh proceeds", async () => {
@@ -257,7 +257,7 @@ describe("Director review workspace", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Reject Story" }));
-    fireEvent.change(screen.getByLabelText("Rejection reason"), {
+    fireEvent.change(screen.getByLabelText("Why this Story is being dropped"), {
       target: { value: transitionReceipt.reason },
     });
     fireEvent.click(screen.getByRole("button", { name: "Reject Story" }));
@@ -303,7 +303,7 @@ describe("Director review workspace", () => {
       </DragDropProvider>,
     );
 
-    const rejectionHeading = screen.getByRole("heading", { name: "Story rejected" });
+    const rejectionHeading = screen.getByRole("heading", { name: "Why work on this Story ended" });
     const articleHeading = screen.getByRole("heading", { name: "Article headline" });
     expect(rejectionHeading).toBeVisible();
     expect(
@@ -316,7 +316,9 @@ describe("Director review workspace", () => {
     expect(screen.getByText("Evidence")).toBeVisible();
     expect(screen.getByText("History & Audit")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Reject Story" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Run Director" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Ask the Director to read it" }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Record decision" })).not.toBeInTheDocument();
   });
 
@@ -354,19 +356,18 @@ describe("Director review workspace", () => {
         />
       </DragDropProvider>,
     );
-    expect(screen.getByRole("heading", { name: "Request changes" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "The Director recommends changes" })).toBeVisible();
     // Five passing checks now, with the sixth — support — the one asking for changes.
     expect(screen.getAllByText("PASS")).toHaveLength(5);
     expect(screen.getByText("NEEDS CHANGES")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Approve" })).toBeVisible();
-    const requestChanges = screen.getByRole("button", { name: "Request changes" });
-    expect(requestChanges).toBeVisible();
-    expect(screen.getByLabelText("Reason")).toHaveValue("");
-    fireEvent.click(requestChanges);
-    expect(screen.getByLabelText("Reason")).toHaveValue(
+    expect(screen.getByRole("button", { name: "Approve this draft" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Send it back to the Writer" })).toBeVisible();
+    // The reason arrives empty, and the Director's wording is taken only if it is asked for.
+    expect(screen.getByLabelText("Your reason")).toHaveValue("");
+    fireEvent.click(screen.getByRole("button", { name: "Use the Director's wording" }));
+    expect(screen.getByLabelText("Your reason")).toHaveValue(
       "Support the timeline or remove the claim.",
     );
-    expect(screen.getByRole("button", { name: "Record decision" })).toBeVisible();
   });
 
   it("keeps approval available without offering request changes after both revision cycles", () => {
@@ -419,14 +420,16 @@ describe("Director review workspace", () => {
       </DragDropProvider>,
     );
 
-    expect(screen.getByRole("heading", { name: "Request changes" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Request changes" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "The Director recommends changes" })).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Send it back to the Writer" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByText(
-        "Both revision cycles have been used. Request changes is no longer available for this Article revision.",
+        "This Article has had both of its revisions. Sending it back is no longer open; approve it or reject the Story.",
       ),
     ).toBeVisible();
-    expect(screen.getByRole("button", { name: "Approve" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Approve this draft" })).toBeVisible();
   });
 
   it("offers the bounded Writer revision after an operator requests changes", async () => {
@@ -466,8 +469,8 @@ describe("Director review workspace", () => {
       </DragDropProvider>,
     );
 
-    expect(screen.getByRole("heading", { name: "Create Article Revision 2" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Run Writer Revision" }));
+    expect(screen.getByRole("heading", { name: "Revision 2 is next" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Write revision 2" }));
     expect(createWriterRevision).toHaveBeenCalledWith(reviewed.story.id);
     expect(await screen.findByText("Evidence unavailable.")).toBeVisible();
   });
@@ -512,7 +515,7 @@ describe("Director review workspace", () => {
       </DragDropProvider>,
     );
 
-    expect(screen.getByRole("button", { name: "Run Director" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Ask the Director to read it" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Request changes" })).not.toBeInTheDocument();
   });
 
@@ -551,13 +554,13 @@ describe("Director review workspace", () => {
       </DragDropProvider>,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Run Writer Revision" }));
+    fireEvent.click(screen.getByRole("button", { name: "Write revision 2" }));
     const pending = await screen.findByRole("status", {
       name: "Writer is revising the Article…",
     });
     expect(pending).toHaveAttribute("aria-busy", "true");
     expect(screen.getByRole("heading", { name: "Article headline" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Run Writer Revision" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Write revision 2" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reject Story" })).toBeDisabled();
   });
 
@@ -580,11 +583,13 @@ describe("Director review workspace", () => {
       </DragDropProvider>,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Run Director" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ask the Director to read it" }));
     expect(
       await screen.findByRole("status", { name: "Director is reviewing the Article…" }),
     ).toHaveAttribute("aria-busy", "true");
-    expect(screen.queryByRole("button", { name: "Run Director" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Ask the Director to read it" }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reject Story" })).toBeDisabled();
   });
 
@@ -612,11 +617,11 @@ describe("Director review workspace", () => {
       </DragDropProvider>,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Run Writer" }));
+    fireEvent.click(screen.getByRole("button", { name: "Write the draft" }));
     expect(
       await screen.findByRole("status", { name: "Writer is drafting the Article…" }),
     ).toHaveAttribute("aria-busy", "true");
-    expect(screen.queryByRole("button", { name: "Run Writer" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Write the draft" })).not.toBeInTheDocument();
   });
 
   it("uses the shared pending surface for the Assignment Editor", async () => {
@@ -647,13 +652,15 @@ describe("Director review workspace", () => {
       </DragDropProvider>,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Ask Assignment Editor" }));
+    fireEvent.click(screen.getByRole("button", { name: "Draw up the Assignment" }));
     expect(
       await screen.findByRole("status", {
         name: "Assignment Editor is preparing a recommendation…",
       }),
     ).toHaveAttribute("aria-busy", "true");
-    expect(screen.queryByRole("button", { name: "Ask Assignment Editor" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Draw up the Assignment" }),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -694,7 +701,9 @@ describe("in-flight agent runs", () => {
 
     // Nothing was clicked: the workspace rejoins a run that was already under way.
     expect(await screen.findByText("Director is reviewing the Article…")).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Run Director" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Ask the Director to read it" }),
+    ).not.toBeInTheDocument();
   });
 
   it("follows an in-flight run and reports the Story once it settles", async () => {

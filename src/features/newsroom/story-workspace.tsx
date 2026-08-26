@@ -58,6 +58,8 @@ import { withRun } from "./agent-run-list";
 import { ToolActivity } from "./tool-activity";
 import { readableTime } from "./readable-time";
 import { STORY_STATE_LABELS } from "./newsroom-state";
+import { StoryRail } from "./story-rail";
+import { railActivity, railFailure } from "./story-rail-stops";
 import { WRITER_ASSIGNMENT_DROP_ID, WRITER_DRAG_TYPE, type StaffState } from "./newsroom-staff";
 import styles from "./newsroom-shell.module.css";
 import type { StoryClient } from "./story-client";
@@ -547,7 +549,7 @@ function AuditPanel({
       <summary>
         <span>
           <strong>History &amp; Audit</strong>
-          <small>Transitions, AgentRuns, durable records, and IDs</small>
+          <small>Every step, every agent run, and the identifiers behind them</small>
         </span>
         <span>{transitions.length + runs.length + reviewDecisions.length} records</span>
       </summary>
@@ -557,7 +559,7 @@ function AuditPanel({
           revisions={revisionHistory({ ...inspection, agentRuns: runs })}
         />
         <section aria-labelledby="story-audit-heading">
-          <h4 id="story-audit-heading">Technical Story details</h4>
+          <h4 id="story-audit-heading">Story identifiers</h4>
           <dl className={styles.auditGrid}>
             <div>
               <dt>Story ID</dt>
@@ -580,7 +582,7 @@ function AuditPanel({
         <section aria-labelledby="source-audit-heading">
           <h4 id="source-audit-heading">Evidence identities</h4>
           {sources.length === 0 ? (
-            <p>No evidence identities are recorded.</p>
+            <p>No evidence is attached to this Story.</p>
           ) : (
             sources.map(({ source, attachment, extractions, preparations }) => (
               <dl className={styles.auditGrid} key={source.id}>
@@ -621,9 +623,9 @@ function AuditPanel({
           )}
         </section>
         <section aria-labelledby="assignment-audit-heading">
-          <h4 id="assignment-audit-heading">Technical Assignment record</h4>
+          <h4 id="assignment-audit-heading">Assignment identifiers</h4>
           {assignment === null ? (
-            <p>No durable Assignment is recorded.</p>
+            <p>No Assignment has been made for this Story.</p>
           ) : (
             <dl className={styles.auditGrid}>
               <div>
@@ -652,7 +654,7 @@ function AuditPanel({
         <section aria-labelledby="transition-audit-heading">
           <h4 id="transition-audit-heading">Story transitions</h4>
           {transitions.length === 0 ? (
-            <p>No durable Story transitions are recorded.</p>
+            <p>This Story has not moved yet.</p>
           ) : (
             transitions.map((transition) => (
               <article key={transition.transitionId} className={styles.auditRecord}>
@@ -728,9 +730,9 @@ function AuditPanel({
           )}
         </section>
         <section aria-labelledby="article-audit-heading">
-          <h4 id="article-audit-heading">Technical Article record</h4>
+          <h4 id="article-audit-heading">Article identifiers</h4>
           {article === null ? (
-            <p>No durable Article is recorded.</p>
+            <p>No Article has been written for this Story.</p>
           ) : (
             <>
               <dl className={styles.auditGrid}>
@@ -960,11 +962,16 @@ export function StoryWorkspace({
   const existingDecision = [...inspection.reviewDecisions]
     .reverse()
     .find((decision) => decision.revisionId === currentRevisionId);
-  const revisionsExhausted = story.revisionCycle >= 2;
-  const [operatorDecision, setOperatorDecision] = useState<"approve" | "request_changes" | null>(
-    existingDecision?.decision ?? (revisionsExhausted ? "approve" : null),
-  );
   const [decisionReason, setDecisionReason] = useState(existingDecision?.reason ?? "");
+  /**
+   * A wording the operator can take in one click, never one they have to notice and clear. The
+   * Director has already said this in its own words, so offering it costs nothing; putting it in
+   * the field unasked is what produced a run-on reason in the permanent trail.
+   */
+  const suggestedReason =
+    successfulDirectorRun?.review.revisionInstructions ??
+    successfulDirectorRun?.review.summary ??
+    null;
   const { standing: deliveryStanding, delivered: deliveredPost } = readDeliveries(
     inspection.deliveries,
   );
@@ -1069,8 +1076,8 @@ export function StoryWorkspace({
     }
   }
 
-  async function submitAssignment() {
-    if (assignmentPending) return;
+  async function submitAssignment(): Promise<boolean> {
+    if (assignmentPending) return false;
     setAssignmentPending(true);
     setSubmissionError(null);
     try {
@@ -1085,17 +1092,29 @@ export function StoryWorkspace({
         setSubmissionError(
           result.kind === "application-failure" ? result.error.message : result.message,
         );
-        return;
+        return false;
       }
       const writer = profiles.find((profile) => profile.id === selectedWriterProfileId);
       if (!writer) {
         setSubmissionError("The selected Writer Profile is no longer available.");
-        return;
+        return false;
       }
       await onAssigned(result.value, writer);
+      return true;
     } finally {
       setAssignmentPending(false);
     }
+  }
+
+  /**
+   * Assigning and drafting are one act on the screen because there is no decision between them.
+   * Creating the Assignment used to land the operator on a screen whose only affordance was to
+   * run the Writer, which is two clicks for one intention. Both are still written separately —
+   * the Assignment names the Writer and snapshots the Sources, the run is what the Writer did —
+   * so nothing the trail distinguishes is lost by asking for them together.
+   */
+  async function assignAndDraft() {
+    if (await submitAssignment()) await runWriter();
   }
 
   async function runWriter() {
@@ -1399,12 +1418,6 @@ export function StoryWorkspace({
         setReviewStatus("Director review is still running. Reopen this Story to see the result.");
         return;
       }
-      setOperatorDecision(result.value.review.recommendation);
-      setDecisionReason(
-        result.value.review.recommendation === "request_changes"
-          ? (result.value.review.revisionInstructions ?? "")
-          : "The current Article revision is approved for the next editorial stage.",
-      );
       await refreshAfterReviewChange(
         "Director review saved, but authoritative inspection refresh is unavailable. Reopen the Story.",
       );
@@ -1413,14 +1426,14 @@ export function StoryWorkspace({
     }
   }
 
-  async function recordDecision() {
-    if (decisionPending || !successfulDirectorRun || !operatorDecision) return;
+  async function recordDecision(decision: "approve" | "request_changes") {
+    if (decisionPending || !successfulDirectorRun) return;
     setDecisionPending(true);
     setReviewStatus(null);
     try {
       const result = await requests.recordReviewDecision(story.id, {
         directorRunId: successfulDirectorRun.id,
-        decision: operatorDecision,
+        decision,
         reason: decisionReason,
       });
       if (result.kind !== "completed") {
@@ -1484,6 +1497,13 @@ export function StoryWorkspace({
         </div>
         <span className={styles.stateBadge}>{STORY_STATE_LABELS[story.state]}</span>
       </header>
+      <StoryRail
+        state={story.state}
+        delivered={deliveredPost !== null}
+        leftFrom={rejectionTransition?.previousState}
+        activity={railActivity(runs)}
+        failure={railFailure(runs)}
+      />
       {notice ? (
         <p role="status" className={styles.workspaceNotice}>
           {notice}
@@ -1509,7 +1529,7 @@ export function StoryWorkspace({
 
       {story.state === "rejected" && rejectionTransition ? (
         <section className={styles.rejectionResult} aria-labelledby="story-rejected-heading">
-          <h2 id="story-rejected-heading">Story rejected</h2>
+          <h2 id="story-rejected-heading">Why work on this Story ended</h2>
           <p>{rejectionTransition.reason}</p>
           <dl className={styles.auditGrid}>
             <div>
@@ -1557,25 +1577,29 @@ export function StoryWorkspace({
               />
             ) : story.state === "in_progress" ? (
               <section className={styles.reviewTask} aria-labelledby="review-submission-heading">
-                <p className={styles.currentTaskLabel}>Current task · Editorial review</p>
-                <h2 id="review-submission-heading">Ready for review</h2>
-                <p>Submit the current immutable Article revision to the Director review stage.</p>
+                <p className={styles.currentTaskLabel}>Now · Review</p>
+                <h2 id="review-submission-heading">Ready for the Director</h2>
+                <p>
+                  The draft above is finished. Send it to the Director, who reads it against the
+                  evidence behind it and recommends. Nothing about the draft changes.
+                </p>
                 <button
                   type="button"
                   className={styles.primaryAction}
                   disabled={reviewSubmissionPending}
                   onClick={() => void submitReview()}
                 >
-                  {reviewSubmissionPending ? "Sending to Review…" : "Send to Review"}
+                  {reviewSubmissionPending ? "Sending…" : "Send this draft to the Director"}
                 </button>
               </section>
             ) : story.state === "approved" ? (
               <section className={styles.reviewTask} aria-labelledby="publication-heading">
-                <p className={styles.currentTaskLabel}>Current task · Publication</p>
+                <p className={styles.currentTaskLabel}>Now · Publication</p>
                 <h2 id="publication-heading">Approved and ready to publish</h2>
                 <p>
-                  Publishing records the operator decision to release this Article and moves the
-                  Story to its final state. StoryRail does not deliver the Article anywhere yet.
+                  Publishing releases this Article here, under your name and the reason you give. It
+                  does not send it to your site — that is Delivered, the next stop on the rail and a
+                  decision of its own.
                 </p>
                 {!publicationOpen ? (
                   <button
@@ -1584,7 +1608,7 @@ export function StoryWorkspace({
                     disabled={editorialMutationPending}
                     onClick={() => setPublicationOpen(true)}
                   >
-                    Publish Story
+                    Publish this Story
                   </button>
                 ) : (
                   <form
@@ -1594,22 +1618,27 @@ export function StoryWorkspace({
                       void publish();
                     }}
                   >
-                    <label>
-                      Publication reason
-                      <textarea
-                        value={publicationReason}
-                        onChange={(event) => setPublicationReason(event.target.value)}
-                        required
-                        disabled={publicationPending}
-                      />
-                    </label>
+                    <label htmlFor="publication-reason">Why this Story is being published</label>
+                    <p id="publication-reason-purpose" className={styles.fieldPurpose}>
+                      Kept with the Story for good. It is what anyone reading back through this
+                      Story later sees as your reason for releasing it.
+                    </p>
+                    <textarea
+                      id="publication-reason"
+                      aria-describedby="publication-reason-purpose"
+                      value={publicationReason}
+                      onChange={(event) => setPublicationReason(event.target.value)}
+                      required
+                      disabled={publicationPending}
+                      placeholder="Checked against the Sources and cleared for release."
+                    />
                     <div className={styles.taskActions}>
                       <button
                         type="submit"
                         className={styles.primaryAction}
                         disabled={publicationPending || publicationReason.trim().length === 0}
                       >
-                        {publicationPending ? "Publishing…" : "Publish Story"}
+                        {publicationPending ? "Publishing…" : "Publish this Story"}
                       </button>
                       <button
                         type="button"
@@ -1644,14 +1673,14 @@ export function StoryWorkspace({
                 <p className={styles.currentTaskLabel}>Published</p>
                 <h2 id="published-heading">This Story is published</h2>
                 <p>
-                  Published is terminal. The Article, its revisions, and every durable record behind
-                  them stay available.
+                  Editorial work on this Story is finished. The Article, each of its Revisions, and
+                  the whole trail behind them stay here to be read.
                 </p>
                 <h3>Delivery</h3>
                 {deliveryStanding.kind === "never-delivered" ? (
                   <p className={styles.deliveryRecord}>
-                    This Story has never been delivered. Publishing records the decision to release
-                    it; it does not send it anywhere.
+                    This Story has not been sent anywhere. Publishing released it here; delivering
+                    is what puts it on your site.
                   </p>
                 ) : deliveryStanding.kind === "in-flight" ? (
                   <p className={styles.deliveryRecord}>
@@ -1753,18 +1782,18 @@ export function StoryWorkspace({
               />
             ) : story.state === "in_review" && !successfulDirectorRun ? (
               <section className={styles.reviewTask} aria-labelledby="director-task-heading">
-                <p className={styles.currentTaskLabel}>Current task · Director review</p>
-                <h2 id="director-task-heading">Director Review</h2>
+                <p className={styles.currentTaskLabel}>Now · Director review</p>
+                <h2 id="director-task-heading">Waiting for the Director</h2>
                 <p>
-                  The Director will record an advisory recommendation without changing Story state
-                  or Article content.
+                  The Director reads the draft against the evidence behind it and recommends. It
+                  changes nothing about the Article, and the call on it stays yours.
                 </p>
                 <button
                   type="button"
                   className={styles.primaryAction}
                   onClick={() => void runDirector()}
                 >
-                  {failedDirectorRun ? "Retry Director" : "Run Director"}
+                  {failedDirectorRun ? "Ask the Director again" : "Ask the Director to read it"}
                 </button>
               </section>
             ) : successfulDirectorRun ? (
@@ -1772,8 +1801,8 @@ export function StoryWorkspace({
                 <p className={styles.currentTaskLabel}>Director review</p>
                 <h2 id="director-review-heading">
                   {successfulDirectorRun.review.recommendation === "approve"
-                    ? "Approve"
-                    : "Request changes"}
+                    ? "The Director recommends approving it"
+                    : "The Director recommends changes"}
                 </h2>
                 <p>{successfulDirectorRun.review.summary}</p>
                 <div className={styles.reviewChecks}>
@@ -1797,79 +1826,68 @@ export function StoryWorkspace({
                     className={styles.decisionForm}
                     onSubmit={(event) => {
                       event.preventDefault();
-                      void recordDecision();
                     }}
                   >
-                    <fieldset>
-                      <legend>Operator decision</legend>
-                      <div className={styles.taskActions}>
+                    <label htmlFor="review-decision-reason">Your reason</label>
+                    <p id="review-decision-reason-purpose" className={styles.fieldPurpose}>
+                      This is the audit trail. It is kept against your name for as long as the Story
+                      exists, and it is what the Writer is given if you send this back.
+                    </p>
+                    {/*
+                     * Deliberately not pre-filled. It used to arrive holding a real sentence that
+                     * read like placeholder text, so a typed reason was appended to it and a
+                     * run-on went into the trail — seen happening in a live run. A suggestion the
+                     * operator accepts on purpose is honest; one they have to notice is not.
+                     */}
+                    <textarea
+                      id="review-decision-reason"
+                      aria-describedby="review-decision-reason-purpose"
+                      value={decisionReason}
+                      onChange={(event) => setDecisionReason(event.target.value)}
+                      required
+                      disabled={decisionPending}
+                      placeholder="Say what you checked and why this is the right call."
+                    />
+                    {suggestedReason !== null && decisionReason.trim().length === 0 ? (
+                      <button
+                        type="button"
+                        className={styles.tertiaryAction}
+                        onClick={() => setDecisionReason(suggestedReason)}
+                      >
+                        Use the Director&apos;s wording
+                      </button>
+                    ) : null}
+                    <div className={styles.taskActions}>
+                      <button
+                        type="button"
+                        className={styles.primaryAction}
+                        disabled={decisionPending || decisionReason.trim().length === 0}
+                        onClick={() => void recordDecision("approve")}
+                      >
+                        {decisionPending ? "Recording…" : "Approve this draft"}
+                      </button>
+                      {story.revisionCycle < 2 ? (
                         <button
                           type="button"
                           className={styles.secondaryAction}
-                          aria-pressed={operatorDecision === "approve"}
-                          onClick={() => {
-                            setOperatorDecision("approve");
-                            setDecisionReason(
-                              "The current Article revision is approved for the next editorial stage.",
-                            );
-                          }}
+                          disabled={decisionPending || decisionReason.trim().length === 0}
+                          onClick={() => void recordDecision("request_changes")}
                         >
-                          Approve
+                          Send it back to the Writer
                         </button>
-                        {story.revisionCycle < 2 ? (
-                          <button
-                            type="button"
-                            className={styles.secondaryAction}
-                            aria-pressed={operatorDecision === "request_changes"}
-                            onClick={() => {
-                              setOperatorDecision("request_changes");
-                              setDecisionReason(
-                                successfulDirectorRun.review.revisionInstructions ?? "",
-                              );
-                            }}
-                          >
-                            Request changes
-                          </button>
-                        ) : null}
-                      </div>
-                      {story.revisionCycle >= 2 ? (
-                        <p className={styles.inlineAlert}>
-                          Both revision cycles have been used. Request changes is no longer
-                          available for this Article revision.
-                        </p>
                       ) : null}
-                    </fieldset>
-                    {operatorDecision &&
-                    operatorDecision !== successfulDirectorRun.review.recommendation ? (
-                      <p role="status" className={styles.inlineAlert}>
-                        Operator decision differs from the Director recommendation.
+                    </div>
+                    {story.revisionCycle >= 2 ? (
+                      <p className={styles.inlineAlert}>
+                        This Article has had both of its revisions. Sending it back is no longer
+                        open; approve it or reject the Story.
                       </p>
                     ) : null}
-                    <label>
-                      Reason
-                      <textarea
-                        value={decisionReason}
-                        onChange={(event) => setDecisionReason(event.target.value)}
-                        required
-                        disabled={decisionPending}
-                      />
-                    </label>
-                    <button
-                      type="submit"
-                      className={styles.primaryAction}
-                      disabled={
-                        decisionPending || !operatorDecision || decisionReason.trim().length === 0
-                      }
-                    >
-                      {decisionPending ? "Recording decision…" : "Record decision"}
-                    </button>
                     {/* A disabled control should say what it is waiting for. */}
-                    {!decisionPending &&
-                    (!operatorDecision || decisionReason.trim().length === 0) ? (
+                    {!decisionPending && decisionReason.trim().length === 0 ? (
                       <p className={styles.formHint}>
-                        {!operatorDecision
-                          ? "Choose Approve or Request changes, then give a reason."
-                          : "A reason is required before the decision can be recorded."}
+                        Give your reason first — every decision here is attributable, so neither
+                        button works without one.
                       </p>
                     ) : null}
                   </form>
@@ -1884,20 +1902,20 @@ export function StoryWorkspace({
                 ) : null}
                 {story.state === "changes_requested" && !revisionRunning ? (
                   <section className={styles.reviewTask} aria-labelledby="writer-revision-heading">
-                    <p className={styles.currentTaskLabel}>Current task · Writer revision</p>
+                    <p className={styles.currentTaskLabel}>Now · Revision</p>
                     <h3 id="writer-revision-heading">
-                      Create Article Revision {(latestRevision?.revisionNumber ?? 1) + 1}
+                      Revision {(latestRevision?.revisionNumber ?? 1) + 1} is next
                     </h3>
                     <p>
-                      The Writer will revise the current Article using the operator decision and the
-                      exact historical evidence behind this revision.
+                      The Writer rewrites the Article to what you asked for, using the same evidence
+                      this draft was built from.
                     </p>
                     <button
                       type="button"
                       className={styles.primaryAction}
                       onClick={() => void runWriterRevision()}
                     >
-                      Run Writer Revision
+                      Write revision {(latestRevision?.revisionNumber ?? 1) + 1}
                     </button>
                   </section>
                 ) : null}
@@ -1976,10 +1994,16 @@ export function StoryWorkspace({
                   <button
                     type="button"
                     className={styles.primaryAction}
-                    disabled={assignmentPending || selectedWriterProfileId.length === 0}
-                    onClick={() => void submitAssignment()}
+                    disabled={
+                      assignmentPending || draftRunning || selectedWriterProfileId.length === 0
+                    }
+                    onClick={() => void assignAndDraft()}
                   >
-                    {assignmentPending ? "Creating Assignment…" : "Create Assignment"}
+                    {assignmentPending
+                      ? "Assigning…"
+                      : draftRunning
+                        ? "Drafting…"
+                        : "Assign it and write the draft"}
                   </button>
                   <button
                     type="button"
@@ -2007,7 +2031,7 @@ export function StoryWorkspace({
                 className={styles.assignmentEditorForm}
                 onSubmit={(event) => {
                   event.preventDefault();
-                  void submitAssignment();
+                  void assignAndDraft();
                 }}
               >
                 <header>
@@ -2034,7 +2058,7 @@ export function StoryWorkspace({
                       disabled={proposalRunning}
                       onClick={() => void generateProposal()}
                     >
-                      {proposalRunning ? "Assignment Editor is working…" : "Ask Assignment Editor"}
+                      {proposalRunning ? "Drawing it up…" : "Draw up the Assignment"}
                     </button>
                   )}
                 </header>
@@ -2044,7 +2068,11 @@ export function StoryWorkspace({
                     editorial fields remain unchanged until you create the Assignment.
                   </p>
                 ) : null}
-                <p>Assignment will snapshot all currently attached Sources: {sources.length}</p>
+                <p>
+                  The Assignment takes the {sources.length}{" "}
+                  {sources.length === 1 ? "Source" : "Sources"} attached right now. Evidence added
+                  later will not reach this Writer.
+                </p>
                 <label>
                   Writer
                   <select
@@ -2093,21 +2121,31 @@ export function StoryWorkspace({
                     disabled={assignmentPending}
                   />
                 </label>
-                <label>
-                  Assignment reason
-                  <input
-                    value={reason}
-                    onChange={(event) => setReason(event.target.value)}
-                    disabled={assignmentPending}
-                    required
-                  />
-                </label>
+                <label htmlFor="assignment-reason">Why this Writer and this angle</label>
+                <p id="assignment-reason-purpose" className={styles.fieldPurpose}>
+                  Kept with the Assignment. It is what explains to a later reader why the Story was
+                  pointed this way rather than another.
+                </p>
+                <input
+                  id="assignment-reason"
+                  aria-describedby="assignment-reason-purpose"
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                  disabled={assignmentPending}
+                  required
+                />
                 <button
                   type="submit"
                   className={styles.primaryAction}
-                  disabled={assignmentPending || selectedWriterProfileId.length === 0}
+                  disabled={
+                    assignmentPending || draftRunning || selectedWriterProfileId.length === 0
+                  }
                 >
-                  {assignmentPending ? "Creating Assignment…" : "Create Assignment"}
+                  {assignmentPending
+                    ? "Assigning…"
+                    : draftRunning
+                      ? "Drafting…"
+                      : "Assign it and write the draft"}
                 </button>
                 {profilesUnavailable ? <p role="alert">Writer Profiles are unavailable.</p> : null}
                 {proposalStatus ? (
@@ -2123,26 +2161,27 @@ export function StoryWorkspace({
               </form>
             ) : (
               <div className={styles.readyCard}>
-                <p className={styles.currentTaskLabel}>Current task · Assignment</p>
-                <h2 id="current-task-heading">Ready for assignment</h2>
+                <p className={styles.currentTaskLabel}>Now · Intake</p>
+                <h2 id="current-task-heading">Ready to be assigned</h2>
                 <p>
-                  Ask the Assignment Editor to prepare a Writer recommendation and brief, or create
-                  the Assignment manually.
+                  Next this Story needs a Writer and a brief. The Assignment Editor will draw both
+                  up from the evidence attached, or you can write them yourself.
                 </p>
                 <div className={styles.taskActions}>
                   <button
                     type="button"
                     className={styles.primaryAction}
+                    disabled={proposalRunning}
                     onClick={() => void generateProposal()}
                   >
-                    Ask Assignment Editor
+                    {proposalRunning ? "Drawing it up…" : "Draw up the Assignment"}
                   </button>
                   <button
                     type="button"
                     className={styles.secondaryAction}
                     onClick={() => setEditingAssignment(true)}
                   >
-                    Assign manually
+                    Write the Assignment myself
                   </button>
                   <button
                     type="button"
@@ -2183,7 +2222,7 @@ export function StoryWorkspace({
                     disabled={autopilotPending || autopilotRunning}
                     onClick={() => void startAutopilot()}
                   >
-                    {autopilotRunning ? "Autopilot is running…" : "Run autopilot"}
+                    {autopilotRunning ? "Autopilot is running…" : "Run this Story to publication"}
                   </button>
                 </fieldset>
                 <p className={styles.autopilotExplainer}>
@@ -2214,8 +2253,8 @@ export function StoryWorkspace({
             />
           ) : (
             <div className={styles.assignmentSummary}>
-              <p className={styles.currentTaskLabel}>Current task · Writer execution</p>
-              <h2 id="current-task-heading">Assignment ready</h2>
+              <p className={styles.currentTaskLabel}>Now · Drafting</p>
+              <h2 id="current-task-heading">The Writer has the brief</h2>
               <div className={styles.assignedWriter}>
                 <span>Writer</span>
                 <h3>{assignment.writerProfile.name}</h3>
@@ -2238,9 +2277,10 @@ export function StoryWorkspace({
                 <button
                   type="button"
                   className={styles.primaryAction}
+                  disabled={draftRunning}
                   onClick={() => void runWriter()}
                 >
-                  Run Writer
+                  {draftRunning ? "Drafting…" : "Write the draft"}
                 </button>
               </div>
               {writerStatus ? (
@@ -2274,7 +2314,10 @@ export function StoryWorkspace({
               <div className={styles.rejectionSummary}>
                 <div>
                   <h2 id="story-rejection-heading">Reject this Story</h2>
-                  <p>End editorial work on this Story with an attributable operator reason.</p>
+                  <p>
+                    End work on this Story. It leaves the rail and everything gathered for it stays
+                    where it is.
+                  </p>
                 </div>
                 <button
                   type="button"
@@ -2296,19 +2339,23 @@ export function StoryWorkspace({
                 <div>
                   <h2 id="story-rejection-heading">Confirm Story rejection</h2>
                   <p>
-                    Rejected is terminal. Existing Sources, assignments, Articles, agent runs, and
-                    audit records will be preserved.
+                    This Story leaves the rail and cannot be put back on it. Its Sources,
+                    Assignment, Article, and everything the newsroom did stay here to be read.
                   </p>
                 </div>
-                <label>
-                  Rejection reason
-                  <textarea
-                    value={rejectionReason}
-                    onChange={(event) => setRejectionReason(event.target.value)}
-                    required
-                    disabled={rejectionPending || editorialMutationPending}
-                  />
-                </label>
+                <label htmlFor="rejection-reason">Why this Story is being dropped</label>
+                <p id="rejection-reason-purpose" className={styles.fieldPurpose}>
+                  Kept with the Story for good, under your name. It is the answer to anyone who
+                  later asks why the newsroom stopped work on this.
+                </p>
+                <textarea
+                  id="rejection-reason"
+                  aria-describedby="rejection-reason-purpose"
+                  value={rejectionReason}
+                  onChange={(event) => setRejectionReason(event.target.value)}
+                  required
+                  disabled={rejectionPending || editorialMutationPending}
+                />
                 <div className={styles.taskActions}>
                   <button
                     type="submit"

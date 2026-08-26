@@ -145,7 +145,7 @@ describe("a Story whose run is reported twice", () => {
       </DragDropProvider>,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Ask Assignment Editor" }));
+    fireEvent.click(screen.getByRole("button", { name: "Draw up the Assignment" }));
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_600);
     });
