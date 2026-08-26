@@ -33,6 +33,31 @@ It fetches Stories via `storyClient`, pending Sources via `sourceInboxRequests`,
 
 `newsroom-staff.tsx` (`NewsroomStaff`) loads and renders the Agent Profile roster as `StaffState` (`loading` / `loaded` / `unavailable`). Built-in profiles are ordered Assignment Editor, General Writer, Director, then custom Writers by name. Each Writer card is a `@dnd-kit/react` draggable source (`WRITER_DRAG_TYPE`, drag handle visible only for Writers); non-Writer profiles render as static cards. The drag data carries the full `AgentProfile` so the Story workspace can create an Assignment from the dropped Writer.
 
+## Multi-site navigation and site switcher
+
+`site-switcher.tsx` (`SiteSwitcher`) and `sites-workspace.tsx` (`SitesWorkspace`) provide newsroom discovery and switching:
+- Header dropdown enables immediate switching between configured newsrooms, with URLs bound to `/s/[siteId]`.
+- Sites workspace lists all available sites and allows creating a new newsroom with domain and description validation.
+- `site-paths.ts` centralizes client URL resolution so components generate site-scoped routes consistently.
+
+## Article reading and plain reading toggle
+
+`article-reader.tsx` renders an `ArticleRevision`:
+- **Annotated View (Default)**: Visualizes cited article blocks, grounding attributions, and source evidence links. Unattributed writer framing is visibly marked.
+- **Plain Reading View**: Verbatim manuscript presentation of `articleBodyMarkdown` without syntax manipulation or extra Markdown parsing, allowing an operator to read the draft as uninterrupted prose exactly as written.
+
+## Publishing and delivery controls
+
+`story-workspace.tsx` and `delivery-outcome.ts` provide operator-facing delivery controls and status reporting:
+- **Delivery Trigger**: Operators can deliver a published Story's latest Article Revision to the configured destination (StudioCMS or WordPress).
+- **Delivery Inspection**: Inspects and renders delivery records (`StoryDeliveryInspection`).
+- **Clear Status Messaging**: Differentiates between:
+  - Deliveries that were never attempted ("Nothing was sent.") when credentials or destinations are unconfigured.
+  - Deliveries in progress ("Sending...").
+  - Succeeded deliveries (showing remote ID and any modified slug).
+  - Refused or failed deliveries (displaying specific failure codes and reasons).
+- **Re-delivery**: Allows re-delivering to update an existing remote post after a new revision is published.
+
 ## Workspaces and clients
 
 | Component                 | File                            | Backed by                                                                                                                                          |
@@ -41,7 +66,8 @@ It fetches Stories via `storyClient`, pending Sources via `sourceInboxRequests`,
 | `SourceInboxWorkspace`    | `source-inbox-workspace.tsx`    | `GET /api/source-inbox`, `POST /api/sources/[sourceId]/preparations`, `POST /api/sources/[sourceId]/extractions`, and `PUT /api/sources/[sourceId]/triage` via `source-inbox-client.ts`        |
 | `StoryWorkspace`          | `story-workspace.tsx`           | `GET /api/stories/[storyId]`, `POST .../assignment-proposals`, `POST .../assignments`, `POST .../writer-drafts`, `POST .../writer-revisions`, `POST .../review-submissions`, `POST .../director-reviews`, `POST .../review-decisions`, `POST .../rejections` via `story-client.ts` |
 | `AgentProfilesWorkspace`  | `agent-profiles-workspace.tsx`  | `GET/POST /api/agent-profiles` via `agent-profile-client.ts`                                                                                       |
-| `ArticleReader`           | `article-reader.tsx`            | Renders an `ArticleRevision` through `SafeMarkdown`                                                                                                |
+| `NewsroomStandardsEditor` | `newsroom-standards-editor.tsx` | `GET/PUT /api/sites/[siteId]/newsroom-standards` via `newsroom-standards-client.ts` |
+| `ArticleReader`           | `article-reader.tsx`            | Renders an `ArticleRevision` through `SafeMarkdown` or verbatim plain text view |
 | `EditorialTaskPending`    | `editorial-task-pending.tsx`    | Shared accessible pending-status card (`role="status"`, `aria-live="polite"`, `aria-busy="true"`) used by Assignment Editor, Writer draft/revision, and Director review pending states |
 
 ### Source-evidence intake
