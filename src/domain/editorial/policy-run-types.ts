@@ -9,6 +9,11 @@ export const EDITORIAL_POLICIES = ["autopilot"] as const;
 export type EditorialPolicy = (typeof EDITORIAL_POLICIES)[number];
 
 export const POLICY_RUN_STEPS = [
+  "source_intake",
+  "source_preparation",
+  "story_creation",
+  "source_attachment",
+  "source_triage",
   "source_research",
   "assignment_proposal",
   "assignment",
@@ -18,6 +23,7 @@ export const POLICY_RUN_STEPS = [
   "review_decision",
   "writer_revision",
   "publication",
+  "delivery",
 ] as const;
 export type PolicyRunStep = (typeof POLICY_RUN_STEPS)[number];
 
@@ -33,7 +39,13 @@ export type PolicyRunConclusion = (typeof POLICY_RUN_CONCLUSIONS)[number];
 
 interface PolicyRunCommon {
   readonly id: PolicyRunId;
-  readonly storyId: StoryId;
+  /**
+   * Null until the policy has a Story. A run started from a URL preserves and prepares evidence
+   * before anything editorial exists, and the record has to be able to say that a URL is under
+   * automation during those minutes; a run that could only be written once a Story existed would
+   * leave the very steps most likely to be interrupted with nothing saying they were running.
+   */
+  readonly storyId: StoryId | null;
   readonly policy: EditorialPolicy;
   readonly requestedBy: OperatorActor;
   /** Whether the operator asked for the evidence to be widened before assigning. */

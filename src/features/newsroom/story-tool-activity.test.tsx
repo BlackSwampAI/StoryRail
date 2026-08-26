@@ -152,7 +152,7 @@ describe("a run narrating what it reached for", () => {
   it("says how many of the run's allowed calls were spent", () => {
     renderWorkspace(inspection(CALLS));
 
-    expect(screen.getByText(/3 of 6 research calls used/)).toBeTruthy();
+    expect(screen.getByText(/3 of 12 research calls used/)).toBeTruthy();
     expect(screen.getByText(/1 call was refused/)).toBeTruthy();
   });
 

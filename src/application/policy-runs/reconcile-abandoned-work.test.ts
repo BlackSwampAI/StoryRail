@@ -91,6 +91,7 @@ function harness(options: {
         append: vi.fn(),
         observe: vi.fn(),
         settle,
+        findById: vi.fn(),
         findByStoryId: vi.fn(),
         listStaleRunning: vi.fn(async () => options.stale ?? []),
       },

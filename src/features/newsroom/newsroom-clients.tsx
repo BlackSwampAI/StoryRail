@@ -17,6 +17,7 @@ import {
 } from "./source-evidence-url-client";
 import { createSourceInboxClient, type SourceInboxClient } from "./source-inbox-client";
 import { createStoryClient, type StoryClient } from "./story-client";
+import { createUrlAutopilotClient, type UrlAutopilotClient } from "./url-autopilot-client";
 
 export interface NewsroomClients {
   readonly stories: StoryClient;
@@ -26,6 +27,7 @@ export interface NewsroomClients {
   readonly modelCatalog: ModelCatalogClient;
   readonly newsroomStandards: NewsroomStandardsClient;
   readonly requestSourceEvidenceUrl: RequestSourceEvidenceUrl;
+  readonly urlAutopilot: UrlAutopilotClient;
 }
 
 export interface NewsroomSiteValue {
@@ -49,6 +51,7 @@ export function createNewsroomClients(
       siteId: site,
       fetch: fetchImplementation,
     }),
+    urlAutopilot: createUrlAutopilotClient({ siteId: site, fetch: fetchImplementation }),
   });
 }
 

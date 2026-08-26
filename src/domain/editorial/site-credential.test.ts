@@ -51,7 +51,7 @@ describe("per-Site settings", () => {
   it("accepts a model for every role and trims what it stores", () => {
     expect(recordSiteSettings({ models: { ...models, writer: "  provider/three  " } })).toEqual({
       ok: true,
-      settings: { models, destination: null, search: null },
+      settings: { models, destination: null, search: null, research: null },
     });
   });
 
@@ -101,6 +101,7 @@ describe("per-Site settings", () => {
           draft: true,
         },
         search: null,
+        research: null,
       },
     });
   });
@@ -127,6 +128,7 @@ describe("per-Site settings", () => {
           draft: false,
         },
         search: null,
+        research: null,
       },
     });
   });
@@ -219,6 +221,7 @@ describe("per-Site settings", () => {
         models,
         destination: null,
         search: { baseUrl: "https://search.newsroom.test", username: "storyrail" },
+        research: null,
       },
     });
   });
@@ -254,6 +257,47 @@ describe("per-Site settings", () => {
     expect(recordSiteSettings({ models })).toMatchObject({
       ok: true,
       settings: { search: null },
+    });
+  });
+
+  it("accepts a research budget that names its calls and its turns separately", () => {
+    expect(
+      recordSiteSettings({ models, research: { maximumCalls: 20, maximumTurns: 6 } }),
+    ).toMatchObject({
+      ok: true,
+      settings: { research: { maximumCalls: 20, maximumTurns: 6 } },
+    });
+  });
+
+  it("refuses a research budget that names calls without naming turns", () => {
+    expect(recordSiteSettings({ models, research: { maximumCalls: 20 } })).toMatchObject({
+      ok: false,
+      error: { code: "SITE_SETTINGS_RESEARCH_INVALID" },
+    });
+  });
+
+  it("refuses a research budget of nothing, which no run could succeed under", () => {
+    expect(
+      recordSiteSettings({ models, research: { maximumCalls: 0, maximumTurns: 4 } }),
+    ).toMatchObject({ ok: false, error: { code: "SITE_SETTINGS_RESEARCH_INVALID" } });
+  });
+
+  it("refuses a research budget nobody meant to authorise", () => {
+    expect(
+      recordSiteSettings({ models, research: { maximumCalls: 400, maximumTurns: 4 } }),
+    ).toMatchObject({ ok: false, error: { code: "SITE_SETTINGS_RESEARCH_INVALID" } });
+  });
+
+  it("refuses a fractional research budget, which is compared against a whole count", () => {
+    expect(
+      recordSiteSettings({ models, research: { maximumCalls: 6.5, maximumTurns: 4 } }),
+    ).toMatchObject({ ok: false, error: { code: "SITE_SETTINGS_RESEARCH_INVALID" } });
+  });
+
+  it("treats a newsroom that has chosen no budget as configured rather than broken", () => {
+    expect(recordSiteSettings({ models })).toMatchObject({
+      ok: true,
+      settings: { research: null },
     });
   });
 

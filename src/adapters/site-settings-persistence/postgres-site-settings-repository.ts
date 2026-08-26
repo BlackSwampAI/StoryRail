@@ -49,6 +49,7 @@ export function createPostgresSiteSettingsRepository(
             models: command.settings.models,
             ...(command.settings.destination ? { destination: command.settings.destination } : {}),
             ...(command.settings.search ? { search: command.settings.search } : {}),
+            ...(command.settings.research ? { research: command.settings.research } : {}),
           }),
           command.updatedAt,
         ],

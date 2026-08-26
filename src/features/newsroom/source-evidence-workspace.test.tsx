@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   canonicalizeSourceUrl,
   operatorId,
+  policyRunId,
   sourceEvidencePreparationId,
   sourceExtractionId,
   sourceId,
@@ -494,5 +495,135 @@ describe("SourceEvidenceWorkspace", () => {
     expect(
       screen.queryByRole("button", { name: "Review in Source Inbox" }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("starting a whole run from the URL", () => {
+  const autopilot = (
+    overrides: Partial<{
+      readonly start: ReturnType<typeof vi.fn>;
+      readonly follow: ReturnType<typeof vi.fn>;
+    }> = {},
+  ) => ({
+    start:
+      overrides.start ??
+      vi.fn(async () => ({
+        kind: "started" as const,
+        policyRunId: policyRunId("policy-1"),
+        sourceId: SOURCE.id,
+      })),
+    follow:
+      overrides.follow ??
+      vi.fn(async () => ({
+        kind: "observed" as const,
+        run: { storyId: null, step: "source_preparation" } as never,
+      })),
+  });
+
+  function chooseAutopilotAndSubmit() {
+    fireEvent.change(screen.getByRole("textbox", { name: "Source URL" }), {
+      target: { value: "https://newsroom.test/apple-m5-ultra" },
+    });
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: /Run this all the way to a published post/ }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Run this to a published post" }));
+  }
+
+  it("hands the URL to autopilot instead of preserving it by hand", async () => {
+    const perform = request();
+    const requests = autopilot();
+    render(
+      <SourceEvidenceWorkspace
+        requestSourceEvidence={perform}
+        inboxRequests={inbox()}
+        autopilotRequests={requests as never}
+      />,
+    );
+    chooseAutopilotAndSubmit();
+
+    await waitFor(() =>
+      expect(requests.start).toHaveBeenCalledWith({
+        submittedUrl: "https://newsroom.test/apple-m5-ultra",
+        research: false,
+      }),
+    );
+    expect(perform).not.toHaveBeenCalled();
+    expect(
+      await screen.findByRole("heading", { name: "Running this to a published post…" }),
+    ).toBeVisible();
+  });
+
+  it("says what the run is doing while there is still no Story to look at", async () => {
+    const requests = autopilot();
+    render(
+      <SourceEvidenceWorkspace
+        requestSourceEvidence={request()}
+        inboxRequests={inbox()}
+        autopilotRequests={requests as never}
+      />,
+    );
+    chooseAutopilotAndSubmit();
+
+    expect(await screen.findByText("Preparing the evidence")).toBeVisible();
+  });
+
+  it("hands the operator to the Story the moment the run has one", async () => {
+    const onAutopilotStory = vi.fn();
+    const requests = autopilot({
+      follow: vi.fn(async () => ({
+        kind: "observed" as const,
+        run: { storyId: "story-from-a-url", step: "writer_draft" } as never,
+      })),
+    });
+    render(
+      <SourceEvidenceWorkspace
+        requestSourceEvidence={request()}
+        inboxRequests={inbox()}
+        autopilotRequests={requests as never}
+        onAutopilotStory={onAutopilotStory}
+      />,
+    );
+    chooseAutopilotAndSubmit();
+
+    await waitFor(() => expect(onAutopilotStory).toHaveBeenCalledWith("story-from-a-url"));
+  });
+
+  it("says nothing was automated when the URL is refused", async () => {
+    const requests = autopilot({
+      start: vi.fn(async () => ({
+        kind: "refused" as const,
+        error: { code: "DUPLICATE_SOURCE", message: "This newsroom already has that page." },
+      })),
+    });
+    render(
+      <SourceEvidenceWorkspace
+        requestSourceEvidence={request()}
+        inboxRequests={inbox()}
+        autopilotRequests={requests as never}
+      />,
+    );
+    chooseAutopilotAndSubmit();
+
+    expect(
+      await screen.findByRole("heading", { name: "This newsroom already has that page." }),
+    ).toBeVisible();
+    expect(screen.getByText(/no Story was opened/)).toBeVisible();
+  });
+
+  it("leaves the ordinary intake path alone when nobody asked for automation", async () => {
+    const perform = request();
+    const requests = autopilot();
+    render(
+      <SourceEvidenceWorkspace
+        requestSourceEvidence={perform}
+        inboxRequests={inbox()}
+        autopilotRequests={requests as never}
+      />,
+    );
+    submit();
+
+    await waitFor(() => expect(perform).toHaveBeenCalledOnce());
+    expect(requests.start).not.toHaveBeenCalled();
   });
 });

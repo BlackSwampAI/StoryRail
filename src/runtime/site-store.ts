@@ -4,7 +4,17 @@ import { createAesGcmCredentialCipher } from "@/adapters/credential-cipher";
 import { createPostgresSiteCredentialRepository } from "@/adapters/site-credential-persistence";
 import { createPostgresSiteSettingsRepository } from "@/adapters/site-settings-persistence";
 import { createResolveCredential, type CredentialCipher } from "@/application/site-credentials";
-import type { ApiKeyResolution, CredentialSlot, SiteId, SiteModelIds } from "@/domain/editorial";
+import {
+  DEFAULT_RESEARCH_CALL_BUDGET,
+  DEFAULT_RESEARCH_TURN_BUDGET,
+} from "@/application/source-research";
+import type {
+  ApiKeyResolution,
+  CredentialSlot,
+  SiteId,
+  SiteModelIds,
+  SiteResearchSettings,
+} from "@/domain/editorial";
 
 /**
  * The models an installation ships with, used until a newsroom chooses its own.
@@ -24,6 +34,7 @@ export const DEFAULT_SITE_MODEL_IDS: SiteModelIds = Object.freeze({
 export interface SiteStore {
   readonly resolveApiKey: (slot: CredentialSlot) => Promise<ApiKeyResolution>;
   readonly readModelIds: () => Promise<SiteModelIds>;
+  readonly readResearchBudget: () => Promise<SiteResearchSettings>;
 }
 
 /**
@@ -69,6 +80,17 @@ export function createSiteStore(options: {
       // A Site with no settings row is a Site nobody has configured yet, not a broken one, so it
       // runs on what the installation shipped with rather than refusing to run.
       return (await settings.find())?.models ?? DEFAULT_SITE_MODEL_IDS;
+    },
+
+    async readResearchBudget(): Promise<SiteResearchSettings> {
+      // A newsroom that has not chosen a budget runs on what the installation shipped with,
+      // rather than refusing to research at all.
+      return (
+        (await settings.find())?.research ?? {
+          maximumCalls: DEFAULT_RESEARCH_CALL_BUDGET,
+          maximumTurns: DEFAULT_RESEARCH_TURN_BUDGET,
+        }
+      );
     },
   });
 }

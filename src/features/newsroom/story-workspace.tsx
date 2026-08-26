@@ -1,7 +1,7 @@
 "use client";
 
 import { useDragDropMonitor, useDragOperation, useDroppable } from "@dnd-kit/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { StoryInspection } from "@/application/story-inspection";
 import {
@@ -45,6 +45,10 @@ import {
  * Stated where the operator chooses, so the cost of asking for research is not a surprise, and
  * again against what a run has spent, so a thin result can be read as a budget rather than a
  * fault.
+ *
+ * This is what the installation ships with rather than what this Site has chosen. A newsroom that
+ * has set its own budget spends that, and the workspace has no settings to read here; the number
+ * shown is a guide to the cost, not the enforced limit, which lives with the run.
  */
 const RESEARCH_CALL_BUDGET = DEFAULT_RESEARCH_CALL_BUDGET;
 
@@ -883,6 +887,14 @@ export function StoryWorkspace({
   const [reviewStatus, setReviewStatus] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
   const [rejectionStatus, setRejectionStatus] = useState<string | null>(null);
+  // The rail and the state badge read the Story the parent owns, so a poll that sees a later
+  // state has to hand that Story up rather than keep it. The last state seen is held in a ref
+  // because the polling intervals close over the render that started them and would otherwise
+  // compare every refresh against the state the Story was opened at.
+  const observedStateRef = useRef(story.state);
+  useEffect(() => {
+    observedStateRef.current = story.state;
+  }, [story.state]);
   const [runs, setRuns] = useState<readonly AgentRun[]>(agentRuns);
   // Tool calls arrive with the inspection and are refreshed by the same polls that follow the
   // runs, so the list grows while a run is still working rather than only once it has finished.
@@ -1200,6 +1212,13 @@ export function StoryWorkspace({
         if (refreshed.value.agentRuns.some(isSuccessfulProposal)) setProposalReady(true);
         if (refreshed.value.agentRuns.every((run) => run.outcome !== "running")) {
           onWriterCompleted(refreshed.value);
+          return;
+        }
+        // An agent can move the Story on while its run is still in flight, so a poll that only
+        // refreshed the runs would leave the rail standing on the stop the Story was opened at.
+        if (refreshed.value.story.state !== observedStateRef.current) {
+          observedStateRef.current = refreshed.value.story.state;
+          onReviewStateChanged(refreshed.value);
         }
       })();
     }, IN_FLIGHT_POLL_INTERVAL_MS);
@@ -1207,7 +1226,7 @@ export function StoryWorkspace({
       active = false;
       clearInterval(timer);
     };
-  }, [anythingRunning, requests, story.id, onWriterCompleted]);
+  }, [anythingRunning, requests, story.id, onWriterCompleted, onReviewStateChanged]);
 
   const autopilotRunning = autopilotWatch !== null;
   // The in-flight poll above stops as soon as no run is running, which is true in every gap
@@ -1225,6 +1244,8 @@ export function StoryWorkspace({
         const progress = autopilotProgress(refreshed.value);
         const observedAt = Date.now();
         const moved = progress !== autopilotWatch.progress;
+        const stateAdvanced = refreshed.value.story.state !== observedStateRef.current;
+        if (stateAdvanced) observedStateRef.current = refreshed.value.story.state;
         const follow = resolveAutopilotFollow({
           inspection: refreshed.value,
           priorRunIds: autopilotWatch.priorRunIds,
@@ -1238,8 +1259,8 @@ export function StoryWorkspace({
         }
         if (moved) {
           setAutopilotWatch({ priorRunIds: autopilotWatch.priorRunIds, progress, observedAt });
-          onReviewStateChanged(refreshed.value);
         }
+        if (moved || stateAdvanced) onReviewStateChanged(refreshed.value);
       })();
     }, IN_FLIGHT_POLL_INTERVAL_MS);
     return () => {
@@ -2210,9 +2231,9 @@ export function StoryWorkspace({
                     <span>
                       Research first, when autopilot runs
                       <small>
-                        Retrieves up to {RESEARCH_CALL_BUDGET} linked pages and adds a model call
-                        before drafting. Slower, and it costs more per run. It applies only to
-                        autopilot — to research now, use Find more Sources.
+                        Spends up to {RESEARCH_CALL_BUDGET} tool calls looking for further pages and
+                        adds a model call before drafting. Slower, and it costs more per run. It
+                        applies only to autopilot — to research now, use Find more Sources.
                       </small>
                     </span>
                   </label>

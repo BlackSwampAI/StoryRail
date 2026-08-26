@@ -576,6 +576,7 @@ export function NewsroomShell({
                     setFocusedSourceId(sourceId);
                     setWorkspaceMode("source-inbox");
                   }}
+                  onAutopilotStory={(identity) => void selectStory(identity)}
                 />
               ) : null}
             </div>

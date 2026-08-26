@@ -1,16 +1,25 @@
 "use client";
 
-import { useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 
 import type {
   EditorialActor,
+  PolicyRun,
+  PolicyRunId,
   SourceEvidencePreparation,
   SourceExtraction,
+  StoryId,
   UrlSource,
 } from "@/domain/editorial";
 
 import styles from "./newsroom-shell.module.css";
 import { useNewsroomClients } from "./newsroom-clients";
+import { POLICY_RUN_STEP_LABELS } from "./newsroom-state";
+import {
+  URL_AUTOPILOT_UNAVAILABLE_MESSAGE,
+  type UrlAutopilotClient,
+  type UrlAutopilotError,
+} from "./url-autopilot-client";
 import { SafeMarkdown } from "./safe-markdown";
 import {
   SOURCE_INBOX_UNAVAILABLE_MESSAGE,
@@ -27,9 +36,18 @@ import {
 export interface SourceEvidenceWorkspaceProps {
   readonly requestSourceEvidence?: RequestSourceEvidenceUrl;
   readonly inboxRequests?: SourceInboxClient;
+  readonly autopilotRequests?: UrlAutopilotClient;
   readonly onSourceAvailable?: (sourceId: string) => void;
   readonly onReviewInInbox?: (sourceId: string) => void;
+  /**
+   * Called the moment an automated run has a Story, so the operator is handed to the rail that
+   * shows the rest of it. Everything before this point has no Story to show.
+   */
+  readonly onAutopilotStory?: (storyId: StoryId) => void;
 }
+
+/** How often the watcher asks the policy run where it has got to. */
+export const AUTOPILOT_FOLLOW_INTERVAL_MS = 3_000;
 
 type PreparationRequestFailure =
   | { readonly kind: "application-failure"; readonly error: SourceInboxClientError }
@@ -57,7 +75,14 @@ type IntakeState =
       readonly preparations: readonly SourceEvidencePreparation[];
       readonly requestFailure: PreparationRequestFailure | null;
     }
-  | { readonly kind: "result"; readonly result: SourceEvidenceUrlResult };
+  | { readonly kind: "result"; readonly result: SourceEvidenceUrlResult }
+  | {
+      readonly kind: "autopilot";
+      readonly policyRunId: PolicyRunId | null;
+      readonly run: PolicyRun | null;
+    }
+  | { readonly kind: "autopilot-refused"; readonly error: UrlAutopilotError }
+  | { readonly kind: "autopilot-unavailable"; readonly message: string };
 
 function ActorValue({ actor }: Readonly<{ actor: EditorialActor }>) {
   return actor.type === "operator" ? (
@@ -444,18 +469,26 @@ function retryableSource(state: IntakeState): UrlSource | null {
 export function SourceEvidenceWorkspace({
   requestSourceEvidence: suppliedRequestSourceEvidence,
   inboxRequests: suppliedInboxRequests,
+  autopilotRequests: suppliedAutopilotRequests,
   onSourceAvailable,
   onReviewInInbox,
+  onAutopilotStory,
 }: SourceEvidenceWorkspaceProps) {
   const clients = useNewsroomClients();
   const requestSourceEvidence = suppliedRequestSourceEvidence ?? clients.requestSourceEvidenceUrl;
   const inboxRequests = suppliedInboxRequests ?? clients.sourceInbox;
+  const autopilotRequests = suppliedAutopilotRequests ?? clients.urlAutopilot;
   const [submittedUrl, setSubmittedUrl] = useState("");
+  const [autopilot, setAutopilot] = useState(false);
+  const [autopilotResearch, setAutopilotResearch] = useState(false);
   const [state, setState] = useState<IntakeState>({ kind: "idle" });
   const pendingRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const pending =
-    state.kind === "preserving" || state.kind === "preparing" || state.kind === "extracting";
+    state.kind === "preserving" ||
+    state.kind === "preparing" ||
+    state.kind === "extracting" ||
+    state.kind === "autopilot";
   const sourceIdForReview = reviewableSourceId(state);
   const sourceForRetry = retryableSource(state);
 
@@ -533,8 +566,51 @@ export function SourceEvidenceWorkspace({
     }
   }
 
+  /**
+   * Hands the URL to autopilot and stops touching it.
+   *
+   * The response comes back as soon as intake is durable, because that is the only refusal an
+   * operator can act on. Everything after it — preparation, a Story, an assignment, a draft, a
+   * review, publication, delivery — is followed through the policy run, which is the only record
+   * that exists during the minutes before there is a Story to look at.
+   */
+  async function submitToAutopilot() {
+    if (pendingRef.current) return;
+    pendingRef.current = true;
+    setState({ kind: "autopilot", policyRunId: null, run: null });
+
+    try {
+      const started = await autopilotRequests.start({
+        submittedUrl,
+        research: autopilotResearch,
+      });
+      if (started.kind === "started") {
+        setSubmittedUrl("");
+        onSourceAvailable?.(started.sourceId);
+        setState({ kind: "autopilot", policyRunId: started.policyRunId, run: null });
+        return;
+      }
+      setState(
+        started.kind === "refused"
+          ? { kind: "autopilot-refused", error: started.error }
+          : { kind: "autopilot-unavailable", message: started.message },
+      );
+    } catch {
+      setState({
+        kind: "autopilot-unavailable",
+        message: URL_AUTOPILOT_UNAVAILABLE_MESSAGE,
+      });
+    } finally {
+      pendingRef.current = false;
+    }
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (autopilot) {
+      await submitToAutopilot();
+      return;
+    }
     if (pendingRef.current) return;
     pendingRef.current = true;
     setState({ kind: "preserving" });
@@ -578,6 +654,32 @@ export function SourceEvidenceWorkspace({
     inputRef.current?.focus();
   }
 
+  // The watcher follows the policy run rather than the Story, because for the first minutes of a
+  // run started from a URL there is no Story to follow. The moment the run reports one, the
+  // operator is handed to the Story rail, which shows the rest of the journey.
+  const followedRunId = state.kind === "autopilot" ? state.policyRunId : null;
+  useEffect(() => {
+    if (followedRunId === null) return;
+    let active = true;
+    const observe = async () => {
+      const observed = await autopilotRequests.follow(followedRunId);
+      if (!active || observed.kind !== "observed") return;
+      setState((current) =>
+        current.kind === "autopilot" ? { ...current, run: observed.run } : current,
+      );
+      if (observed.run.storyId !== null) {
+        active = false;
+        onAutopilotStory?.(observed.run.storyId);
+      }
+    };
+    void observe();
+    const timer = setInterval(() => void observe(), AUTOPILOT_FOLLOW_INTERVAL_MS);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [followedRunId, autopilotRequests, onAutopilotStory]);
+
   return (
     <section
       className={styles.sourceWorkspace}
@@ -593,7 +695,10 @@ export function SourceEvidenceWorkspace({
         </p>
       </header>
 
-      {state.kind === "idle" || state.kind === "preserving" ? (
+      {state.kind === "idle" ||
+      state.kind === "preserving" ||
+      state.kind === "autopilot-refused" ||
+      state.kind === "autopilot-unavailable" ? (
         <form className={styles.sourceForm} onSubmit={submit} aria-busy={pending}>
           <label htmlFor="source-url">Source URL</label>
           <div className={styles.sourceFormControls}>
@@ -608,10 +713,48 @@ export function SourceEvidenceWorkspace({
               onChange={(event) => setSubmittedUrl(event.currentTarget.value)}
             />
             <button type="submit" disabled={pending}>
-              Bring into newsroom
+              {autopilot ? "Run this to a published post" : "Bring into newsroom"}
             </button>
           </div>
           <p className={styles.formHint}>The exact submitted value is validated on the server.</p>
+          {/*
+            Autopilot starts here because this is where a URL enters the newsroom, and starting it
+            from a Story workspace meant an operator had already done five things by hand before
+            the automation could begin.
+          */}
+          <fieldset className={styles.autopilotControl}>
+            <legend>Autopilot</legend>
+            <label className={styles.autopilotOption}>
+              <input
+                type="checkbox"
+                checked={autopilot}
+                disabled={pending}
+                onChange={(event) => setAutopilot(event.currentTarget.checked)}
+              />
+              <span>
+                Run this all the way to a published post
+                <small>
+                  Prepares the evidence, opens a Story, writes it, reviews it, publishes it, and
+                  delivers it. No human reads the Article, and every record says so.
+                </small>
+              </span>
+            </label>
+            <label className={styles.autopilotOption}>
+              <input
+                type="checkbox"
+                checked={autopilotResearch}
+                disabled={pending || !autopilot}
+                onChange={(event) => setAutopilotResearch(event.currentTarget.checked)}
+              />
+              <span>
+                Look for more Sources first
+                <small>
+                  Searches and retrieves further pages before anything is assigned. Slower, and it
+                  costs more per run.
+                </small>
+              </span>
+            </label>
+          </fieldset>
           {state.kind === "preserving" ? (
             <p className={styles.pendingStatus} role="status">
               Preserving and extracting Source…
@@ -687,6 +830,34 @@ export function SourceEvidenceWorkspace({
             {state.failure.kind === "application-failure" ? (
               <ErrorFacts error={state.failure.error} />
             ) : null}
+          </article>
+        ) : null}
+        {state.kind === "autopilot" ? (
+          <article
+            className={`${styles.receipt} ${styles.preparationActive}`}
+            role="status"
+            aria-busy="true"
+            aria-labelledby="autopilot-active-heading"
+          >
+            <p className={styles.sectionKicker}>Autopilot</p>
+            <h2 id="autopilot-active-heading">Running this to a published post…</h2>
+            <p className={styles.preparationWaitCopy}>
+              {state.run === null
+                ? "The page is preserved. Nothing else has happened yet."
+                : POLICY_RUN_STEP_LABELS[state.run.step]}
+            </p>
+            <p className={styles.formHint}>
+              This takes minutes. Leaving the screen does not stop it: the run is recorded and
+              carries on without anybody watching.
+            </p>
+          </article>
+        ) : null}
+        {state.kind === "autopilot-refused" || state.kind === "autopilot-unavailable" ? (
+          <article className={`${styles.receipt} ${styles.receiptRejected}`} role="alert">
+            <p className={styles.sectionKicker}>Autopilot did not start</p>
+            <h2>{state.kind === "autopilot-refused" ? state.error.message : state.message}</h2>
+            <p>Nothing was automated. The URL is unchanged and no Story was opened.</p>
+            {state.kind === "autopilot-refused" ? <ErrorFacts error={state.error} /> : null}
           </article>
         ) : null}
         {state.kind === "review" ? <EvidenceReview {...state} /> : null}

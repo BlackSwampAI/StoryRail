@@ -199,6 +199,14 @@ const searchSettingsMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0071-search-settings.sql",
 );
+const urlPolicyRunMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0072-policy-runs-from-a-url.sql",
+);
+const researchBudgetMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0073-research-budget-settings.sql",
+);
 
 const DEFAULT_SITE = siteId("site-default");
 const OTHER_SITE = siteId("site-other");
@@ -433,6 +441,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let destinationKindMigrationSql: string;
   let siteSwitchingMigrationSql: string;
   let searchSettingsMigrationSql: string;
+  let urlPolicyRunMigrationSql: string;
+  let researchBudgetMigrationSql: string;
 
   /** Every migration, in order. One list so a rebuild can never drift from the first build. */
   const orderedMigrations = (): readonly string[] => [
@@ -467,6 +477,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
     destinationKindMigrationSql,
     siteSwitchingMigrationSql,
     searchSettingsMigrationSql,
+    urlPolicyRunMigrationSql,
+    researchBudgetMigrationSql,
   ];
   let destructiveSetupAllowed = false;
 
@@ -545,6 +557,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
     destinationKindMigrationSql = await readFile(destinationKindMigrationPath, "utf8");
     siteSwitchingMigrationSql = await readFile(siteSwitchingMigrationPath, "utf8");
     searchSettingsMigrationSql = await readFile(searchSettingsMigrationPath, "utf8");
+    urlPolicyRunMigrationSql = await readFile(urlPolicyRunMigrationPath, "utf8");
+    researchBudgetMigrationSql = await readFile(researchBudgetMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -845,6 +859,90 @@ describePostgres("PostgreSQL persistence repositories", () => {
           observedAt: "2026-08-23T11:25:00.000Z",
         }),
       ).resolves.toMatchObject({ ok: false, error: { code: "POLICY_RUN_NOT_RUNNING" } });
+    });
+
+    it("records a run that has no Story yet, and lets it learn the one it makes", async () => {
+      // A run started from a URL preserves, extracts and prepares before anything editorial
+      // exists. Those minutes are the ones most likely to be interrupted, so the record has to
+      // exist through them and name the Story only once there is one.
+      const repository = createPostgresPolicyRunRepository({ pool, siteId: DEFAULT_SITE });
+      await expect(
+        repository.append(policyRun("policy-from-a-url", { id: null }, { step: "source_intake" })),
+      ).resolves.toMatchObject({ ok: true, run: { storyId: null } });
+
+      const story = makeStory("policy-learned-story");
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
+
+      await expect(
+        repository.observe({
+          id: policyRunId("policy-from-a-url"),
+          step: "story_creation",
+          observedAt: "2026-08-26T11:10:00.000Z",
+          storyId: story.id,
+        }),
+      ).resolves.toMatchObject({ ok: true, run: { storyId: story.id, step: "story_creation" } });
+
+      // Learning a Story is allowed once. Changing it is not: the run would then be a record of
+      // two different pieces of work under one identity.
+      await expect(
+        repository.observe({
+          id: policyRunId("policy-from-a-url"),
+          step: "writer_draft",
+          observedAt: "2026-08-26T11:11:00.000Z",
+          storyId: makeStory("policy-other-story").id,
+        }),
+      ).resolves.toMatchObject({ ok: true, run: { storyId: story.id } });
+
+      await expect(repository.findByStoryId(story.id)).resolves.toMatchObject([
+        { id: "policy-from-a-url" },
+      ]);
+    });
+
+    it("lets two URLs be automated at once, since neither has a Story to collide over", async () => {
+      const repository = createPostgresPolicyRunRepository({ pool, siteId: DEFAULT_SITE });
+
+      await expect(
+        repository.append(policyRun("policy-url-a", { id: null }, { step: "source_intake" })),
+      ).resolves.toMatchObject({ ok: true });
+      await expect(
+        repository.append(policyRun("policy-url-b", { id: null }, { step: "source_intake" })),
+      ).resolves.toMatchObject({ ok: true });
+    });
+
+    it("answers with one run by its own identity, which is all a watcher has to follow", async () => {
+      const repository = createPostgresPolicyRunRepository({ pool, siteId: DEFAULT_SITE });
+      await repository.append(
+        policyRun("policy-followed", { id: null }, { step: "source_intake" }),
+      );
+
+      await expect(repository.findById(policyRunId("policy-followed"))).resolves.toMatchObject({
+        id: "policy-followed",
+        storyId: null,
+        step: "source_intake",
+      });
+      await expect(repository.findById(policyRunId("policy-never-was"))).resolves.toBeNull();
+    });
+
+    it("records every step that carries a run from a URL to a delivered post", async () => {
+      const story = makeStory("policy-every-step");
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
+      const repository = createPostgresPolicyRunRepository({ pool, siteId: DEFAULT_SITE });
+      await repository.append(policyRun("policy-every-step", story));
+
+      for (const step of [
+        "source_preparation",
+        "story_creation",
+        "source_attachment",
+        "source_triage",
+        "delivery",
+      ] as const)
+        await expect(
+          repository.observe({
+            id: policyRunId("policy-every-step"),
+            step,
+            observedAt: "2026-08-26T11:00:00.000Z",
+          }),
+        ).resolves.toMatchObject({ ok: true, run: { step } });
     });
 
     it("finds only the runs that have gone quiet", async () => {
@@ -6225,6 +6323,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         destination: null,
         // And nowhere to search, for the same reason.
         search: null,
+        research: null,
       });
     });
 
@@ -6380,6 +6479,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         },
         destination: null,
         search: { baseUrl: "https://search.newsroom.test", username: "storyrail" },
+        research: null,
       };
 
       try {
@@ -6483,6 +6583,138 @@ describePostgres("PostgreSQL persistence repositories", () => {
       }
     });
 
+    it("meets a database that could not automate a URL and leaves it able to", async () => {
+      // The database is put back into the state 0072 actually meets by replaying every migration
+      // before it against an empty schema, rather than by dropping the constraint under test. A
+      // test that removes what it is testing proves only that the migration can be run twice.
+      const before = orderedMigrations().slice(
+        0,
+        orderedMigrations().indexOf(urlPolicyRunMigrationSql),
+      );
+      const storeStoryless = () =>
+        pool.query(
+          `INSERT INTO storyrail.policy_runs
+             (policy_run_id, story_id, policy, status, step, observed_at, payload)
+           VALUES ('policy-migration-0072', NULL, 'autopilot', 'running', 'source_intake',
+                   '2026-08-26T00:00:00.000Z', jsonb_build_object(
+             'id', 'policy-migration-0072',
+             'storyId', NULL,
+             'policy', 'autopilot',
+             'requestedBy', jsonb_build_object('type', 'operator', 'operatorId', 'operator-0072'),
+             'research', false,
+             'startedAt', '2026-08-26T00:00:00.000Z',
+             'step', 'source_intake',
+             'observedAt', '2026-08-26T00:00:00.000Z',
+             'status', 'running'
+           ))`,
+          [],
+        );
+
+      try {
+        await pool.query("DROP SCHEMA storyrail CASCADE");
+        for (const migration of before) await pool.query(migration);
+
+        // 0061 required a Story and knew nothing of intake, so a run that has neither is refused
+        // twice over until this migration widens both.
+        await expect(storeStoryless()).rejects.toMatchObject({ code: "23502" });
+
+        await pool.query(urlPolicyRunMigrationSql);
+        await storeStoryless();
+
+        const { rows } = await pool.query<{ story_id: string | null; step: string }>(
+          "SELECT story_id, step FROM storyrail.policy_runs WHERE policy_run_id = 'policy-migration-0072'",
+        );
+        expect(rows[0]).toEqual({ story_id: null, step: "source_intake" });
+
+        // The payload and the column still have to agree, so a run cannot claim a Story the
+        // column does not name.
+        await expect(
+          pool.query(
+            `UPDATE storyrail.policy_runs
+             SET payload = jsonb_set(payload, '{storyId}', '"story-invented"'::jsonb)
+             WHERE policy_run_id = 'policy-migration-0072'`,
+          ),
+        ).rejects.toMatchObject({ constraint: "policy_runs_payload_shape_check" });
+
+        // Nothing is backfilled: no run that already named a Story was touched.
+        const orphans = await pool.query<{ count: string }>(
+          "SELECT count(*) AS count FROM storyrail.policy_runs WHERE story_id IS NULL AND policy_run_id <> 'policy-migration-0072'",
+        );
+        expect(orphans.rows[0]?.count).toBe("0");
+      } finally {
+        await pool.query("DROP SCHEMA storyrail CASCADE");
+        for (const migration of orderedMigrations()) await pool.query(migration);
+        await addSecondSite(pool);
+        await addSecondSiteWriter(pool);
+      }
+    });
+
+    it("meets a database with a fixed research budget and leaves it able to choose one", async () => {
+      // Replayed rather than patched, for the reason above: a migration test that sets up its own
+      // preconditions by removing the thing under test proves nothing.
+      const before = orderedMigrations().slice(
+        0,
+        orderedMigrations().indexOf(researchBudgetMigrationSql),
+      );
+      const store = (budget: string) =>
+        pool.query(
+          `UPDATE storyrail.site_settings
+           SET payload = jsonb_set(payload, '{research}', $2::jsonb)
+           WHERE site_id = $1`,
+          [DEFAULT_SITE, budget],
+        );
+
+      try {
+        await pool.query("DROP SCHEMA storyrail CASCADE");
+        for (const migration of before) await pool.query(migration);
+
+        // 0071 pinned the payload to exactly `models`, `destination` and `search`, so a fourth
+        // key is a shape violation until this migration widens it.
+        await expect(
+          store(JSON.stringify({ maximumCalls: 20, maximumTurns: 6 })),
+        ).rejects.toMatchObject({ constraint: "site_settings_payload_exact_shape_check" });
+
+        await pool.query(researchBudgetMigrationSql);
+        await store(JSON.stringify({ maximumCalls: 20, maximumTurns: 6 }));
+
+        const { rows } = await pool.query<{ research: unknown }>(
+          "SELECT payload -> 'research' AS research FROM storyrail.site_settings WHERE site_id = $1",
+          [DEFAULT_SITE],
+        );
+        expect(rows[0]?.research).toEqual({ maximumCalls: 20, maximumTurns: 6 });
+
+        // Calls and turns are separate numbers, and a budget naming only one of them is refused
+        // rather than half stored.
+        await expect(store(JSON.stringify({ maximumCalls: 20 }))).rejects.toMatchObject({
+          constraint: "site_settings_research_shape_check",
+        });
+        // A run with no calls could only ever fail, and a fractional budget is compared against a
+        // count that moves by one.
+        await expect(
+          store(JSON.stringify({ maximumCalls: 0, maximumTurns: 6 })),
+        ).rejects.toMatchObject({ constraint: "site_settings_research_shape_check" });
+        await expect(
+          store(JSON.stringify({ maximumCalls: 6.5, maximumTurns: 6 })),
+        ).rejects.toMatchObject({ constraint: "site_settings_research_shape_check" });
+        await expect(
+          store(JSON.stringify({ maximumCalls: 400, maximumTurns: 6 })),
+        ).rejects.toMatchObject({ constraint: "site_settings_research_shape_check" });
+
+        // Nothing is backfilled: a newsroom that chose no budget still has none and runs on the
+        // defaults the installation ships with.
+        const others = await pool.query<{ count: string }>(
+          "SELECT count(*) AS count FROM storyrail.site_settings WHERE site_id <> $1 AND payload ? 'research'",
+          [DEFAULT_SITE],
+        );
+        expect(others.rows[0]?.count).toBe("0");
+      } finally {
+        await pool.query("DROP SCHEMA storyrail CASCADE");
+        for (const migration of orderedMigrations()) await pool.query(migration);
+        await addSecondSite(pool);
+        await addSecondSiteWriter(pool);
+      }
+    });
+
     it("keeps one Site's chosen models away from another's", async () => {
       const before = await settings(DEFAULT_SITE).find();
       const chosen = {
@@ -6495,6 +6727,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         },
         destination: null,
         search: null,
+        research: null,
       };
 
       try {

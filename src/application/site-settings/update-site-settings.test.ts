@@ -40,7 +40,12 @@ describe("changing what a newsroom is configured with", () => {
   it("leaves the destination alone when a submission says nothing about it", async () => {
     // The settings screen has no destination field. Without this, choosing a model would quietly
     // take away the newsroom's ability to deliver anything.
-    const { settings, read } = store({ models: MODELS, destination: DESTINATION, search: null });
+    const { settings, read } = store({
+      models: MODELS,
+      destination: DESTINATION,
+      search: null,
+      research: null,
+    });
     const update = createUpdateSiteSettings({ settings, now: () => "2026-08-24T00:00:00.000Z" });
 
     await update({ models: { ...MODELS, writer: "provider/six" } });
@@ -49,43 +54,74 @@ describe("changing what a newsroom is configured with", () => {
       models: { ...MODELS, writer: "provider/six" },
       destination: DESTINATION,
       search: null,
+      research: null,
     });
   });
 
   it("takes the destination away only when asked to in so many words", async () => {
-    const { settings, read } = store({ models: MODELS, destination: DESTINATION, search: null });
+    const { settings, read } = store({
+      models: MODELS,
+      destination: DESTINATION,
+      search: null,
+      research: null,
+    });
     const update = createUpdateSiteSettings({ settings, now: () => "2026-08-24T00:00:00.000Z" });
 
     await update({ models: MODELS, destination: null });
 
-    expect(read()).toEqual({ models: MODELS, destination: null, search: null });
+    expect(read()).toEqual({ models: MODELS, destination: null, search: null, research: null });
   });
 
   it("leaves the search instance alone when a submission says nothing about it", async () => {
-    const { settings, read } = store({ models: MODELS, destination: null, search: SEARCH });
+    const { settings, read } = store({
+      models: MODELS,
+      destination: null,
+      search: SEARCH,
+      research: null,
+    });
     const update = createUpdateSiteSettings({ settings, now: () => "2026-08-26T00:00:00.000Z" });
 
     await update({ models: MODELS, destination: null });
 
-    expect(read()).toEqual({ models: MODELS, destination: null, search: SEARCH });
+    expect(read()).toEqual({
+      models: MODELS,
+      destination: null,
+      search: SEARCH,
+      research: null,
+    });
   });
 
   it("takes the search instance away only when asked to in so many words", async () => {
-    const { settings, read } = store({ models: MODELS, destination: null, search: SEARCH });
+    const { settings, read } = store({
+      models: MODELS,
+      destination: null,
+      search: SEARCH,
+      research: null,
+    });
     const update = createUpdateSiteSettings({ settings, now: () => "2026-08-26T00:00:00.000Z" });
 
     await update({ models: MODELS, search: null });
 
-    expect(read()).toEqual({ models: MODELS, destination: null, search: null });
+    expect(read()).toEqual({ models: MODELS, destination: null, search: null, research: null });
   });
 
   it("stores nothing when the submitted settings are refused", async () => {
-    const { settings, read } = store({ models: MODELS, destination: DESTINATION, search: null });
+    const { settings, read } = store({
+      models: MODELS,
+      destination: DESTINATION,
+      search: null,
+      research: null,
+    });
     const update = createUpdateSiteSettings({ settings, now: () => "2026-08-24T00:00:00.000Z" });
 
     await expect(update({ models: { ...MODELS, writer: "  " } })).resolves.toMatchObject({
       ok: false,
     });
-    expect(read()).toEqual({ models: MODELS, destination: DESTINATION, search: null });
+    expect(read()).toEqual({
+      models: MODELS,
+      destination: DESTINATION,
+      search: null,
+      research: null,
+    });
   });
 });

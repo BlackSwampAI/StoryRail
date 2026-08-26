@@ -123,6 +123,7 @@ export function createResearcherRuntime(options: {
       resolveApiKey: (slot) => store.resolveApiKey(slot),
     }),
     resolveModel,
+    readResearchBudget: () => store.readResearchBudget(),
     createAgentRunId: () => agentRunId(uuid()),
     createToolCallId: () => agentToolCallId(uuid()),
     createSourceId: () => sourceId(uuid()),
