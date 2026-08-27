@@ -2,7 +2,14 @@ import type {
   ExtractPersistedSourceFailureError,
   PreserveUrlSourceFailureError,
 } from "@/application/source-evidence";
-import type { EditorialActor, SiteId, SourceExtraction, UrlSource } from "@/domain/editorial";
+import {
+  AGENT_ROLES,
+  SOURCE_EXTRACTION_FAILURE_CODES,
+  type EditorialActor,
+  type SiteId,
+  type SourceExtraction,
+  type UrlSource,
+} from "@/domain/editorial";
 
 import { siteApiPath } from "./site-paths";
 
@@ -83,14 +90,7 @@ const INTERFACE_ERROR_CODES = new Set([
   "INVALID_REQUEST",
   "UNSUPPORTED_MEDIA_TYPE",
 ]);
-const EXTRACTION_FAILURE_CODES = new Set([
-  "RETRIEVAL_FAILED",
-  "RETRIEVAL_TIMED_OUT",
-  "RESPONSE_REJECTED",
-  "UNSUPPORTED_CONTENT_TYPE",
-  "CONTENT_TOO_LARGE",
-  "EXTRACTION_FAILED",
-]);
+const EXTRACTION_FAILURE_CODES: ReadonlySet<string> = new Set(SOURCE_EXTRACTION_FAILURE_CODES);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -109,7 +109,9 @@ function isActor(value: unknown): value is EditorialActor {
     ? isString(value.operatorId)
     : value.type === "agent" &&
         isString(value.role) &&
-        ["assignment_editor", "writer", "fact_checker", "editor_in_chief"].includes(value.role) &&
+        // The domain owns which roles an agent may act in. Written out here, this list never
+        // gained `researcher`, so evidence a Researcher retrieved could not be read back.
+        (AGENT_ROLES as readonly string[]).includes(value.role) &&
         isString(value.runId);
 }
 

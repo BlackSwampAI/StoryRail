@@ -1,6 +1,12 @@
 // @vitest-environment node
 
-import { STORY_STATES, siteId } from "@/domain/editorial";
+import { decodePostgresAgentRun } from "@/adapters/agent-run-persistence";
+import {
+  AGENT_PROFILE_ROLES,
+  DIRECTOR_CHECK_NAMES,
+  STORY_STATES,
+  siteId,
+} from "@/domain/editorial";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -146,7 +152,16 @@ const RESEARCHER_RUN = {
   completedAt: "opaque-completed",
   input: {
     story: { id: STORY.id, title: STORY.title, state: "intake", revisionCycle: 0 },
-    evidence: [],
+    // A run is recorded with the evidence it started from. The domain refuses a run that names
+    // none, and research never begins without at least one usable Source to widen from.
+    evidence: [
+      {
+        sourceId: SOURCE.id,
+        relevance: ATTACHMENT.relevance,
+        evidenceKind: "prepared",
+        evidenceId: PREPARATION.id,
+      },
+    ],
     unavailableSourceIds: [],
   },
 } as const;
@@ -264,6 +279,239 @@ describe("story-client", () => {
       kind: "unavailable",
       message: STORY_REQUEST_UNAVAILABLE_MESSAGE,
     });
+  });
+
+  it("reads back a Writer revision run carrying the Director review it answers", async () => {
+    const story = { ...STORY, state: "changes_requested", revisionCycle: 1 } as const;
+    const passing = { status: "pass", note: "Reads as assigned.", quoted: "A quoted passage." };
+    // Every check the domain defines is present, which is what a recorded review always carries.
+    const checks = Object.fromEntries(DIRECTOR_CHECK_NAMES.map((name) => [name, passing]));
+    const run = {
+      id: "revision-run-0034",
+      storyId: story.id,
+      profileId: "storyrail-general-writer-v1",
+      role: "writer",
+      operation: "article_revision",
+      model: { provider: "openrouter", model: "provider/model" },
+      prompt: { key: "storyrail_writer", version: "1" },
+      requestedBy: { type: "operator", operatorId: "operator-0034" },
+      startedAt: "opaque-started",
+      completedAt: "opaque-completed",
+      input: {
+        story: {
+          id: story.id,
+          title: story.title,
+          state: story.state,
+          revisionCycle: story.revisionCycle,
+        },
+        assignment: {
+          id: "assignment-0034",
+          storyId: story.id,
+          writerProfileId: "storyrail-general-writer-v1",
+          sourceIds: [SOURCE.id],
+          angle: "Focused angle",
+          brief: "Bounded brief",
+          constraints: null,
+        },
+        article: { id: "article-0034", assignmentId: "assignment-0034" },
+        revision: {
+          id: "revision-0034",
+          articleId: "article-0034",
+          revisionNumber: 1,
+          writerProfileId: "storyrail-general-writer-v1",
+          agentRunId: "draft-run-0034",
+          headline: "The headline under review",
+          dek: null,
+          bodyMarkdown: "The body as the Director read it.",
+        },
+        directorReview: {
+          recommendation: "request_changes",
+          summary: "One claim outruns its evidence.",
+          checks: {
+            ...checks,
+            support: { status: "needs_changes", note: "Overstated.", quoted: "A quoted claim." },
+          },
+          revisionInstructions: "Bring the claim back to what the evidence says.",
+        },
+        reviewDecision: {
+          id: "decision-0034",
+          storyId: story.id,
+          articleId: "article-0034",
+          revisionId: "revision-0034",
+          directorRunId: "director-run-0034",
+          decision: "request_changes",
+          reason: "Agreed with the Director.",
+          decidedBy: { type: "operator", operatorId: "operator-0034" },
+          decidedAt: "opaque-decided",
+        },
+        evidence: [
+          {
+            sourceId: SOURCE.id,
+            relevance: ATTACHMENT.relevance,
+            evidenceKind: "prepared",
+            evidenceId: PREPARATION.id,
+          },
+        ],
+        unavailableSourceIds: [],
+      },
+      outcome: "succeeded",
+      articleId: "article-0034",
+      revisionId: "revision-0035",
+    };
+    const inspection = { ...INSPECTION, story, agentRuns: [run] };
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(200, { ok: true, inspection }),
+    );
+
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).inspectStory(story.id),
+    ).resolves.toEqual({ kind: "completed", value: inspection });
+  });
+
+  it("reads back an inspection carrying a run in every role an agent works in", async () => {
+    const story = { ...STORY, state: "in_review", revisionCycle: 1 } as const;
+    const evidence = [
+      {
+        sourceId: SOURCE.id,
+        relevance: ATTACHMENT.relevance,
+        evidenceKind: "prepared",
+        evidenceId: PREPARATION.id,
+      },
+    ];
+    const assignment = {
+      id: "assignment-0036",
+      storyId: story.id,
+      writerProfileId: "storyrail-general-writer-v1",
+      sourceIds: [SOURCE.id],
+      angle: "Focused angle",
+      brief: "Bounded brief",
+      constraints: null,
+    };
+    const article = { id: "article-0036", assignmentId: assignment.id };
+    const revision = {
+      id: "revision-0036",
+      articleId: article.id,
+      revisionNumber: 1,
+      writerProfileId: assignment.writerProfileId,
+      agentRunId: "draft-run-0036",
+      headline: "The headline under review",
+      dek: null,
+      bodyMarkdown: "The body as the Director read it.",
+    };
+    const common = {
+      storyId: story.id,
+      model: { provider: "openrouter", model: "provider/model" },
+      requestedBy: { type: "operator", operatorId: "operator-0036" },
+      startedAt: "opaque-started",
+      completedAt: "opaque-completed",
+    };
+    const snapshot = (state: string, revisionCycle: number) => ({
+      id: story.id,
+      title: story.title,
+      state,
+      revisionCycle,
+    });
+    const runs = [
+      {
+        ...AGENT_RUN,
+        storyId: story.id,
+        input: { ...AGENT_RUN.input, story: snapshot("intake", 0) },
+      },
+      {
+        ...RESEARCHER_RUN,
+        storyId: story.id,
+        input: { ...RESEARCHER_RUN.input, story: snapshot("intake", 0) },
+        outcome: "succeeded",
+        attached: [],
+      },
+      {
+        ...common,
+        id: "draft-run-0036",
+        profileId: assignment.writerProfileId,
+        role: "writer",
+        operation: "article_draft",
+        prompt: { key: "storyrail_writer", version: "1" },
+        input: { story: snapshot("assigned", 0), assignment, evidence, unavailableSourceIds: [] },
+        outcome: "succeeded",
+        articleId: article.id,
+        revisionId: revision.id,
+      },
+      {
+        ...common,
+        id: "director-run-0036",
+        profileId: "storyrail-director-v1",
+        role: "editor_in_chief",
+        operation: "article_review",
+        prompt: { key: "storyrail_director", version: "1" },
+        input: {
+          story: snapshot("in_review", 1),
+          assignment,
+          article,
+          revision,
+          evidence,
+          unavailableSourceIds: [],
+        },
+        outcome: "succeeded",
+        review: {
+          recommendation: "approve",
+          summary: "Ready as written.",
+          checks: Object.fromEntries(
+            DIRECTOR_CHECK_NAMES.map((name) => [
+              name,
+              { status: "pass", note: "Holds up.", quoted: "A quoted passage." },
+            ]),
+          ),
+          revisionInstructions: null,
+        },
+      },
+    ];
+    const inspection = { ...INSPECTION, story, agentRuns: runs };
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(200, { ok: true, inspection }),
+    );
+
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).inspectStory(story.id),
+    ).resolves.toEqual({ kind: "completed", value: inspection });
+    // Every role a Profile may hold appears above, so no role can be dropped from this reader
+    // without a test noticing — which is how a Researcher run went unread for months.
+    expect(new Set(runs.map((run) => run.role))).toEqual(new Set(AGENT_PROFILE_ROLES));
+  });
+
+  it("refuses an inspection whose Story carries a key the domain does not record", async () => {
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(200, {
+        ok: true,
+        inspection: { ...INSPECTION, story: { ...STORY, archivedAt: null } },
+      }),
+    );
+
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).inspectStory(STORY.id),
+    ).resolves.toEqual({ kind: "unavailable", message: STORY_REQUEST_UNAVAILABLE_MESSAGE });
+  });
+
+  it("accepts over the wire exactly what PostgreSQL decoded out of a persisted row", async () => {
+    // The point of the batch in one assertion: the record the database reader hands back is read
+    // by the browser through the same account of what a run is, so there is no second opinion
+    // left for a shape to drift away from.
+    const persisted = decodePostgresAgentRun({
+      run_id: AGENT_RUN.id,
+      story_id: AGENT_RUN.storyId,
+      profile_id: AGENT_RUN.profileId,
+      role: AGENT_RUN.role,
+      operation: AGENT_RUN.operation,
+      outcome: AGENT_RUN.outcome,
+      payload: AGENT_RUN,
+    });
+    const inspection = { ...INSPECTION, agentRuns: [persisted] };
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(200, { ok: true, inspection }),
+    );
+
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).inspectStory(STORY.id),
+    ).resolves.toEqual({ kind: "completed", value: inspection });
   });
 
   it("reads back a Story in every state the domain allows", async () => {

@@ -1,5 +1,6 @@
 import type { SourceInboxItem } from "@/application/source-inbox";
 import {
+  AGENT_ROLES,
   SOURCE_EXTRACTION_FAILURE_CODES,
   PREPARATION_FAILURE_CODES,
   type EditorialActor,
@@ -52,9 +53,10 @@ function isActor(value: unknown): value is EditorialActor {
     ? exact(value, ["type", "operatorId"]) && typeof value.operatorId === "string"
     : value.type === "agent" &&
         exact(value, ["type", "role", "runId"]) &&
-        ["assignment_editor", "writer", "fact_checker", "editor_in_chief"].includes(
-          String(value.role),
-        ) &&
+        // Which roles an agent may act in is the domain's rule. Named here as a literal, this
+        // list never gained `researcher`, so a Source the Researcher found was refused and the
+        // whole inbox came back unreadable.
+        (AGENT_ROLES as readonly string[]).includes(String(value.role)) &&
         typeof value.runId === "string";
 }
 function isSource(value: unknown): value is UrlSource {

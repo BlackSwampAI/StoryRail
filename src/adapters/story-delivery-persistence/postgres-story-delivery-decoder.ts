@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   DELIVERY_FAILURE_CODES,
+  DELIVERY_OPERATIONS,
   recordStoryDelivery,
   type StoryDelivery,
 } from "@/domain/editorial";
@@ -23,7 +24,7 @@ const deliverySchema = z
     remoteId: nonEmpty.nullable(),
     request: z
       .object({
-        operation: z.enum(["create", "update"]),
+        operation: z.enum(DELIVERY_OPERATIONS),
         slug: nonEmpty,
         draft: z.boolean(),
         bodyCharacters: z.number().int().min(0),

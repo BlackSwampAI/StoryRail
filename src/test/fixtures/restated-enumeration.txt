@@ -1,0 +1,4 @@
+// A reader that describes a shape it does not own. `researcher` is missing, which is exactly how
+// #100 made every Story with a Researcher run unopenable. The guard beside this file must refuse
+// it; once the constant is imported instead, there is nothing left to fall behind.
+const ROLES = ["assignment_editor", "writer", "editor_in_chief"];

@@ -77,6 +77,30 @@ describe("sourceInboxClient", () => {
     });
   });
 
+  it("lists a Source the Researcher found rather than refusing the whole inbox", async () => {
+    const researched = {
+      ...source,
+      submittedBy: { type: "agent", role: "researcher", runId: "research-run-24" },
+    } as const;
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            ok: true,
+            sources: [{ source: researched, extractions: [], preparations: [] }],
+          }),
+          { status: 200 },
+        ),
+    );
+
+    await expect(
+      createSourceInboxClient({ siteId: SITE_ID, fetch }).listPendingSources(),
+    ).resolves.toEqual({
+      kind: "completed",
+      value: [{ source: researched, extractions: [], preparations: [] }],
+    });
+  });
+
   it("performs the exact triage PUT without browser provenance or timestamp", async () => {
     const triageDecision = {
       sourceId: source.id,
