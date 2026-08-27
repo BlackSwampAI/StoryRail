@@ -563,9 +563,9 @@ describe("autopilot from a URL", () => {
     }));
     const attachSourceToStory = vi.fn(async () => ({ ok: true as const }));
     const recordSourceTriageDecision = vi.fn(async () => ({ ok: true as const }));
-    const preserveAndExtractUrlSource = vi.fn(async () => ({
+    const preserveUrlSource = vi.fn(async () => ({ ok: true as const, source }));
+    const extractPersistedSource = vi.fn(async () => ({
       ok: true as const,
-      source,
       extraction: overrides.extraction ?? extraction,
     }));
     const prepareSourceEvidence = vi.fn(async () => ({
@@ -577,7 +577,8 @@ describe("autopilot from a URL", () => {
       createStory,
       attachSourceToStory,
       recordSourceTriageDecision,
-      preserveAndExtractUrlSource,
+      preserveUrlSource,
+      extractPersistedSource,
       prepareSourceEvidence,
     };
     return {
@@ -591,7 +592,7 @@ describe("autopilot from a URL", () => {
           recordSourceTriageDecision,
           ...(overrides.deliverStory === undefined ? {} : { deliverStory: overrides.deliverStory }),
         },
-        sourceEvidence: { preserveAndExtractUrlSource },
+        sourceEvidence: { preserveUrlSource, extractPersistedSource },
         evidencePreparation: { prepareSourceEvidence },
       } as unknown as AutopilotRuntimes,
     };
@@ -610,9 +611,13 @@ describe("autopilot from a URL", () => {
     const harness = urlHarness();
     const { result } = await runFromUrl(harness);
 
-    expect(harness.calls.preserveAndExtractUrlSource).toHaveBeenCalledWith({
+    expect(harness.calls.preserveUrlSource).toHaveBeenCalledWith({
       submittedUrl: source.submittedUrl,
       submittedBy: operator,
+    });
+    expect(harness.calls.extractPersistedSource).toHaveBeenCalledWith({
+      sourceId: source.id,
+      requestedBy: operator,
     });
     expect(harness.calls.prepareSourceEvidence).toHaveBeenCalledWith({
       sourceId: source.id,
@@ -749,7 +754,7 @@ describe("autopilot from a URL", () => {
   it("refuses the URL at the door rather than automating anything", async () => {
     const harness = urlHarness();
     (
-      harness.runtimes.sourceEvidence!.preserveAndExtractUrlSource as ReturnType<typeof vi.fn>
+      harness.runtimes.sourceEvidence!.preserveUrlSource as ReturnType<typeof vi.fn>
     ).mockResolvedValueOnce({
       ok: false,
       stage: "preservation",
@@ -796,6 +801,17 @@ describe("autopilot from a URL", () => {
     if (!started.ok) throw new Error("autopilot refused to start");
     await started.completion;
 
+    const append = withPolicy.policyRuns!.append as ReturnType<typeof vi.fn>;
+    expect(harness.calls.preserveUrlSource.mock.invocationCallOrder[0]!).toBeLessThan(
+      append.mock.invocationCallOrder[0]!,
+    );
+    expect(append.mock.invocationCallOrder[0]!).toBeLessThan(
+      harness.calls.extractPersistedSource.mock.invocationCallOrder[0]!,
+    );
+    expect(append).toHaveBeenCalledWith(
+      expect.objectContaining({ storyId: null, sourceId: source.id, step: "source_intake" }),
+    );
+
     expect(observed.map(({ step }) => step)).toEqual([
       "source_preparation",
       "story_creation",
@@ -812,6 +828,10 @@ describe("autopilot from a URL", () => {
     ]);
     // The run is written before there is a Story and learns which one it made when it makes it.
     expect(observed[0]?.storyId).toBeUndefined();
+    expect(observed.find(({ storyId }) => storyId !== undefined)).toEqual({
+      step: "source_attachment",
+      storyId: identity,
+    });
     expect(observed.at(-1)?.storyId).toBe(identity);
     expect(settled).toHaveLength(1);
   });
@@ -841,11 +861,10 @@ describe("autopilot from a URL", () => {
     expect(harness.calls.attachSourceToStory).toHaveBeenCalledTimes(1);
   });
 
-  it("settles the policy run rather than leaving it in flight when the URL is refused", async () => {
-    const settled: Array<{ readonly conclusion: string }> = [];
+  it("does not create a policy when preserving the URL is refused", async () => {
     const harness = urlHarness();
     (
-      harness.runtimes.sourceEvidence!.preserveAndExtractUrlSource as ReturnType<typeof vi.fn>
+      harness.runtimes.sourceEvidence!.preserveUrlSource as ReturnType<typeof vi.fn>
     ).mockResolvedValueOnce({
       ok: false,
       stage: "preservation",
@@ -856,10 +875,7 @@ describe("autopilot from a URL", () => {
       policyRuns: {
         append: vi.fn(async (run: unknown) => ({ ok: true as const, run })),
         observe: vi.fn(async () => ({ ok: true as const, run: {} })),
-        settle: vi.fn(async (command: { conclusion: string }) => {
-          settled.push(command);
-          return { ok: true as const, run: {} };
-        }),
+        settle: vi.fn(),
       },
     } as unknown as AutopilotRuntimes;
 
@@ -869,7 +885,8 @@ describe("autopilot from a URL", () => {
       createPolicyRunId: () => policyRunId("policy-url-refused"),
     });
 
-    expect(settled).toEqual([expect.objectContaining({ conclusion: "stopped" })]);
+    expect(withPolicy.policyRuns!.append).not.toHaveBeenCalled();
+    expect(withPolicy.policyRuns!.settle).not.toHaveBeenCalled();
   });
 });
 

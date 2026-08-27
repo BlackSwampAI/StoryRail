@@ -9,6 +9,7 @@ import {
   sourceId,
   storyId,
   type AgentRun,
+  type AgentRunId,
   type AgentToolCall,
   type PolicyRun,
 } from "@/domain/editorial";
@@ -23,6 +24,7 @@ const policyRun = (overrides: Partial<PolicyRun> = {}): PolicyRun =>
   ({
     id: policyRunId("policy-1"),
     storyId: STORY,
+    sourceId: null,
     policy: "autopilot",
     requestedBy: OPERATOR,
     research: false,
@@ -77,6 +79,7 @@ function harness(options: {
   readonly toolCalls?: readonly AgentToolCall[];
 }) {
   const completeToolCall = vi.fn(async (call: AgentToolCall) => ({ ok: true as const, call }));
+  const listByStoryId = vi.fn(async () => options.runs ?? []);
   const settle = vi.fn(async (command: { id: unknown }) => ({
     ok: true as const,
     run: policyRun({ id: command.id as never }),
@@ -86,6 +89,7 @@ function harness(options: {
     settle,
     complete,
     completeToolCall,
+    listByStoryId,
     reconcile: createReconcileAbandonedWork({
       policyRuns: {
         append: vi.fn(),
@@ -98,7 +102,7 @@ function harness(options: {
       agentRuns: {
         append: vi.fn(),
         complete,
-        listByStoryId: vi.fn(async () => options.runs ?? []),
+        listByStoryId,
       },
       toolCalls: {
         append: vi.fn(),
@@ -168,6 +172,24 @@ describe("closing out work whose process disappeared", () => {
     expect(test.complete).not.toHaveBeenCalled();
   });
 
+  it("settles a stale Source-rooted policy without looking for Story agent runs", async () => {
+    const sourceRooted = policyRun({
+      storyId: null,
+      sourceId: sourceId("source-reconcile-root"),
+      step: "source_preparation",
+    });
+    const test = harness({ stale: [sourceRooted] });
+
+    const report = await test.reconcile();
+
+    expect(report.abandonedPolicyRuns).toHaveLength(1);
+    expect(test.settle).toHaveBeenCalledWith(
+      expect.objectContaining({ id: sourceRooted.id, conclusion: "abandoned" }),
+    );
+    expect(test.complete).not.toHaveBeenCalled();
+    expect(test.listByStoryId).not.toHaveBeenCalled();
+  });
+
   it("does nothing when everything is still reporting progress", async () => {
     const test = harness({});
 
@@ -177,5 +199,42 @@ describe("closing out work whose process disappeared", () => {
       abandonedToolCalls: [],
     });
     expect(test.settle).not.toHaveBeenCalled();
+  });
+
+  it("does not process an earlier policy's tool calls again for a later policy", async () => {
+    const first = runningAgentRun();
+    const second = { ...runningAgentRun(), id: agentRunId("run-reconcile-second") } as AgentRun;
+    const listByStoryId = vi.fn().mockResolvedValueOnce([first]).mockResolvedValueOnce([second]);
+    const listByRunId = vi.fn(async (id: AgentRunId) => {
+      void id;
+      return [];
+    });
+    const reconcile = createReconcileAbandonedWork({
+      policyRuns: {
+        append: vi.fn(),
+        observe: vi.fn(),
+        settle: vi.fn(async (command: { id: unknown }) => ({
+          ok: true as const,
+          run: policyRun({ id: command.id as never }),
+        })),
+        findById: vi.fn(),
+        findByStoryId: vi.fn(),
+        listStaleRunning: vi.fn(async () => [
+          policyRun({ id: policyRunId("policy-first") }),
+          policyRun({ id: policyRunId("policy-second") }),
+        ]),
+      },
+      agentRuns: {
+        append: vi.fn(),
+        complete: vi.fn(async (run: AgentRun) => ({ ok: true as const, run })),
+        listByStoryId,
+      },
+      toolCalls: { append: vi.fn(), complete: vi.fn(), listByRunId },
+      now: () => NOW,
+    });
+
+    await reconcile();
+
+    expect(listByRunId.mock.calls.map(([id]) => id)).toEqual([first.id, second.id]);
   });
 });

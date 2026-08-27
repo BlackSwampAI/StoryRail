@@ -10,6 +10,7 @@ import {
   type OperatorActor,
   type PolicyRunId,
   type SourceExtraction,
+  type SourceId,
   type StoryId,
   type UrlSource,
 } from "@/domain/editorial";
@@ -182,7 +183,10 @@ export interface AutopilotRuntimes {
   /** Present only where an operator has research configured; autopilot works without it. */
   readonly researcher?: Pick<ResearcherRuntime, "researchStorySources">;
   /** Present only for a run started from a URL; a run started at a Story never reaches for it. */
-  readonly sourceEvidence?: Pick<SourceEvidenceRuntime, "preserveAndExtractUrlSource">;
+  readonly sourceEvidence?: Pick<
+    SourceEvidenceRuntime,
+    "preserveUrlSource" | "extractPersistedSource"
+  >;
   readonly evidencePreparation?: Pick<EvidencePreparationRuntime, "prepareSourceEvidence">;
   readonly story: Pick<
     StoryRuntime,
@@ -275,9 +279,15 @@ export function createAutopilot(runtimes: AutopilotRuntimes) {
    */
   function tracker(policyRunId: PolicyRunId | null, now: () => string) {
     return {
-      async reached(step: AutopilotStep, storyId?: StoryId): Promise<void> {
-        if (policyRunId === null || runtimes.policyRuns === undefined) return;
-        await runtimes.policyRuns.observe({ id: policyRunId, step, observedAt: now(), storyId });
+      async reached(step: AutopilotStep, storyId?: StoryId): Promise<WorkflowError | null> {
+        if (policyRunId === null || runtimes.policyRuns === undefined) return null;
+        const observed = await runtimes.policyRuns.observe({
+          id: policyRunId,
+          step,
+          observedAt: now(),
+          storyId,
+        });
+        return observed.ok ? null : observed.error;
       },
       async settle(result: AutopilotResult): Promise<AutopilotResult> {
         if (policyRunId === null || runtimes.policyRuns === undefined) return result;
@@ -504,7 +514,8 @@ export function createAutopilot(runtimes: AutopilotRuntimes) {
     if (!created.ok) return refused(null, "story_creation", created.error);
     const storyId = created.story.id;
 
-    await progress.reached("source_attachment", storyId);
+    const rooted = await progress.reached("source_attachment", storyId);
+    if (rooted !== null) return refused(storyId, "source_attachment", rooted);
     const attached = await stories.attachSourceToStory({
       storyId,
       sourceId: source.id,
@@ -531,6 +542,7 @@ export function createAutopilot(runtimes: AutopilotRuntimes) {
 
   async function appendPolicyRun(command: {
     readonly storyId: StoryId | null;
+    readonly sourceId: SourceId | null;
     readonly requestedBy: OperatorActor;
     readonly research: boolean;
     readonly step: AutopilotStep;
@@ -546,6 +558,7 @@ export function createAutopilot(runtimes: AutopilotRuntimes) {
     const created = await runtimes.policyRuns.append({
       id: command.createPolicyRunId(),
       storyId: command.storyId,
+      sourceId: command.sourceId,
       policy: "autopilot",
       requestedBy: command.requestedBy,
       research: command.research,
@@ -579,6 +592,7 @@ export function createAutopilot(runtimes: AutopilotRuntimes) {
       // step still leaves something saying this Story was under automation.
       const appended = await appendPolicyRun({
         storyId: command.storyId,
+        sourceId: null,
         requestedBy: command.requestedBy,
         research: command.research === true,
         step: command.research === true ? "source_research" : "assignment_proposal",
@@ -642,11 +656,17 @@ export function createAutopilot(runtimes: AutopilotRuntimes) {
             message: "Source intake is not configured for this newsroom.",
           },
         };
-      // The policy is recorded before the URL leaves for the extractor, so a process that dies
-      // during intake still leaves something saying this URL was under automation. It names no
-      // Story because there is not one yet; it learns which Story it made when it makes it.
+      const preserved = await runtimes.sourceEvidence.preserveUrlSource({
+        submittedUrl: command.submittedUrl,
+        submittedBy: command.requestedBy,
+      });
+      if (!preserved.ok) return { ok: false, stage: "preservation", error: preserved.error };
+
+      // Preservation establishes the tenant-scoped root. Record it before the external adapter
+      // is reached, so even a process lost during extraction has an attributable policy.
       const appended = await appendPolicyRun({
         storyId: null,
+        sourceId: preserved.source.id,
         requestedBy: command.requestedBy,
         research: command.research === true,
         step: "source_intake",
@@ -661,25 +681,25 @@ export function createAutopilot(runtimes: AutopilotRuntimes) {
         };
       const progress = tracker(appended.id, now);
 
-      const intake = await runtimes.sourceEvidence.preserveAndExtractUrlSource({
-        submittedUrl: command.submittedUrl,
-        submittedBy: command.requestedBy,
+      const extraction = await runtimes.sourceEvidence.extractPersistedSource({
+        sourceId: preserved.source.id,
+        requestedBy: command.requestedBy,
       });
-      if (!intake.ok) {
+      if (!extraction.ok) {
         // The policy is settled here rather than left running: nothing further will happen, and
         // a record that stayed in flight would be reconciled later as abandoned work instead of
         // saying the URL was refused at the door.
-        await progress.settle(refused(null, "source_intake", intake.error));
-        return { ok: false, stage: intake.stage, error: intake.error };
+        await progress.settle(refused(null, "source_intake", extraction.error));
+        return { ok: false, stage: "extraction", error: extraction.error };
       }
 
       return {
         ok: true,
         policyRunId: appended.id,
-        source: intake.source,
+        source: preserved.source,
         completion: driveFromSource(
-          intake.source,
-          intake.extraction,
+          preserved.source,
+          extraction.extraction,
           command.requestedBy,
           command.research === true,
           progress,

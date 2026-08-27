@@ -63,6 +63,7 @@ export function createReconcileAbandonedWork(dependencies: {
       // preparation, which are recorded against the Source rather than against a Story.
       const editorialRuns =
         run.storyId === null ? [] : await dependencies.agentRuns.listByStoryId(run.storyId);
+      const currentPolicyAgentRuns: AgentRun[] = [];
       for (const agentRun of editorialRuns) {
         if (agentRun.outcome !== "running") continue;
         const recorded = recordAgentRun({
@@ -73,11 +74,14 @@ export function createReconcileAbandonedWork(dependencies: {
         } as AgentRun);
         if (!recorded.ok) continue;
         const completed = await dependencies.agentRuns.complete(recorded.run);
-        if (completed.ok) abandonedAgentRuns.push(completed.run);
+        if (completed.ok) {
+          abandonedAgentRuns.push(completed.run);
+          currentPolicyAgentRuns.push(completed.run);
+        }
       }
 
       // Tool calls left open by the same dead process are closed with the same reasoning.
-      for (const agentRun of abandonedAgentRuns) {
+      for (const agentRun of currentPolicyAgentRuns) {
         for (const call of await dependencies.toolCalls.listByRunId(agentRun.id)) {
           if (call.outcome !== "running") continue;
           const closed = recordAgentToolCall({

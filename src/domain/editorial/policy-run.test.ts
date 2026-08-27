@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { recordPolicyRun } from "./policy-run";
-import { operatorId, policyRunId, storyId } from "./types";
+import { operatorId, policyRunId, sourceId, storyId } from "./types";
 import type { PolicyRun } from "./policy-run-types";
 
 const base = {
   id: policyRunId("policy-1"),
   storyId: storyId("story-1"),
+  sourceId: null,
   policy: "autopilot",
   requestedBy: { type: "operator", operatorId: operatorId("operator-1") },
   research: false,
@@ -21,10 +22,52 @@ describe("recording that work is under an automated policy", () => {
     // A run started from a URL preserves, extracts and prepares before anything editorial
     // exists. Those are the minutes most likely to be interrupted, so the record has to be
     // writable before there is a Story to name.
-    expect(recordPolicyRun({ ...base, storyId: null, step: "source_intake" })).toMatchObject({
+    expect(
+      recordPolicyRun({
+        ...base,
+        storyId: null,
+        sourceId: sourceId("source-1"),
+        step: "source_intake",
+      }),
+    ).toMatchObject({
       ok: true,
       run: { storyId: null, step: "source_intake" },
     });
+  });
+
+  it("refuses a running policy without exactly one authoritative root", () => {
+    expect(recordPolicyRun({ ...base, storyId: null, sourceId: null })).toMatchObject({
+      ok: false,
+      error: { code: "POLICY_RUN_IDENTITY_INVALID" },
+    });
+    expect(recordPolicyRun({ ...base, sourceId: sourceId("source-1") })).toMatchObject({
+      ok: false,
+      error: { code: "POLICY_RUN_IDENTITY_INVALID" },
+    });
+  });
+
+  it("allows a settled legacy policy with no root but never one with two roots", () => {
+    expect(
+      recordPolicyRun({
+        ...base,
+        storyId: null,
+        sourceId: null,
+        status: "settled",
+        conclusion: "abandoned",
+        reason: "Migrated legacy work.",
+        completedAt: "2026-08-26T00:01:00.000Z",
+      }),
+    ).toMatchObject({ ok: true });
+    expect(
+      recordPolicyRun({
+        ...base,
+        sourceId: sourceId("source-1"),
+        status: "settled",
+        conclusion: "stopped",
+        reason: "Stopped.",
+        completedAt: "2026-08-26T00:01:00.000Z",
+      }),
+    ).toMatchObject({ ok: false, error: { code: "POLICY_RUN_IDENTITY_INVALID" } });
   });
 
   it("accepts a run that has since learned which Story it made", () => {
