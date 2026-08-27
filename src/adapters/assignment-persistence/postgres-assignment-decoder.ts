@@ -1,18 +1,18 @@
 import { isDeepStrictEqual } from "node:util";
 
-import type {
-  AgentProfileId,
-  AgentRole,
-  AgentRunId,
-  Assignment,
-  EditorialActor,
-  OperatorId,
-  SourceId,
-  StoryId,
-  StoryState,
-  StoryTransitionReceipt,
+import {
+  AGENT_ROLES,
+  STORY_STATES,
+  assignmentSchema,
+  type AgentRole,
+  type AgentRunId,
+  type Assignment,
+  type EditorialActor,
+  type OperatorId,
+  type StoryId,
+  type StoryState,
+  type StoryTransitionReceipt,
 } from "@/domain/editorial";
-import { AGENT_ROLES, STORY_STATES } from "@/domain/editorial";
 
 export class PostgresAssignmentInvariantError extends Error {
   constructor() {
@@ -70,58 +70,19 @@ export function decodePostgresAssignment(row: {
   readonly writer_role?: unknown;
   readonly payload: unknown;
 }): Assignment {
-  const value = row.payload;
+  const parsed = assignmentSchema.safeParse(row.payload);
   if (
     typeof row.assignment_id !== "string" ||
     typeof row.story_id !== "string" ||
     typeof row.writer_profile_id !== "string" ||
     (row.writer_role !== undefined && row.writer_role !== "writer") ||
-    !record(value) ||
-    !exact(value, [
-      "id",
-      "storyId",
-      "writerProfileId",
-      "sourceIds",
-      "angle",
-      "brief",
-      "constraints",
-      "assignedBy",
-      "assignedAt",
-    ]) ||
-    value.id !== row.assignment_id ||
-    value.storyId !== row.story_id ||
-    value.writerProfileId !== row.writer_profile_id ||
-    !Array.isArray(value.sourceIds) ||
-    !value.sourceIds.every((item) => typeof item === "string") ||
-    new Set(value.sourceIds).size !== value.sourceIds.length ||
-    typeof value.angle !== "string" ||
-    value.angle.trim().length === 0 ||
-    value.angle !== value.angle.trim() ||
-    typeof value.brief !== "string" ||
-    value.brief.trim().length === 0 ||
-    value.brief !== value.brief.trim() ||
-    !(
-      value.constraints === null ||
-      (typeof value.constraints === "string" &&
-        value.constraints.trim().length > 0 &&
-        value.constraints === value.constraints.trim())
-    ) ||
-    typeof value.assignedAt !== "string"
+    !parsed.success ||
+    parsed.data.id !== row.assignment_id ||
+    parsed.data.storyId !== row.story_id ||
+    parsed.data.writerProfileId !== row.writer_profile_id
   )
     return fail();
-  const assignedBy = decodeAssignmentActor(value.assignedBy);
-  if (assignedBy.type === "agent" && assignedBy.role !== "assignment_editor") return fail();
-  return {
-    id: value.id as Assignment["id"],
-    storyId: value.storyId as StoryId,
-    writerProfileId: value.writerProfileId as AgentProfileId,
-    sourceIds: value.sourceIds as SourceId[],
-    angle: value.angle,
-    brief: value.brief,
-    constraints: value.constraints as string | null,
-    assignedBy,
-    assignedAt: value.assignedAt,
-  };
+  return structuredClone(parsed.data) as unknown as Assignment;
 }
 
 export function decodePostgresTransitionReceipt(row: {

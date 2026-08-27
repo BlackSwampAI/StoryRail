@@ -1,6 +1,11 @@
 import { isDeepStrictEqual } from "node:util";
 
-import { createAgentProfile, type AgentProfile, type AgentProfileRole } from "@/domain/editorial";
+import {
+  agentProfileSchema,
+  createAgentProfile,
+  type AgentProfile,
+  type AgentProfileRole,
+} from "@/domain/editorial";
 
 interface AgentProfilePersistenceRow {
   readonly profile_id: unknown;
@@ -17,26 +22,17 @@ export class PostgresAgentProfileInvariantError extends Error {
 }
 
 export function decodePostgresAgentProfile(row: AgentProfilePersistenceRow): AgentProfile {
+  const parsed = agentProfileSchema.safeParse(row.payload);
   if (
     typeof row.profile_id !== "string" ||
     typeof row.role !== "string" ||
     typeof row.built_in !== "boolean" ||
-    typeof row.payload !== "object" ||
-    row.payload === null ||
-    Array.isArray(row.payload) ||
-    !isDeepStrictEqual(Object.keys(row.payload).sort(), [
-      "builtIn",
-      "id",
-      "instructions",
-      "model",
-      "name",
-      "role",
-    ])
+    !parsed.success
   ) {
     throw new PostgresAgentProfileInvariantError();
   }
 
-  const payload = row.payload as Record<string, unknown>;
+  const payload = parsed.data;
   const decoded = createAgentProfile({
     profileId: row.profile_id as AgentProfile["id"],
     role: payload.role,
