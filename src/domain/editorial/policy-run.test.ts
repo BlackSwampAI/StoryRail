@@ -13,6 +13,7 @@ const base = {
   research: false,
   startedAt: "2026-08-26T00:00:00.000Z",
   step: "writer_draft",
+  attempt: 1,
   observedAt: "2026-08-26T00:00:10.000Z",
   status: "running",
 } as PolicyRun;
@@ -85,6 +86,22 @@ describe("recording that work is under an automated policy", () => {
     expect(recordPolicyRun({ ...base, step: "proofreading" as never })).toMatchObject({
       ok: false,
       error: { code: "POLICY_RUN_STEP_INVALID" },
+    });
+  });
+
+  it("bounds attempts and reserves retries for Writer steps", () => {
+    for (const step of ["writer_draft", "writer_revision"] as const)
+      for (const attempt of [1, 2, 3])
+        expect(recordPolicyRun({ ...base, step, attempt })).toMatchObject({ ok: true });
+
+    for (const attempt of [0, 1.5, 4])
+      expect(recordPolicyRun({ ...base, attempt })).toMatchObject({
+        ok: false,
+        error: { code: "POLICY_RUN_ATTEMPT_INVALID" },
+      });
+    expect(recordPolicyRun({ ...base, step: "delivery", attempt: 2 })).toMatchObject({
+      ok: false,
+      error: { code: "POLICY_RUN_ATTEMPT_INVALID" },
     });
   });
 

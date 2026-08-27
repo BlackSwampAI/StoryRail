@@ -30,6 +30,7 @@ export interface PolicyRunRepository {
   observe(command: {
     readonly id: PolicyRunId;
     readonly step: PolicyRunStep;
+    readonly attempt: number;
     readonly observedAt: string;
     /**
      * The Story the policy has reached, for a run that began at a URL and did not have one.

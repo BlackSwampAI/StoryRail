@@ -18,6 +18,7 @@ import {
   type AgentRun,
   type DirectorReviewRecommendation,
   type OperatorActor,
+  type PolicyRun,
   type Story,
   type StoryState,
 } from "@/domain/editorial";
@@ -215,6 +216,9 @@ function runtimes(overrides: {
   readonly revisionCycles?: readonly number[];
   readonly proposal?: AgentRun;
   readonly draft?: AgentRun;
+  readonly draftRuns?: readonly AgentRun[];
+  readonly draftStart?: Awaited<ReturnType<AutopilotRuntimes["writer"]["createWriterDraft"]>>;
+  readonly revisionRuns?: readonly AgentRun[];
 }): {
   readonly runtimes: AutopilotRuntimes;
   readonly calls: {
@@ -224,6 +228,7 @@ function runtimes(overrides: {
     readonly publishStory: ReturnType<typeof vi.fn>;
     readonly deliverStory: ReturnType<typeof vi.fn>;
     readonly createWriterRevision: ReturnType<typeof vi.fn>;
+    readonly createWriterDraft: ReturnType<typeof vi.fn>;
   };
 } {
   const directorRuns = [...(overrides.directorRuns ?? [directorRun("run-director-1", "approve")])];
@@ -233,8 +238,19 @@ function runtimes(overrides: {
   const recordStoryReviewDecision = vi.fn(async () => ({ ok: true as const }));
   const publishStory = vi.fn(async () => ({ ok: true as const }));
   const deliverStory = vi.fn(async () => ({ ok: true as const, delivery: {} }));
+  const revisionRuns = [
+    ...(overrides.revisionRuns ?? [writerRun("run-writer-revision", "article_revision")]),
+  ];
   const createWriterRevision = vi.fn(async () =>
-    started(writerRun("run-writer-revision", "article_revision")),
+    started(revisionRuns.shift() ?? writerRun("run-writer-revision-last", "article_revision")),
+  );
+  const draftRuns = [
+    ...(overrides.draftRuns ?? [overrides.draft ?? writerRun("run-writer-draft", "article_draft")]),
+  ];
+  const createWriterDraft = vi.fn(
+    async () =>
+      overrides.draftStart ??
+      started(draftRuns.shift() ?? writerRun("run-writer-draft-last", "article_draft")),
   );
   return {
     calls: {
@@ -244,6 +260,7 @@ function runtimes(overrides: {
       publishStory,
       deliverStory,
       createWriterRevision,
+      createWriterDraft,
     },
     runtimes: {
       story: {
@@ -272,9 +289,7 @@ function runtimes(overrides: {
         ),
       },
       writer: {
-        createWriterDraft: vi.fn(async () =>
-          started(overrides.draft ?? writerRun("run-writer-draft", "article_draft")),
-        ),
+        createWriterDraft,
         createWriterRevision,
       },
       director: {
@@ -286,10 +301,11 @@ function runtimes(overrides: {
   };
 }
 
-async function complete(harness: ReturnType<typeof runtimes>) {
+async function complete(harness: ReturnType<typeof runtimes>, withPolicy = false) {
   const startedRun = await createAutopilot(harness.runtimes).start({
     storyId: identity,
     requestedBy: operator,
+    createPolicyRunId: withPolicy ? () => policyRunId("policy-autopilot-test") : undefined,
   });
   if (!startedRun.ok) throw new Error("autopilot refused to start");
   return { runId: startedRun.runId, result: await startedRun.completion };
@@ -440,18 +456,167 @@ describe("autopilot sequence", () => {
     expect(harness.calls.publishStory).toHaveBeenCalledTimes(1);
   });
 
-  it("stops at the failed run rather than retrying it", async () => {
-    const draft = failedRun(writerRun("run-writer-draft", "article_draft"));
+  it("retries a retryable Writer draft and retains distinct durable run identities", async () => {
+    const failed = failedRun(writerRun("run-writer-draft-failed", "article_draft"));
+    const succeeded = writerRun("run-writer-draft-succeeded", "article_draft");
+    const writerAttempts: number[] = [];
+    const harness = runtimes({ draftRuns: [failed, succeeded] });
+    const withPolicy = {
+      ...harness,
+      runtimes: {
+        ...harness.runtimes,
+        policyRuns: {
+          append: vi.fn(async (run: PolicyRun) => ({ ok: true as const, run })),
+          observe: vi.fn(async (command: { step: string; attempt: number }) => {
+            if (command.step === "writer_draft") writerAttempts.push(command.attempt);
+            return { ok: true as const, run: {} as PolicyRun };
+          }),
+          settle: vi.fn(async () => ({ ok: true as const, run: {} as PolicyRun })),
+        } as never,
+      },
+    } as ReturnType<typeof runtimes>;
+    const { result } = await complete(withPolicy, true);
+
+    expect(result).toMatchObject({ ok: true });
+    expect(harness.calls.createWriterDraft).toHaveBeenCalledTimes(2);
+    expect([failed.id, succeeded.id]).toEqual([
+      agentRunId("run-writer-draft-failed"),
+      agentRunId("run-writer-draft-succeeded"),
+    ]);
+    expect(writerAttempts).toEqual([1, 2]);
+  });
+
+  it("stops after exactly three retryable Writer failures with the third run", async () => {
+    const failures = [1, 2, 3].map((attempt) =>
+      failedRun(writerRun(`run-writer-draft-${attempt}`, "article_draft")),
+    );
+    const harness = runtimes({ draftRuns: failures });
+    const { result } = await complete(harness);
+
+    expect(harness.calls.createWriterDraft).toHaveBeenCalledTimes(3);
+    expect(result).toMatchObject({
+      ok: false,
+      stop: { kind: "agent_run_failed", runId: failures[2]!.id, code: "MODEL_OUTPUT_INVALID" },
+    });
+  });
+
+  it("does not retry a non-retryable Writer failure", async () => {
+    const draft = {
+      ...failedRun(writerRun("run-writer-draft", "article_draft")),
+      failure: { code: "MODEL_OUTPUT_INVALID", retryable: false },
+    } as AgentRun;
     const harness = runtimes({ draft });
+    const { result } = await complete(harness);
+
+    expect(result).toMatchObject({ ok: false, stop: { runId: draft.id } });
+    expect(harness.calls.createWriterDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry when the Writer runtime refuses to start", async () => {
+    const harness = runtimes({
+      draftStart: {
+        ok: false,
+        error: { code: "WRITER_MODEL_UNAVAILABLE", message: "The Writer could not start." },
+      },
+    });
+
     const { result } = await complete(harness);
 
     expect(result).toEqual({
       ok: false,
       storyId: identity,
       stoppedAt: "writer_draft",
-      stop: { kind: "agent_run_failed", runId: draft.id, code: "MODEL_OUTPUT_INVALID" },
+      stop: {
+        kind: "workflow_refused",
+        code: "WRITER_MODEL_UNAVAILABLE",
+        message: "The Writer could not start.",
+      },
     });
-    expect(harness.calls.submitStoryReview).not.toHaveBeenCalled();
+    expect(harness.calls.createWriterDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry when Writer run completion cannot be read", async () => {
+    const harness = runtimes({
+      draftStart: {
+        ok: true,
+        runId: agentRunId("run-writer-completion-failed"),
+        completion: Promise.resolve({
+          ok: false,
+          error: { code: "WRITER_DRAFT_CONFLICT", message: "The Writer run was unavailable." },
+        }),
+      },
+    });
+
+    const { result } = await complete(harness);
+
+    expect(result).toEqual({
+      ok: false,
+      storyId: identity,
+      stoppedAt: "writer_draft",
+      stop: {
+        kind: "workflow_refused",
+        code: "WRITER_DRAFT_CONFLICT",
+        message: "The Writer run was unavailable.",
+      },
+    });
+    expect(harness.calls.createWriterDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops before an unrecorded Writer retry when policy observation fails", async () => {
+    const harness = runtimes({
+      draftRuns: [
+        failedRun(writerRun("run-writer-draft-failed", "article_draft")),
+        writerRun("run-writer-draft-never-called", "article_draft"),
+      ],
+    });
+    const observe = vi.fn(async (command: { attempt: number }) =>
+      command.attempt === 2
+        ? {
+            ok: false as const,
+            error: { code: "POLICY_RUN_NOT_RUNNING" as const, message: "Policy stopped." },
+          }
+        : { ok: true as const, run: {} as PolicyRun },
+    );
+    const withPolicy = {
+      ...harness,
+      runtimes: {
+        ...harness.runtimes,
+        policyRuns: {
+          append: vi.fn(async (run: PolicyRun) => ({ ok: true as const, run })),
+          observe,
+          settle: vi.fn(async () => ({ ok: true as const, run: {} as PolicyRun })),
+        } as never,
+      },
+    } as ReturnType<typeof runtimes>;
+
+    const { result } = await complete(withPolicy, true);
+
+    expect(result).toMatchObject({
+      ok: false,
+      stoppedAt: "writer_draft",
+      stop: { kind: "workflow_refused", code: "POLICY_RUN_NOT_RUNNING" },
+    });
+    expect(harness.calls.createWriterDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a retryable Writer revision and still delivers once", async () => {
+    const harness = runtimes({
+      directorRuns: [
+        directorRun("run-director-1", "request_changes"),
+        directorRun("run-director-2", "approve"),
+      ],
+      revisionCycles: [0],
+      revisionRuns: [
+        failedRun(writerRun("run-writer-revision-failed", "article_revision")),
+        writerRun("run-writer-revision-succeeded", "article_revision"),
+      ],
+    });
+
+    const { result } = await complete(harness);
+
+    expect(result).toMatchObject({ ok: true });
+    expect(harness.calls.createWriterRevision).toHaveBeenCalledTimes(2);
+    expect(harness.calls.deliverStory).toHaveBeenCalledTimes(1);
   });
 
   it("leaves the Story in review rather than approving once the revision budget is spent", async () => {
@@ -809,7 +974,12 @@ describe("autopilot from a URL", () => {
       harness.calls.extractPersistedSource.mock.invocationCallOrder[0]!,
     );
     expect(append).toHaveBeenCalledWith(
-      expect.objectContaining({ storyId: null, sourceId: source.id, step: "source_intake" }),
+      expect.objectContaining({
+        storyId: null,
+        sourceId: source.id,
+        step: "source_intake",
+        attempt: 1,
+      }),
     );
 
     expect(observed.map(({ step }) => step)).toEqual([

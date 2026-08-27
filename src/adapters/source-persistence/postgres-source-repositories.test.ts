@@ -213,6 +213,10 @@ const policySourceRootsMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0074-policy-run-source-roots.sql",
 );
+const policyRunAttemptsMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0075-policy-run-attempts.sql",
+);
 
 const DEFAULT_SITE = siteId("site-default");
 const OTHER_SITE = siteId("site-other");
@@ -450,6 +454,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let urlPolicyRunMigrationSql: string;
   let researchBudgetMigrationSql: string;
   let policySourceRootsMigrationSql: string;
+  let policyRunAttemptsMigrationSql: string;
 
   /** Every migration, in order. One list so a rebuild can never drift from the first build. */
   const orderedMigrations = (): readonly string[] => [
@@ -487,6 +492,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     urlPolicyRunMigrationSql,
     researchBudgetMigrationSql,
     policySourceRootsMigrationSql,
+    policyRunAttemptsMigrationSql,
   ];
   let destructiveSetupAllowed = false;
 
@@ -568,6 +574,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     urlPolicyRunMigrationSql = await readFile(urlPolicyRunMigrationPath, "utf8");
     researchBudgetMigrationSql = await readFile(researchBudgetMigrationPath, "utf8");
     policySourceRootsMigrationSql = await readFile(policySourceRootsMigrationPath, "utf8");
+    policyRunAttemptsMigrationSql = await readFile(policyRunAttemptsMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -812,6 +819,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         research: false,
         startedAt: "2026-08-23T11:00:00.000Z",
         step: "assignment_proposal",
+        attempt: 1,
         observedAt: "2026-08-23T11:00:00.000Z",
         status: "running",
         ...overrides,
@@ -855,9 +863,10 @@ describePostgres("PostgreSQL persistence repositories", () => {
         repository.observe({
           id: policyRunId("policy-progress"),
           step: "writer_draft",
+          attempt: 2,
           observedAt: "2026-08-23T11:10:00.000Z",
         }),
-      ).resolves.toMatchObject({ ok: true, run: { step: "writer_draft" } });
+      ).resolves.toMatchObject({ ok: true, run: { step: "writer_draft", attempt: 2 } });
 
       await repository.settle({
         id: policyRunId("policy-progress"),
@@ -870,9 +879,84 @@ describePostgres("PostgreSQL persistence repositories", () => {
         repository.observe({
           id: policyRunId("policy-progress"),
           step: "publication",
+          attempt: 1,
           observedAt: "2026-08-23T11:25:00.000Z",
         }),
       ).resolves.toMatchObject({ ok: false, error: { code: "POLICY_RUN_NOT_RUNNING" } });
+    });
+
+    it("enforces bounded Writer-only attempts in persisted policy payloads", async () => {
+      const story = makeStory("policy-attempt-constraints");
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
+      const repository = createPostgresPolicyRunRepository({ pool, siteId: DEFAULT_SITE });
+      await repository.append(policyRun("policy-attempt-constraints", story));
+
+      for (const [step, attempt] of [
+        ["writer_draft", 0],
+        ["writer_draft", 1.5],
+        ["writer_revision", 4],
+        ["delivery", 2],
+      ] as const)
+        await expect(
+          pool.query(
+            `UPDATE storyrail.policy_runs
+             SET step = $2,
+                 payload = payload || jsonb_build_object(
+                   'step', $2::text,
+                   'attempt', $3::numeric
+                 )
+             WHERE policy_run_id = $1`,
+            ["policy-attempt-constraints", step, attempt],
+          ),
+        ).rejects.toMatchObject({ constraint: "policy_runs_payload_shape_check" });
+    });
+
+    it("migrates settled Source-rooted pre-attempt history without losing its outcome or root", async () => {
+      const before = orderedMigrations().slice(
+        0,
+        orderedMigrations().indexOf(policyRunAttemptsMigrationSql),
+      );
+      try {
+        await pool.query("DROP SCHEMA storyrail CASCADE");
+        for (const migration of before) await pool.query(migration);
+        const source = makeSource("policy-attempt-migration-source");
+        await createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE }).sources.persist({
+          source,
+        });
+        await pool.query(
+          `INSERT INTO storyrail.policy_runs
+             (policy_run_id, story_id, source_id, policy, status, step, observed_at, payload)
+           VALUES ($1, NULL, $2, 'autopilot', 'settled', 'source_intake', $3::timestamptz,
+             jsonb_build_object(
+               'id', $1::text, 'storyId', NULL, 'sourceId', $2::text,
+               'policy', 'autopilot',
+               'requestedBy', jsonb_build_object('type', 'operator', 'operatorId', 'operator-migration'),
+               'research', false, 'startedAt', $3::text, 'step', 'source_intake',
+               'observedAt', $3::text, 'status', 'settled', 'conclusion', 'stopped',
+               'reason', 'Extraction stopped.', 'completedAt', $3::text
+             ))`,
+          ["policy-attempt-migration", source.id, "2026-08-26T00:00:00.000Z"],
+        );
+
+        await pool.query(policyRunAttemptsMigrationSql);
+        const { rows } = await pool.query<{ payload: Record<string, unknown> }>(
+          "SELECT payload FROM storyrail.policy_runs WHERE policy_run_id = $1",
+          ["policy-attempt-migration"],
+        );
+        expect(rows[0]?.payload).toMatchObject({
+          storyId: null,
+          sourceId: source.id,
+          attempt: 1,
+          status: "settled",
+          conclusion: "stopped",
+          reason: "Extraction stopped.",
+        });
+      } finally {
+        await pool.query("DROP SCHEMA storyrail CASCADE");
+        for (const migration of orderedMigrations()) await pool.query(migration);
+        await addSecondSite(pool);
+        await addSecondSiteWriter(pool);
+      }
     });
 
     it("records a run that has no Story yet, and lets it learn the one it makes", async () => {
@@ -901,6 +985,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         repository.observe({
           id: policyRunId("policy-from-a-url"),
           step: "story_creation",
+          attempt: 1,
           observedAt: "2026-08-26T11:10:00.000Z",
           storyId: story.id,
         }),
@@ -915,6 +1000,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         repository.observe({
           id: policyRunId("policy-from-a-url"),
           step: "writer_draft",
+          attempt: 1,
           observedAt: "2026-08-26T11:11:00.000Z",
           storyId: makeStory("policy-other-story").id,
         }),
@@ -992,6 +1078,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           repository.observe({
             id: policyRunId("policy-every-step"),
             step,
+            attempt: 1,
             observedAt: "2026-08-26T11:00:00.000Z",
           }),
         ).resolves.toMatchObject({ ok: true, run: { step } });
@@ -1062,6 +1149,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         local.observe({
           id: run.id,
           step: "source_attachment",
+          attempt: 1,
           observedAt: "2026-08-23T11:10:00.000Z",
           storyId: localStory.id,
         }),

@@ -27,6 +27,9 @@ export const POLICY_RUN_STEPS = [
 ] as const;
 export type PolicyRunStep = (typeof POLICY_RUN_STEPS)[number];
 
+/** Writer model work gets one initial call and at most two recorded retries. */
+export const MAX_AUTOPILOT_WRITER_ATTEMPTS = 3;
+
 export const POLICY_RUN_CONCLUSIONS = [
   /** The policy ran to the end of its sequence. */
   "completed",
@@ -55,6 +58,8 @@ interface PolicyRunCommon {
   readonly startedAt: string;
   /** The furthest step the policy is known to have reached. */
   readonly step: PolicyRunStep;
+  /** The 1-based attempt at the current step. Only Writer steps may advance beyond one. */
+  readonly attempt: number;
   /** When that step was last recorded. Silence past a threshold is what abandonment means. */
   readonly observedAt: string;
 }
@@ -83,6 +88,7 @@ export type PolicyRunValidationCode =
   | "POLICY_RUN_IDENTITY_INVALID"
   | "POLICY_RUN_POLICY_INVALID"
   | "POLICY_RUN_STEP_INVALID"
+  | "POLICY_RUN_ATTEMPT_INVALID"
   | "POLICY_RUN_OUTCOME_INVALID";
 
 export type RecordPolicyRunResult =

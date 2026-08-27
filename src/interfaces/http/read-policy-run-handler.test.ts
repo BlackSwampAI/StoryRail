@@ -20,6 +20,7 @@ const run = (storyIdentity: string | null): PolicyRun =>
     research: false,
     startedAt: "2026-08-26T00:00:00.000Z",
     step: storyIdentity === null ? "source_preparation" : "writer_draft",
+    attempt: 1,
     observedAt: "2026-08-26T00:00:10.000Z",
     status: "running",
   }) as PolicyRun;
