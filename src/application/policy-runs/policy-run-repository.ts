@@ -11,7 +11,8 @@ export type AppendPolicyRunResult =
   | {
       readonly ok: false;
       readonly error: {
-        readonly code: "POLICY_RUN_ID_CONFLICT" | "POLICY_ALREADY_RUNNING";
+        readonly code:
+          "POLICY_RUN_ID_CONFLICT" | "POLICY_ALREADY_RUNNING" | "POLICY_RUN_ROOT_UNAVAILABLE";
         readonly message: string;
       };
     };

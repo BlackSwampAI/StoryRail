@@ -2,7 +2,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { operatorId, policyRunId, storyId, type PolicyRun } from "@/domain/editorial";
+import { operatorId, policyRunId, sourceId, storyId, type PolicyRun } from "@/domain/editorial";
 
 import { createReadPolicyRunHttpHandler } from "./read-policy-run-handler";
 
@@ -14,6 +14,7 @@ const run = (storyIdentity: string | null): PolicyRun =>
   ({
     id: identity,
     storyId: storyIdentity === null ? null : storyId(storyIdentity),
+    sourceId: storyIdentity === null ? sourceId("source-http") : null,
     policy: "autopilot",
     requestedBy: { type: "operator", operatorId: operatorId("operator-http") },
     research: false,

@@ -2,7 +2,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { operatorId, sourceId } from "@/domain/editorial";
+import { FIRECRAWL_API_KEY_SLOT, operatorId, sourceId } from "@/domain/editorial";
 
 import type { AutopilotRuntimes } from "./autopilot-sequence";
 import { createRunUrlAutopilotHttpHandler } from "./run-url-autopilot-handler";
@@ -31,7 +31,7 @@ const source = {
 };
 
 function harness(
-  preserveAndExtractUrlSource: ReturnType<typeof vi.fn>,
+  preserveUrlSource: ReturnType<typeof vi.fn>,
   extras: Partial<Record<string, unknown>> = {},
 ) {
   return {
@@ -39,7 +39,17 @@ function harness(
     assignmentEditor: { generateAssignmentProposal: vi.fn() },
     writer: {},
     director: {},
-    sourceEvidence: { preserveAndExtractUrlSource },
+    sourceEvidence: {
+      preserveUrlSource,
+      extractPersistedSource: vi.fn(async () => ({
+        ok: true,
+        extraction: {
+          id: "extraction-http-autopilot",
+          outcome: "succeeded",
+          document: { title: "Apple announces the M5 Ultra" },
+        },
+      })),
+    },
     evidencePreparation: { prepareSourceEvidence: vi.fn() },
     ...extras,
   } as unknown as AutopilotRuntimes;
@@ -56,11 +66,6 @@ describe("starting autopilot from a URL over HTTP", () => {
     const preserve = vi.fn(async () => ({
       ok: true,
       source,
-      extraction: {
-        id: "extraction-http-autopilot",
-        outcome: "succeeded",
-        document: { title: "Apple announces the M5 Ultra" },
-      },
     }));
     const runtimes = harness(preserve);
     // The sequence continues after the response, so preparation is held open until this test
@@ -90,7 +95,6 @@ describe("starting autopilot from a URL over HTTP", () => {
   it("records the operator who authorised the run as the actor on the Source", async () => {
     const preserve = vi.fn(async () => ({
       ok: false,
-      stage: "preservation",
       error: { code: "INVALID_SOURCE_URL", message: "That is not a URL." },
     }));
 
@@ -106,7 +110,6 @@ describe("starting autopilot from a URL over HTTP", () => {
   it("hands back a URL it cannot use rather than opening a Story for it", async () => {
     const preserve = vi.fn(async () => ({
       ok: false,
-      stage: "preservation",
       error: { code: "INVALID_SOURCE_URL", message: "That is not a URL." },
     }));
 
@@ -126,7 +129,6 @@ describe("starting autopilot from a URL over HTTP", () => {
   it("reports a page this newsroom already has as a conflict, not a fault", async () => {
     const preserve = vi.fn(async () => ({
       ok: false,
-      stage: "preservation",
       error: { code: "DUPLICATE_SOURCE", message: "Already ingested." },
     }));
 
@@ -141,19 +143,22 @@ describe("starting autopilot from a URL over HTTP", () => {
 
   it("says the extractor has no key rather than blaming the newsroom", async () => {
     const preserve = vi.fn(async () => ({
-      ok: false,
-      stage: "extraction",
+      ok: true,
       source,
+    }));
+    const runtimes = harness(preserve);
+    vi.mocked(runtimes.sourceEvidence!.extractPersistedSource).mockResolvedValueOnce({
+      ok: false,
       error: {
         code: "CREDENTIAL_NOT_CONFIGURED",
         message: "No Firecrawl key is configured.",
-        slot: "firecrawl_api_key",
+        slot: FIRECRAWL_API_KEY_SLOT,
         reason: "CREDENTIAL_NOT_CONFIGURED",
       },
-    }));
+    });
 
     const response = await createRunUrlAutopilotHttpHandler({
-      getRuntimes: () => harness(preserve),
+      getRuntimes: () => runtimes,
       environment,
       after: () => {},
     })(request(JSON.stringify({ submittedUrl })));

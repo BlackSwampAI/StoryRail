@@ -1,5 +1,5 @@
 import type { OperatorActor } from "./types";
-import type { PolicyRunId, StoryId } from "./types";
+import type { PolicyRunId, SourceId, StoryId } from "./types";
 
 /**
  * The automations an operator can authorise. Closed rather than open: a policy is a sequence
@@ -46,6 +46,8 @@ interface PolicyRunCommon {
    * leave the very steps most likely to be interrupted with nothing saying they were running.
    */
   readonly storyId: StoryId | null;
+  /** The preserved Source is authoritative until a URL-started run creates its Story. */
+  readonly sourceId: SourceId | null;
   readonly policy: EditorialPolicy;
   readonly requestedBy: OperatorActor;
   /** Whether the operator asked for the evidence to be widened before assigning. */

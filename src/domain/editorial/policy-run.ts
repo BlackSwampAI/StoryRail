@@ -19,6 +19,9 @@ export function recordPolicyRun(candidate: PolicyRun): RecordPolicyRunResult {
   if (
     !nonEmpty(candidate.id) ||
     !(candidate.storyId === null || nonEmpty(candidate.storyId)) ||
+    !(candidate.sourceId === null || nonEmpty(candidate.sourceId)) ||
+    (candidate.storyId !== null && candidate.sourceId !== null) ||
+    (candidate.status === "running" && candidate.storyId === null && candidate.sourceId === null) ||
     !nonEmpty(candidate.startedAt) ||
     !nonEmpty(candidate.observedAt) ||
     candidate.requestedBy?.type !== "operator" ||
