@@ -1,6 +1,7 @@
 import type { StartAssignmentProposalResult } from "@/application/assignment-proposals";
 import {
   DIRECTOR_CHECK_NAMES,
+  MAX_AUTOPILOT_WRITER_ATTEMPTS,
   MAX_REVISION_CYCLES,
   agentRunId,
   type AgentRun,
@@ -102,7 +103,7 @@ export const AUTOPILOT_STEPS = [
 export type AutopilotStep = (typeof AUTOPILOT_STEPS)[number];
 
 export type AutopilotStop =
-  /** A supervised run recorded a failure. Autopilot never retries: the failure is the answer. */
+  /** A supervised run recorded a final failure. Retryable Writer failures get a bounded retry. */
   | {
       readonly kind: "agent_run_failed";
       readonly runId: AgentRunId;
@@ -231,9 +232,9 @@ function refused(
 }
 
 /**
- * Reduces a settled supervised run to the one thing the sequence needs: the successful run, or
- * the reason to stop. A failed run stops the sequence rather than being retried — free models
- * fail often enough that a silent retry would hide a real problem instead of reporting it.
+ * Reduces a settled non-Writer supervised run to the one thing the sequence needs: the successful
+ * run, or the reason to stop. These roles are always single-attempt; Writer steps use their own
+ * bounded, policy-recorded loop below.
  */
 async function settleRun<Run extends AgentRun>(
   storyId: StoryId,
@@ -279,13 +280,18 @@ export function createAutopilot(runtimes: AutopilotRuntimes) {
    */
   function tracker(policyRunId: PolicyRunId | null, now: () => string) {
     return {
-      async reached(step: AutopilotStep, storyId?: StoryId): Promise<WorkflowError | null> {
+      async reached(
+        step: AutopilotStep,
+        storyId?: StoryId,
+        attempt = 1,
+      ): Promise<WorkflowError | null> {
         if (policyRunId === null || runtimes.policyRuns === undefined) return null;
         const observed = await runtimes.policyRuns.observe({
           id: policyRunId,
           step,
           observedAt: now(),
           storyId,
+          attempt,
         });
         return observed.ok ? null : observed.error;
       },
@@ -309,6 +315,53 @@ export function createAutopilot(runtimes: AutopilotRuntimes) {
   }
 
   type Progress = ReturnType<typeof tracker>;
+
+  async function runWriterStep(
+    storyId: StoryId,
+    operator: OperatorActor,
+    step: "writer_draft" | "writer_revision",
+    progress: Progress,
+  ): Promise<SettledRun<AgentRun>> {
+    for (let attempt = 1; attempt <= MAX_AUTOPILOT_WRITER_ATTEMPTS; attempt += 1) {
+      const progressError = await progress.reached(step, storyId, attempt);
+      if (progressError !== null)
+        return { ok: false, result: refused(storyId, step, progressError) };
+
+      const started =
+        step === "writer_draft"
+          ? await writer.createWriterDraft({ storyId, requestedBy: operator })
+          : await writer.createWriterRevision({ storyId, requestedBy: operator });
+      if (!started.ok) return { ok: false, result: refused(storyId, step, started.error) };
+
+      const completed = await started.completion;
+      if (!completed.ok) return { ok: false, result: refused(storyId, step, completed.error) };
+      if (completed.run.outcome === "succeeded")
+        return {
+          ok: true,
+          run: completed.run as Extract<AgentRun, { readonly outcome: "succeeded" }>,
+        };
+
+      if (
+        completed.run.outcome === "failed" &&
+        completed.run.failure.retryable === true &&
+        attempt < MAX_AUTOPILOT_WRITER_ATTEMPTS
+      )
+        continue;
+
+      const code: ModelFailureCode =
+        completed.run.outcome === "failed" ? completed.run.failure.code : "MODEL_REQUEST_FAILED";
+      return {
+        ok: false,
+        result: {
+          ok: false,
+          storyId,
+          stoppedAt: step,
+          stop: { kind: "agent_run_failed", runId: started.runId, code },
+        },
+      };
+    }
+    throw new Error("The bounded Writer attempt loop exhausted without a result.");
+  }
 
   /**
    * Publishing declares a Story ready; this puts it somewhere, and may fail without unmaking
@@ -362,10 +415,7 @@ export function createAutopilot(runtimes: AutopilotRuntimes) {
     });
     if (!assigned.ok) return refused(storyId, "assignment", assigned.error);
 
-    await progress.reached("writer_draft", storyId);
-    const draftStarted = await writer.createWriterDraft({ storyId, requestedBy: operator });
-    if (!draftStarted.ok) return refused(storyId, "writer_draft", draftStarted.error);
-    const drafted = await settleRun(storyId, "writer_draft", draftStarted);
+    const drafted = await runWriterStep(storyId, operator, "writer_draft", progress);
     if (!drafted.ok) return drafted.result;
 
     // The domain bounds this routing loop: `request_changes` is refused once the revision budget
@@ -424,13 +474,7 @@ export function createAutopilot(runtimes: AutopilotRuntimes) {
         return { ok: true, storyId, revisionCycles: cycle, delivery };
       }
 
-      await progress.reached("writer_revision", storyId);
-      const revisionStarted = await writer.createWriterRevision({
-        storyId,
-        requestedBy: operator,
-      });
-      if (!revisionStarted.ok) return refused(storyId, "writer_revision", revisionStarted.error);
-      const revised = await settleRun(storyId, "writer_revision", revisionStarted);
+      const revised = await runWriterStep(storyId, operator, "writer_revision", progress);
       if (!revised.ok) return revised.result;
     }
     return {
@@ -564,6 +608,7 @@ export function createAutopilot(runtimes: AutopilotRuntimes) {
       research: command.research,
       startedAt,
       step: command.step,
+      attempt: 1,
       observedAt: startedAt,
       status: "running",
     });

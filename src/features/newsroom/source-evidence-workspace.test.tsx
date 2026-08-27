@@ -573,7 +573,7 @@ describe("starting a whole run from the URL", () => {
     const requests = autopilot({
       follow: vi.fn(async () => ({
         kind: "observed" as const,
-        run: { storyId: "story-from-a-url", step: "writer_draft" } as never,
+        run: { storyId: "story-from-a-url", step: "writer_draft", attempt: 2 } as never,
       })),
     });
     render(
@@ -587,6 +587,7 @@ describe("starting a whole run from the URL", () => {
     chooseAutopilotAndSubmit();
 
     await waitFor(() => expect(onAutopilotStory).toHaveBeenCalledWith("story-from-a-url"));
+    expect(screen.getByText("Writing the draft — attempt 2 of 3")).toBeVisible();
   });
 
   it("says nothing was automated when the URL is refused", async () => {

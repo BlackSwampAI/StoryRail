@@ -30,6 +30,7 @@ const policyRun = (overrides: Partial<PolicyRun> = {}): PolicyRun =>
     research: false,
     startedAt: "2026-08-23T11:00:00.000Z",
     step: "writer_draft",
+    attempt: 1,
     observedAt: "2026-08-23T11:05:00.000Z",
     status: "running",
     ...overrides,

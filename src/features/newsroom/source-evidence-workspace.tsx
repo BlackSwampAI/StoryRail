@@ -2,14 +2,15 @@
 
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 
-import type {
-  EditorialActor,
-  PolicyRun,
-  PolicyRunId,
-  SourceEvidencePreparation,
-  SourceExtraction,
-  StoryId,
-  UrlSource,
+import {
+  MAX_AUTOPILOT_WRITER_ATTEMPTS,
+  type EditorialActor,
+  type PolicyRun,
+  type PolicyRunId,
+  type SourceEvidencePreparation,
+  type SourceExtraction,
+  type StoryId,
+  type UrlSource,
 } from "@/domain/editorial";
 
 import styles from "./newsroom-shell.module.css";
@@ -844,7 +845,12 @@ export function SourceEvidenceWorkspace({
             <p className={styles.preparationWaitCopy}>
               {state.run === null
                 ? "The page is preserved. Nothing else has happened yet."
-                : POLICY_RUN_STEP_LABELS[state.run.step]}
+                : `${POLICY_RUN_STEP_LABELS[state.run.step]}${
+                    (state.run.step === "writer_draft" || state.run.step === "writer_revision") &&
+                    state.run.attempt > 1
+                      ? ` — attempt ${state.run.attempt} of ${MAX_AUTOPILOT_WRITER_ATTEMPTS}`
+                      : ""
+                  }`}
             </p>
             <p className={styles.formHint}>
               This takes minutes. Leaving the screen does not stop it: the run is recorded and

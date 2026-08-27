@@ -1,5 +1,6 @@
 import {
   EDITORIAL_POLICIES,
+  MAX_AUTOPILOT_WRITER_ATTEMPTS,
   POLICY_RUN_CONCLUSIONS,
   POLICY_RUN_STEPS,
   type PolicyRun,
@@ -40,6 +41,19 @@ export function recordPolicyRun(candidate: PolicyRun): RecordPolicyRunResult {
 
   if (!(POLICY_RUN_STEPS as readonly string[]).includes(candidate.step))
     return invalid("POLICY_RUN_STEP_INVALID", "The recorded step is not part of this policy.");
+
+  if (
+    !Number.isInteger(candidate.attempt) ||
+    candidate.attempt < 1 ||
+    candidate.attempt > MAX_AUTOPILOT_WRITER_ATTEMPTS ||
+    (candidate.attempt > 1 &&
+      candidate.step !== "writer_draft" &&
+      candidate.step !== "writer_revision")
+  )
+    return invalid(
+      "POLICY_RUN_ATTEMPT_INVALID",
+      "A policy attempt is 1-based, bounded, and may advance only for Writer steps.",
+    );
 
   if (candidate.status === "running") return { ok: true, run: structuredClone(candidate) };
 

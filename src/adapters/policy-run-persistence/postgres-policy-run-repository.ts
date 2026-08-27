@@ -34,6 +34,7 @@ const common = {
   research: z.boolean(),
   startedAt: nonEmpty,
   step: z.enum(POLICY_RUN_STEPS),
+  attempt: z.number().int(),
   observedAt: nonEmpty,
 };
 const schema = z.union([
@@ -149,6 +150,7 @@ export function createPostgresPolicyRunRepository(dependencies: {
              source_id = CASE WHEN story_id IS NULL AND $4::text IS NOT NULL THEN NULL ELSE source_id END,
              payload = payload || jsonb_build_object(
                'step', $2::text,
+               'attempt', $6::integer,
                'observedAt', $3::text,
                'storyId', COALESCE(story_id, $4::text),
                'sourceId', CASE WHEN story_id IS NULL AND $4::text IS NOT NULL THEN NULL ELSE source_id END
@@ -179,6 +181,7 @@ export function createPostgresPolicyRunRepository(dependencies: {
           command.observedAt,
           command.storyId ?? null,
           dependencies.siteId,
+          command.attempt,
         ],
       );
       return rowCount === 0
