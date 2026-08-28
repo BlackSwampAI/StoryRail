@@ -358,6 +358,46 @@ Always returns 200 on success or 500 on internal failure.
 | 503    | Model catalog unreachable or failed |
 | 500    | Internal error |
 
+## POST /api/sites/[siteId]/autopilot — run full Autopilot from URL
+
+- Route: `src/app/api/sites/[siteId]/autopilot/route.ts`
+- Handler: `src/interfaces/http/run-url-autopilot-handler.ts`
+- Provider: `siteDirectoryProvider`, `sourceEvidenceRuntimeProvider`, `evidencePreparationRuntimeProvider`, `storyRuntimeProvider`, `assignmentEditorRuntimeProvider`, `writerRuntimeProvider`, `directorRuntimeProvider`, `researcherRuntimeProvider`
+- Body: `{ "submittedUrl": string, "research"?: boolean }`
+- Workflow: `createAutopilot(runtimes).startFromUrl(...)`. Immediately preserves the Source and creates a policy run rooted at `sourceId`. Spawns the background autonomous sequence across preparation, Story creation, triage, research widening, assignment, bounded Writer draft retries, review submission, Director review, operator decision simulation, bounded revision loop, publication, and delivery.
+- Response: `201` with `{ "ok": true, "policyRunId": string, "storyId": null, "sourceId": string }`.
+
+## POST /api/sites/[siteId]/stories/[storyId]/autopilot — run Autopilot from existing Story
+
+- Route: `src/app/api/sites/[siteId]/stories/[storyId]/autopilot/route.ts`
+- Handler: `src/interfaces/http/run-autopilot-handler.ts`
+- Body: `{ "research"?: boolean }`
+- Workflow: `createAutopilot(runtimes).start(...)`. Creates a policy run rooted at `storyId` and drives the autonomous editorial pipeline from the current Story state to published post and destination delivery.
+- Response: `201` with `{ "ok": true, "policyRunId": string, "storyId": string }`.
+
+## GET /api/sites/[siteId]/policy-runs/[policyRunId] — read Policy Run state
+
+- Route: `src/app/api/sites/[siteId]/policy-runs/[policyRunId]/route.ts`
+- Handler: `src/interfaces/http/read-policy-run-handler.ts`
+- Provider: `storyRuntimeProvider`
+- Response: `200` with `{ "ok": true, "run": PolicyRun }` or `404` `POLICY_RUN_NOT_FOUND`. Shows current step (`source_intake`, `source_preparation`, `story_creation`, `source_attachment`, `source_triage`, `source_research`, `assignment_proposal`, `assignment`, `writer_draft`, `review_submission`, `director_review`, `review_decision`, `writer_revision`, `publication`, `delivery`), 1-based attempt counter (up to 3 for Writer steps), and settlement conclusion.
+
+## POST /api/sites/[siteId]/stories/[storyId]/research — run Source Researcher
+
+- Route: `src/app/api/sites/[siteId]/stories/[storyId]/research/route.ts`
+- Handler: `src/interfaces/http/research-story-sources-handler.ts`
+- Provider: `researcherRuntimeProvider`
+- Body: `{}` (empty object)
+- Workflow: `researchStorySources`. Invokes the Researcher agent with archive search and SearXNG web search tools, executing and streaming tool calls up to the newsroom's configured call budget and attaching discovered candidate sources as durable Sources.
+
+## POST /api/sites/[siteId]/reconciliation — reconcile abandoned policy runs
+
+- Route: `src/app/api/sites/[siteId]/reconciliation/route.ts`
+- Handler: `src/interfaces/http/reconcile-abandoned-work-handler.ts`
+- Provider: `storyRuntimeProvider`
+- Body: `{}` (empty object)
+- Workflow: `reconcileAbandonedWork`. Finds active policy runs that have been silent beyond threshold, reconciles any attached agent runs in-flight, cleans up unfinished tool calls, and transitions policy runs to settled/abandoned.
+
 ## Handler conventions
 
 - `statusFor*` functions map the discriminated workflow result `error.code` to an HTTP status, so domain error codes are the source of truth for HTTP semantics.

@@ -3,7 +3,7 @@ type: Reference
 title: OpenWiki Update Summary
 description: Summary of changes made to the StoryRail OpenWiki documentation during this update cycle.
 ---
-The StoryRail OpenWiki documentation is now current with the repository state at commit 13b77c4fcaf06cf0de1089bb7652c701896620f0.
+The StoryRail OpenWiki documentation is now current with the repository state at commit a71865c197626fbd5fd23d4ee001435e44643039.
 
 Updated files:
 - /openwiki/quickstart.md
@@ -18,11 +18,12 @@ Updated files:
 - /openwiki/update-summary.md
 
 The documentation reflects all changes including:
-- Multi-site routing and tenancy (`/s/[siteId]` and `/api/sites/[siteId]/*`) with site creation, site switcher, and migration `0070-site-switching.sql` (`df39e29`)
-- WordPress delivery destination alongside StudioCMS, serialized via Gutenberg blocks (`f9c6680`, migration `0069-destination-kind.sql`)
-- Operator destination settings and delivery UI with real-time status reporting and re-delivery (`2d03320`, `27ad55f`)
-- Newsroom identity propagation across all agent roles at runtime (`13b77c4`)
-- Plain reading prose toggle in `ArticleReader` without ungrounding Markdown artifacts (`ca6e4e8`)
-- Grounding normalization to ignore Markdown markup when validating quotations against evidence (`b2877c2`)
-- Handling `MODEL_CORRECTION_OUT_OF_SCOPE` refusals carrying grounding findings across domain, persistence, and UI (`6f4807d`, `fd26a87`)
-- Scoped Newsroom Standards client wiring (`43364d5`)
+- Shared strict Zod schemas across domain, persistence decoders, and browser clients, ending drift between PostgreSQL and UI readers (`e0c46f8`, `a71865c`)
+- Bounded Writer retries (up to 3 attempts with fresh run identities) and migration `0075-policy-run-attempts.sql` (`18d219b`)
+- Pre-Story reconcilable policy runs with Source rooting and migration `0074-policy-run-source-roots.sql` (`9936048`)
+- End-to-end URL-to-delivered post Autopilot sequence with research budget settings and migrations `0072-policy-runs-from-a-url.sql` and `0073-research-budget-settings.sql` (`3f93984`)
+- Interactive Story Rail navigation, pinned compact rail on manuscript scroll, and streamlined one-action editorial operations (`be6c968`)
+- Real-time tool activity stream and budget metrics in inspection and newsroom workspace (`1ba59c6`)
+- Idempotent agent run polling avoiding in-flight collisions (`a605b43`)
+- Support for Researcher agent inspections across browser clients (`b8d43ae`)
+- SearXNG web search integration and search settings migration `0071-search-settings.sql` (`ac8c985`)

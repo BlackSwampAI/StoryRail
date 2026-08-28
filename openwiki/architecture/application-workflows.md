@@ -166,6 +166,18 @@ Rejection is terminal and does not contact a model. It preserves all existing wo
 
 `src/application/model-catalog/model-catalog.ts` provides a filtered model catalog interface (`ModelCatalog`) returning models that support `structured_outputs`. It is used by the settings workspace to populate model selectors for supervised roles without persisting third-party catalog state in the database.
 
+## Autopilot sequence workflow
+
+`src/interfaces/http/autopilot-sequence.ts` — `createAutopilot` automates complete end-to-end editorial execution. Autopilot runs can start either from an existing Story (`createAutopilot(runtimes).start({ storyId, requestedBy, research })`) or from an unpreserved URL (`createAutopilot(runtimes).startFromUrl({ submittedUrl, requestedBy, research })`).
+
+1. **Intake & Preparation**: When started from a URL, preserves the Source, runs Firecrawl extraction, performs evidence preparation, creates a new Story with the page's title, attaches the Source, and triages the Source to the new Story. If evidence preparation fails, the sequence stops safely rather than drafting from unread evidence.
+2. **Dynamic Research**: If `research: true` is requested and configured, executes the Source Researcher agent to find and attach supplementary evidence within the site's research budget (up to `researchCallBudget` tool calls, default 12). Web search candidates from SearXNG are retrieved via Firecrawl into genuine Sources before citation; raw search snippets are never evidence.
+3. **Assignment Proposal & Assignment**: Generates an Assignment Editor proposal and applies it to assign the Story to the chosen Writer.
+4. **Bounded Writer Execution**: Runs the Writer to draft the initial Article. If a retryable failure occurs (such as invalid structured output or temporary model errors), Writer execution is retried up to `MAX_AUTOPILOT_WRITER_ATTEMPTS = 3` times with fresh run identities before stopping. Non-retryable errors stop immediately.
+5. **Review and Revision Loop**: Submits the Story to review, runs advisory Director review, records an approval or request-changes decision, and triggers Writer revisions up to the bounded revision limit (`MAX_REVISION_CYCLES = 2`).
+6. **Publication & Delivery**: Atomically publishes approved Stories with an attributable reason, then executes delivery to the site's configured destination (StudioCMS or WordPress). Delivery failures leave the Story published with the outcome recorded.
+7. **Durable Policy Tracking & Reconciliation**: Every autopilot execution is recorded as an active `storyrail.policy_runs` record. Pre-Story runs are rooted at the `sourceId` and atomically swapped to the `storyId` upon creation. Interrupted or abandoned runs are reconciled by `reconcile-abandoned-work.ts`.
+
 ## Site creation workflow
 
 `src/application/sites/create-site.ts` — `createCreateSite` sets up a new independent newsroom:
