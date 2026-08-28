@@ -238,6 +238,11 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `0068-destination-settings.sql` — destination configuration
 - `0069-destination-kind.sql` — discriminated destination kinds (StudioCMS, WordPress)
 - `0070-site-switching.sql` — multi-site routing and tenancy constraints
+- `0071-search-settings.sql` — SearXNG web search settings and encrypted credential slot
+- `0072-policy-runs-from-a-url.sql` — autonomous policy runs starting from unpreserved URLs
+- `0073-research-budget-settings.sql` — per-site research call budget and turn limits
+- `0074-policy-run-source-roots.sql` — Source-rooted policy runs and reconcilable pre-Story workflows
+- `0075-policy-run-attempts.sql` — bounded Writer retry attempt tracking (up to 3 attempts) in policy payloads
 
 ## Documentation (`docs/`)
 

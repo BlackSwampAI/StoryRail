@@ -264,6 +264,39 @@ It alters the `storyrail.agent_tool_calls` table to:
 - Modifies foreign key constraints on `agent_profiles` and `story_assignments` to include `site_id`, ensuring assignments reference profiles owned by the same site.
 - Updates built-in profile lookups so each site owns its own set of built-in profiles.
 
+## Migration 0071 — search settings
+
+`database/migrations/0071-search-settings.sql` extends `storyrail.site_settings` and `storyrail.site_credentials` to configure web search for the Researcher agent:
+- Adds optional `search` settings object to `site_settings` payload (`{ kind: 'searxng', baseUrl: string }`).
+- Adds credential slot `searxng_password` to `site_credentials` for SearXNG Basic HTTP authentication.
+
+## Migration 0072 — policy runs from a URL
+
+`database/migrations/0072-policy-runs-from-a-url.sql` extends `storyrail.policy_runs` to support autonomous execution starting from a raw URL:
+- Adds new policy run steps to payload constraints: `source_intake`, `source_preparation`, `story_creation`, `source_attachment`, `source_triage`, `delivery`.
+- Relaxes foreign key requirements to allow tracking runs before a Story is fully formed.
+
+## Migration 0073 — research budget settings
+
+`database/migrations/0073-research-budget-settings.sql` adds customizable research budgets to `storyrail.site_settings`:
+- Adds optional `researchBudget` payload object: `{ maxToolCalls: integer (1..50), maxTurns: integer (1..20) }`.
+- Default research budget is 12 tool calls and 6 turns (read when a run starts).
+
+## Migration 0074 — policy run source roots
+
+`database/migrations/0074-policy-run-source-roots.sql` enables pre-Story policy runs to be reconciled by rooting them on `source_id`:
+- Adds `source_id` foreign key referencing `storyrail.url_sources(source_id)` on `policy_runs`.
+- Enforces an XOR root constraint: exactly one of `story_id` or `source_id` must be non-null for running policies, or `source_id` may be null when `story_id` is set.
+- Allows atomic swap from Source root to Story root once `story_creation` step completes.
+- Adds partial unique indexes to ensure at most one running policy per Story or Source.
+
+## Migration 0075 — policy run attempts
+
+`database/migrations/0075-policy-run-attempts.sql` adds attempt tracking and bounded retry validation to `storyrail.policy_runs`:
+- Adds required `attempt` property (integer, 1..3) to the `policy_runs` JSONB payload.
+- Enforces that only Writer steps (`writer_draft`, `writer_revision`) can have `attempt > 1` (up to `MAX_AUTOPILOT_WRITER_ATTEMPTS = 3`).
+- Migrates existing settled and running policy records to `attempt = 1`.
+
 ## Integration test lifecycle
 
-The PostgreSQL integration tests (`src/adapters/source-persistence/postgres-source-repositories.test.ts` and the Story/attachment/assignment/run/article/review/writer-revision/story-rejection suites) connect via `STORYRAIL_TEST_DATABASE_URL`, verify the database name is exactly `storyrail_test`, drop and recreate the `storyrail` schema, apply migrations `0012`, `0017`, `0018`, `0024`, `0025`, `0027`, `0028`, `0030`, `0031`, `0038`, `0041`, `0049`, `0053`, `0054`, `0055`, `0056`, `0057`, `0058`, `0059`, `0060`, `0061`, `0062`, `0063`, `0064`, `0065`, `0066`, `0067`, `0068`, `0069`, and `0070` in order, and truncate the editorial tables (plus delete non-built-in Agent Profiles) between cases. The suite never creates or drops a database.
+The PostgreSQL integration tests (`src/adapters/source-persistence/postgres-source-repositories.test.ts` and the Story/attachment/assignment/run/article/review/writer-revision/story-rejection suites) connect via `STORYRAIL_TEST_DATABASE_URL`, verify the database name is exactly `storyrail_test`, drop and recreate the `storyrail` schema, apply migrations `0012`, `0017`, `0018`, `0024`, `0025`, `0027`, `0028`, `0030`, `0031`, `0038`, `0041`, `0049`, `0053`, `0054`, `0055`, `0056`, `0057`, `0058`, `0059`, `0060`, `0061`, `0062`, `0063`, `0064`, `0065`, `0066`, `0067`, `0068`, `0069`, `0070`, `0071`, `0072`, `0073`, `0074`, and `0075` in order, and truncate the editorial tables (plus delete non-built-in Agent Profiles) between cases. The suite never creates or drops a database.

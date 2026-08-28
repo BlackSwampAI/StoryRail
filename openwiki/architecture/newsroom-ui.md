@@ -10,10 +10,19 @@ tags: [ui, react, newsroom, nextjs]
 The newsroom is a single-page React client rendered by the Next.js home route. `src/app/page.tsx` renders `<NewsroomShell />`, and `src/app/layout.tsx` sets the document title/metadata. The shell is a client component (`"use client"`) in `src/features/newsroom/`.
 
 The UI includes a settings workspace (accessible via the account menu) where operators can configure:
-- API keys for external services (OpenRouter, Firecrawl, StudioCMS token) stored in a per-site encrypted credential store
+- API keys for external services (OpenRouter, Firecrawl, StudioCMS token, WordPress application password, SearXNG password) stored in a per-site encrypted credential store
 - Model identifiers for each supervised agent role (Assignment Editor, Writer, Director, Evidence Preparation, Researcher), populated dynamically via the Model Catalog client (`model-catalog-client.ts`) which filters OpenRouter models to those supporting structured outputs
-- Publishing destination settings (base URL, package, draft default) for external delivery
+- Research tool call budget and turn limit for dynamic research widening
+- SearXNG web search instance URL and categories
+- Publishing destination settings (base URL, package/username, draft default) for external delivery
 - These settings are persisted per newsroom/site and enable the corresponding agent runtimes to function
+
+## The Story Rail
+
+`story-rail.tsx` (`StoryRail`) visualizes a Story's journey along an interactive progression of discrete editorial stops: Intake, Assigned, In progress, In review, Approved, Published, and Delivered (with a detached off-rail state for Rejected Stories).
+- **Interactive Rail Stops**: Each stop displays its current status, active actor/task, attempt counters (e.g. Writer draft attempt 2 of 3), and quick action controls.
+- **Pinned Compact Rail**: When scrolling deep into an Article manuscript, `story-rail-visibility.ts` seamlessly renders a 56px pinned header band with a compact indicator of current position and stage.
+- **Real-Time Tool Activity**: `tool-activity.tsx` streams live tool calls (search queries, URL fetches, archive lookups) with spent budget indicators and refusal reasons directly into the workspace.
 
 ## NewsroomShell
 

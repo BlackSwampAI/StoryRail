@@ -35,7 +35,7 @@ interface AgentActor {
 }
 ```
 
-Agent roles are bounded: `assignment_editor`, `writer`, `fact_checker`, `editor_in_chief` (`AGENT_ROLES` in `types.ts`). Durable facts identify a specific operator or tie an agent actor to a specific agent run.
+Agent roles are bounded: `assignment_editor`, `researcher`, `writer`, `fact_checker`, `editor_in_chief` (`AGENT_ROLES` in `types.ts`). Durable facts identify a specific operator or tie an agent actor to a specific agent run.
 
 ## Story and the state machine
 
@@ -254,6 +254,23 @@ Revision 1 is created by the [Writer draft workflow](application-workflows.md#wr
 - Slug generation: `storyDeliverySlug(headline)` derives a URL-safe slug (max 96 chars) deterministically from the headline.
 - Remote ID tracking: For `create`, destinations return the created page or post ID, which StoryRail stores in `remoteId`. Subsequent deliveries of newer revisions update the existing remote resource via `PATCH`/`POST` using this `remoteId`.
 
+## Shared strict record schemas
+
+To eliminate schema drift between PostgreSQL persistence decoders and browser client readers, the domain defines strict Zod schemas and primitive parsers in `src/domain/editorial/`:
+
+- `schema-primitives.ts` — strict `nonEmptyText`, `isoDateTime`, `actorSchema`, `operatorActorSchema`, `agentActorSchema`, and `modelDescriptorSchema`. All object schemas use `.strict()` so unrecognized persisted or wire properties fail closed instead of being silently dropped.
+- Entity & run schemas: `story-schema.ts`, `source-extraction-schema.ts`, `source-evidence-preparation-schema.ts`, `agent-profile-schema.ts`, `assignment-schema.ts`, `article-schema.ts`, `director-review-schema.ts`, `review-decision-schema.ts`, `agent-run-schema.ts`, `agent-tool-call-schema.ts`, and `story-delivery-schema.ts`.
+- Single source of truth: Enumerations are derived from domain constants (`AGENT_ROLES`, `STORY_STATES`, `DIRECTOR_CHECK_NAMES`, etc.). Both PostgreSQL decoders (`postgres-*-decoder.ts`) and browser HTTP clients (`story-client.ts`, `source-inbox-client.ts`) parse through these shared domain schemas.
+- Anti-drift invariant: Verified by `src/test/domain-enumerations-are-not-restated.test.ts`, which scans adapters and UI code to ensure no domain enumeration is hand-written or restated.
+
+## Automated policy runs and bounded attempts
+
+`policy-run.ts` and `policy-run-types.ts` model autonomous editorial workflows (such as `autopilot`):
+- `PolicyRun`: tracks an automated execution sequence across steps (`source_intake`, `source_preparation`, `story_creation`, `source_attachment`, `source_triage`, `assignment_proposal`, `assignment`, `writer_draft`, `review_submission`, `director_review`, `review_decision`, `writer_revision`, `publication`, `delivery`).
+- Dual tenant roots: Pre-Story policy runs are rooted on `sourceId` (`storyId` is null). Once the Story is created, the root atomically swaps to `storyId` (`sourceId` becomes null), ensuring the run remains reconcilable at every step.
+- Bounded attempts: `attempt` is a 1-based integer. Only Writer steps (`writer_draft` and `writer_revision`) can advance beyond 1, bounded by `MAX_AUTOPILOT_WRITER_ATTEMPTS = 3`. All other steps are strictly attempt 1.
+- Conclusion: Settled runs conclude as `completed`, `stopped`, or `abandoned` with a non-empty `reason`.
+
 ## Re-export barrel
 
-`src/domain/editorial/index.ts` re-exports every module in the domain — Source intake/extraction/triage/preparation, Story creation and attachment, the state machine, Agent Profiles, Assignments, Assignment Proposals, AgentRuns, Director review, ReviewDecisions, Articles, and Story Deliveries — and `src/application/index.ts` re-exports the application layer's domain-facing types so callers import from a single barrel, including the writer-revisions, story-deliveries, and model-catalog modules.
+`src/domain/editorial/index.ts` re-exports every module in the domain — Source intake/extraction/triage/preparation, Story creation and attachment, the state machine, Agent Profiles, Assignments, Assignment Proposals, AgentRuns, Director review, ReviewDecisions, Articles, Story Deliveries, Policy Runs, and strict record schemas — and `src/application/index.ts` re-exports the application layer's domain-facing types so callers import from a single barrel, including the writer-revisions, story-deliveries, and model-catalog modules.
