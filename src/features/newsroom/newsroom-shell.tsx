@@ -2,7 +2,7 @@
 
 import { DragDropProvider, DragOverlay } from "@dnd-kit/react";
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { StoryInspection } from "@/application/story-inspection";
 import type { StoryListItem } from "@/application/story-listing";
@@ -80,6 +80,7 @@ export function NewsroomShell({
   const [chosenQueue, setChosenQueue] = useState<StoryState | null | undefined>(undefined);
   const [listing, setListing] = useState<StoryListingState>({ kind: "loading" });
   const [storySelection, setStorySelection] = useState<StorySelection>({ kind: "none" });
+  const storySelectionGeneration = useRef(0);
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("story");
   // Observed against the open Story, so opening another one starts watching that Story's rail
   // rather than an element that has since been replaced.
@@ -195,18 +196,26 @@ export function NewsroomShell({
   }
 
   async function selectStory(identity: StoryId) {
+    const generation = ++storySelectionGeneration.current;
     setStorySelection({ kind: "loading", storyId: identity });
     setWorkspaceMode("story");
     try {
       const result = await requests.inspectStory(identity);
+      if (generation !== storySelectionGeneration.current) return;
       setStorySelection(
         result.kind === "completed"
           ? { kind: "loaded", inspection: result.value }
           : { kind: "unavailable", storyId: identity },
       );
     } catch {
+      if (generation !== storySelectionGeneration.current) return;
       setStorySelection({ kind: "unavailable", storyId: identity });
     }
+  }
+
+  function installStoryInspection(inspection: StoryInspection, notice?: string) {
+    storySelectionGeneration.current += 1;
+    setStorySelection({ kind: "loaded", inspection, ...(notice === undefined ? {} : { notice }) });
   }
 
   function upsertStoryListItem(item: StoryListItem) {
@@ -474,9 +483,11 @@ export function NewsroomShell({
                       sourceCount: storySelection.inspection.sources.length,
                     });
                     setChosenQueue("assigned");
-                    setStorySelection({ kind: "loaded", inspection: returnedInspection });
+                    installStoryInspection(returnedInspection);
+                    const refreshGeneration = storySelectionGeneration.current;
                     try {
                       const refreshed = await requests.inspectStory(facts.story.id);
+                      if (refreshGeneration !== storySelectionGeneration.current) return;
                       setStorySelection(
                         refreshed.kind === "completed"
                           ? { kind: "loaded", inspection: refreshed.value }
@@ -488,6 +499,7 @@ export function NewsroomShell({
                             },
                       );
                     } catch {
+                      if (refreshGeneration !== storySelectionGeneration.current) return;
                       setStorySelection({
                         kind: "loaded",
                         inspection: returnedInspection,
@@ -502,7 +514,7 @@ export function NewsroomShell({
                       sourceCount: refreshed.sources.length,
                     });
                     setChosenQueue("in_progress");
-                    setStorySelection({ kind: "loaded", inspection: refreshed });
+                    installStoryInspection(refreshed);
                   }}
                   onReviewStateChanged={(refreshed) => {
                     upsertStoryListItem({
@@ -510,7 +522,7 @@ export function NewsroomShell({
                       sourceCount: refreshed.sources.length,
                     });
                     setChosenQueue(refreshed.story.state);
-                    setStorySelection({ kind: "loaded", inspection: refreshed });
+                    installStoryInspection(refreshed);
                   }}
                 />
               ) : storySelection.kind === "loading" ? (
@@ -561,7 +573,7 @@ export function NewsroomShell({
                     sourceCount: inspection.sources.length,
                   });
                   setChosenQueue(inspection.story.state);
-                  setStorySelection({ kind: "loaded", inspection });
+                  installStoryInspection(inspection);
                   setWorkspaceMode("story");
                 }}
               />
