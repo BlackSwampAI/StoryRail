@@ -31,3 +31,9 @@ export interface AgentRunRepository {
   complete(run: AgentRun): Promise<CompleteAgentRunResult>;
   listByStoryId(storyId: StoryId): Promise<readonly AgentRun[]>;
 }
+
+/** Narrow recovery view; ordinary editorial workflows never need to scan unrelated runs. */
+export interface StaleAgentRunRepository {
+  /** Running work durably recorded before this instant, oldest first. */
+  listStaleRunning(before: string): Promise<readonly AgentRun[]>;
+}

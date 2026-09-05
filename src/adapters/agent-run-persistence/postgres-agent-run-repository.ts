@@ -6,7 +6,9 @@ import type {
   AgentRunRepository,
   AppendAgentRunResult,
   CompleteAgentRunResult,
+  StaleAgentRunRepository,
 } from "@/application/agent-runs";
+import type { SiteId } from "@/domain/editorial";
 
 import {
   decodePostgresAgentRun,
@@ -134,6 +136,26 @@ export function createPostgresAgentRunRepository(options: {
          WHERE story_id = $1
          ORDER BY append_position ASC`,
         [storyId],
+      );
+      return result.rows.map(decodePostgresAgentRun);
+    },
+  };
+}
+
+export function createPostgresStaleAgentRunRepository(options: {
+  readonly pool: Pool;
+  readonly siteId: SiteId;
+}): StaleAgentRunRepository {
+  return {
+    async listStaleRunning(before) {
+      const result = await options.pool.query<AgentRunRow>(
+        `SELECT run.run_id, run.story_id, run.profile_id, run.role, run.operation,
+                run.outcome, run.payload
+         FROM storyrail.agent_runs AS run
+         JOIN storyrail.stories AS story ON story.story_id = run.story_id
+         WHERE story.site_id = $1 AND run.outcome = 'running' AND run.recorded_at < $2::timestamptz
+         ORDER BY run.recorded_at ASC, run.append_position ASC`,
+        [options.siteId, before],
       );
       return result.rows.map(decodePostgresAgentRun);
     },
