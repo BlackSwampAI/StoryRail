@@ -75,6 +75,14 @@ jobs:
         env:
           STORYRAIL_TEST_DATABASE_URL: postgresql://storyrail_test:storyrail_test@127.0.0.1:5432/storyrail_test
 
+      - name: Install Chromium for browser acceptance tests
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Test browser acceptance
+        run: pnpm test:e2e
+        env:
+          STORYRAIL_TEST_DATABASE_URL: postgresql://storyrail_test:storyrail_test@127.0.0.1:5432/storyrail_test
+
       - name: Build
         run: pnpm build
 
