@@ -78,6 +78,7 @@ function runtimeWith(assignStory: StoryRuntime["assignStory"]): StoryRuntime {
     publishStory: vi.fn(),
     deliverStory: vi.fn<StoryRuntime["deliverStory"]>(),
     resolveLegacyDeliveryMapping: vi.fn<StoryRuntime["resolveLegacyDeliveryMapping"]>(),
+    reconcileStoryDelivery: vi.fn<StoryRuntime["reconcileStoryDelivery"]>(),
     listStoryDeliveries: vi.fn<StoryRuntime["listStoryDeliveries"]>(),
     submitStoryReview: vi.fn<StoryRuntime["submitStoryReview"]>(),
     readSiteSettings: vi.fn<StoryRuntime["readSiteSettings"]>(),

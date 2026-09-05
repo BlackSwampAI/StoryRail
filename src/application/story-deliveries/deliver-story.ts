@@ -15,11 +15,13 @@ import {
 import type { DeliveryDestinationDirectory } from "./delivery-destination";
 import type { LegacyDeliveryMappingResolutionRepository } from "./legacy-delivery-mapping-resolution-repository";
 import type { StoryDeliveryRepository } from "./story-delivery-repository";
+import type { StoryDeliveryReconciliationRepository } from "./story-delivery-reconciliation-repository";
 
 export type DeliverStoryResult =
   | { readonly ok: true; readonly delivery: StoryDelivery }
   | {
       readonly ok: false;
+      readonly delivery?: StoryDelivery;
       readonly error: {
         readonly code: "DESTINATION_MAPPING_REQUIRES_REVIEW";
         readonly message: string;
@@ -27,6 +29,20 @@ export type DeliverStoryResult =
         readonly destination: string;
         readonly destinationInstanceId: DestinationInstanceId;
         readonly remoteId: string;
+      };
+    }
+  | {
+      readonly ok: false;
+      readonly delivery?: StoryDelivery;
+      readonly error: {
+        readonly code: "DESTINATION_RECONCILIATION_REQUIRED";
+        readonly message: string;
+        readonly deliveryId: StoryDeliveryId;
+        readonly destination: string;
+        readonly destinationInstanceId: DestinationInstanceId;
+        readonly operation: "create" | "update";
+        readonly slug: string;
+        readonly remoteId: string | null;
       };
     }
   | {
@@ -69,6 +85,7 @@ export function createDeliverStory(dependencies: {
   readonly inspections: StoryInspectionRepository;
   readonly deliveries: StoryDeliveryRepository;
   readonly resolutions: LegacyDeliveryMappingResolutionRepository;
+  readonly reconciliations: StoryDeliveryReconciliationRepository;
   readonly destinations: DeliveryDestinationDirectory;
   readonly createDeliveryId: () => StoryDeliveryId;
   readonly now: () => string;
@@ -109,6 +126,52 @@ export function createDeliverStory(dependencies: {
     const resolved = await dependencies.destinations.resolve();
     if (!resolved.ok) return { ok: false, error: resolved.error };
     const destination = resolved.destination;
+
+    // An unknowable external outcome is a hard gate. Retrying it could duplicate a page; using
+    // an older success could overwrite the wrong one. Only an exact operator decision for this
+    // attempt and installation can establish the identity used by the next request.
+    const unresolved = await dependencies.deliveries.findLatestUnresolved({
+      storyId: story.id,
+      destinationInstanceId: destination.instanceId,
+    });
+    let reconciledRemoteId: string | null | undefined;
+    if (unresolved) {
+      const reconciliation = await dependencies.reconciliations.findLatest({
+        storyId: story.id,
+        deliveryId: unresolved.id,
+        destinationInstanceId: destination.instanceId,
+      });
+      const matchesSnapshot =
+        reconciliation?.storyId === unresolved.storyId &&
+        reconciliation.deliveryId === unresolved.id &&
+        reconciliation.destination === unresolved.destination &&
+        reconciliation.destinationInstanceId === unresolved.destinationInstanceId &&
+        reconciliation.operation === unresolved.request.operation &&
+        reconciliation.slug === unresolved.request.slug;
+      if (!matchesSnapshot)
+        return {
+          ok: false,
+          error: {
+            code: "DESTINATION_RECONCILIATION_REQUIRED",
+            message: "The previous delivery outcome must be reconciled before delivering again.",
+            deliveryId: unresolved.id,
+            destination: unresolved.destination,
+            destinationInstanceId: destination.instanceId,
+            operation: unresolved.request.operation,
+            slug: unresolved.request.slug,
+            remoteId: unresolved.remoteId,
+          },
+        };
+      // "Not delivered" rejects only this attempt's outcome. An update still names a mapping
+      // verified by an earlier reconciliation, so forgetting its target here would turn the next
+      // request into a duplicate create.
+      reconciledRemoteId =
+        reconciliation.decision === "delivered"
+          ? reconciliation.remoteId
+          : unresolved.request.operation === "update"
+            ? unresolved.remoteId
+            : null;
+    }
 
     // The prior successful delivery decides create against update, so a Story a Director sent
     // back and a Writer revised keeps the one page it already has rather than gaining a second.
@@ -161,7 +224,7 @@ export function createDeliverStory(dependencies: {
     }
     // An exact successful delivery always wins. Otherwise a matching confirmation adopts the
     // immutable legacy snapshot; a dismissal deliberately starts a new destination page.
-    const remoteId = prior?.remoteId ?? resolvedLegacyRemoteId;
+    const remoteId = prior?.remoteId ?? reconciledRemoteId ?? resolvedLegacyRemoteId;
     const bodyMarkdown = articleBodyMarkdown(revision.blocks);
     const slug = storyDeliverySlug(revision.headline);
     const startedAt = dependencies.now();
@@ -219,7 +282,7 @@ export function createDeliverStory(dependencies: {
     });
 
     const completed = recordStoryDelivery(
-      attempt.ok
+      attempt.ok === true
         ? {
             ...running.delivery,
             outcome: "succeeded",
@@ -229,12 +292,19 @@ export function createDeliverStory(dependencies: {
             remoteId: attempt.remoteId,
             result: attempt.result,
           }
-        : {
-            ...running.delivery,
-            outcome: "failed",
-            completedAt: dependencies.now(),
-            failure: attempt.failure,
-          },
+        : attempt.ok === false
+          ? {
+              ...running.delivery,
+              outcome: "failed",
+              completedAt: dependencies.now(),
+              failure: attempt.failure,
+            }
+          : {
+              ...running.delivery,
+              outcome: "unknown",
+              completedAt: dependencies.now(),
+              uncertainty: attempt.uncertainty,
+            },
     );
     if (!completed.ok)
       return {
@@ -249,15 +319,32 @@ export function createDeliverStory(dependencies: {
         error: { code: "STORY_DELIVERY_NOT_RECORDED", message: written.error.message },
       };
 
-    return attempt.ok
+    return attempt.ok === true
       ? { ok: true, delivery: written.delivery }
-      : {
-          ok: false,
-          delivery: written.delivery,
-          error: {
-            code: attempt.failure.code,
-            message: attempt.failure.message ?? "The destination did not accept the delivery.",
-          },
-        };
+      : attempt.ok === false
+        ? {
+            ok: false,
+            delivery: written.delivery,
+            error: {
+              code: attempt.failure.code,
+              message: attempt.failure.message ?? "The destination did not accept the delivery.",
+            },
+          }
+        : {
+            ok: false,
+            delivery: written.delivery,
+            error: {
+              code: "DESTINATION_RECONCILIATION_REQUIRED",
+              message:
+                attempt.uncertainty.message ??
+                "The destination may have accepted the delivery; operator reconciliation is required.",
+              deliveryId: written.delivery.id,
+              destination: written.delivery.destination,
+              destinationInstanceId: destination.instanceId,
+              operation: written.delivery.request.operation,
+              slug: written.delivery.request.slug,
+              remoteId: written.delivery.remoteId,
+            },
+          };
   };
 }

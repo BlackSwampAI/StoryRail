@@ -33,6 +33,40 @@ const succeeded = (overrides: Partial<StoryDelivery> = {}): StoryDelivery =>
   }) as StoryDelivery;
 
 describe("recording what was delivered outside the system", () => {
+  it.each([
+    "DESTINATION_REQUEST_OUTCOME_UNKNOWN",
+    "DESTINATION_ACCEPTED_RESPONSE_UNVERIFIABLE",
+  ] as const)("accepts the bounded %s uncertainty", (code) => {
+    expect(
+      recordStoryDelivery({
+        ...base,
+        request: { ...base.request, operation: "update" },
+        outcome: "unknown",
+        uncertainty: { code, message: "The outcome cannot be verified." },
+      }),
+    ).toMatchObject({ ok: true, delivery: { outcome: "unknown" } });
+  });
+
+  it("keeps the uncertain remote identity consistent with create versus update", () => {
+    expect(
+      recordStoryDelivery({
+        ...base,
+        outcome: "unknown",
+        uncertainty: { code: "DESTINATION_REQUEST_OUTCOME_UNKNOWN", message: null },
+      }),
+    ).toMatchObject({ ok: false, error: { code: "STORY_DELIVERY_OUTCOME_INVALID" } });
+  });
+
+  it("rejects an invented uncertainty code", () => {
+    expect(
+      recordStoryDelivery({
+        ...base,
+        outcome: "unknown",
+        uncertainty: { code: "MAYBE", message: null },
+      } as unknown as StoryDelivery),
+    ).toMatchObject({ ok: false, error: { code: "STORY_DELIVERY_OUTCOME_INVALID" } });
+  });
+
   it("refuses a blank destination instance identity", () => {
     expect(recordStoryDelivery(succeeded({ destinationInstanceId: "  " as never }))).toMatchObject({
       ok: false,

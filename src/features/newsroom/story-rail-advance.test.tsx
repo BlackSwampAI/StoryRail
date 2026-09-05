@@ -86,6 +86,7 @@ function requests(overrides: Partial<StoryClient>): StoryClient {
     recordReviewDecision: vi.fn(unavailable),
     deliverStory: vi.fn(unavailable),
     resolveLegacyDeliveryMapping: vi.fn(unavailable),
+    reconcileStoryDelivery: vi.fn(unavailable),
     ...overrides,
   } as StoryClient;
 }

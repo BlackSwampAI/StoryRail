@@ -123,7 +123,7 @@ describe("delivering to a StudioCMS install", () => {
     expect(JSON.parse(String(calls[0]?.init.body)).data.draft).toBe(1);
   });
 
-  it("refuses to call a create it cannot read an id out of a success", async () => {
+  it("reports a create with no readable ID as unknown", async () => {
     // A success naming nothing would make the next Revision create a second page.
     const { fetchImplementation } = fixture(json(200, { message: "Page created" }));
     const destination = createStudioCmsDestination({
@@ -133,8 +133,8 @@ describe("delivering to a StudioCMS install", () => {
     });
 
     await expect(destination.deliver(REQUEST)).resolves.toMatchObject({
-      ok: false,
-      failure: { code: "DESTINATION_RESPONSE_INVALID" },
+      ok: null,
+      uncertainty: { code: "DESTINATION_ACCEPTED_RESPONSE_UNVERIFIABLE" },
     });
   });
 
@@ -186,12 +186,15 @@ describe("delivering to a StudioCMS install", () => {
     });
 
     await expect(destination.deliver(REQUEST)).resolves.toMatchObject({
-      ok: false,
-      failure: { code: "DESTINATION_UNREACHABLE", message: "connect ECONNREFUSED" },
+      ok: null,
+      uncertainty: {
+        code: "DESTINATION_REQUEST_OUTCOME_UNKNOWN",
+        message: "connect ECONNREFUSED",
+      },
     });
   });
 
-  it("refuses to call an unreadable answer a delivery that worked", async () => {
+  it("reports an unreadable successful answer as unknown", async () => {
     const { fetchImplementation } = fixture(
       new Response("<html>Something went sideways</html>", { status: 200 }),
     );
@@ -202,8 +205,24 @@ describe("delivering to a StudioCMS install", () => {
     });
 
     await expect(destination.deliver(REQUEST)).resolves.toMatchObject({
-      ok: false,
-      failure: { code: "DESTINATION_RESPONSE_INVALID" },
+      ok: null,
+      uncertainty: { code: "DESTINATION_ACCEPTED_RESPONSE_UNVERIFIABLE" },
+    });
+  });
+
+  it("treats a successful unreadable update as unknown too", async () => {
+    const { fetchImplementation } = fixture(new Response("Saved", { status: 200 }));
+    const destination = createStudioCmsDestination({
+      settings: SETTINGS,
+      apiToken: "token-1",
+      fetch: fetchImplementation,
+    });
+
+    await expect(
+      destination.deliver({ ...REQUEST, operation: "update", remoteId: "page-1" }),
+    ).resolves.toMatchObject({
+      ok: null,
+      uncertainty: { code: "DESTINATION_ACCEPTED_RESPONSE_UNVERIFIABLE" },
     });
   });
 

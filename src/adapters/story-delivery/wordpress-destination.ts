@@ -70,9 +70,9 @@ export function createWordPressDestination(
         });
       } catch (caught) {
         return {
-          ok: false,
-          failure: {
-            code: "DESTINATION_UNREACHABLE",
+          ok: null,
+          uncertainty: {
+            code: "DESTINATION_REQUEST_OUTCOME_UNKNOWN",
             message: bounded(caught instanceof Error ? caught.message : "The request failed."),
           },
         };
@@ -80,14 +80,24 @@ export function createWordPressDestination(
 
       const read = await readJsonBody(response);
       // A body that cannot be read on a successful status is an outcome nothing can vouch for,
-      // so it is recorded as an invalid response rather than as a delivery that worked.
+      // so it is recorded as unknown rather than as either success or failure.
       if (!read.ok)
         return {
-          ok: false,
-          failure: {
-            code: response.ok ? "DESTINATION_RESPONSE_INVALID" : failureCodeFor(response.status),
-            message: `The destination answered ${response.status} with a body that is not JSON.`,
-          },
+          ...(response.ok
+            ? {
+                ok: null,
+                uncertainty: {
+                  code: "DESTINATION_ACCEPTED_RESPONSE_UNVERIFIABLE" as const,
+                  message: `The destination answered ${response.status} with a body that is not JSON.`,
+                },
+              }
+            : {
+                ok: false as const,
+                failure: {
+                  code: failureCodeFor(response.status),
+                  message: `The destination answered ${response.status} with a body that is not JSON.`,
+                },
+              }),
         };
 
       const body = read.body;
@@ -107,8 +117,8 @@ export function createWordPressDestination(
       // create reads it: an update already knows which post it wrote, and taking the answer's id
       // there would let a delivery quietly change which post it says it made.
       //
-      // A create whose id cannot be read is recorded as a failure rather than as a success naming
-      // nothing, because the next Revision would then create a second post instead of updating it.
+      // A create whose id cannot be read is recorded as unknown rather than as a success naming
+      // nothing, and the next delivery is gated for reconciliation instead of creating again.
       const identifier = isRecord(body) ? body.id : undefined;
       const created =
         typeof identifier === "number" && Number.isInteger(identifier)
@@ -119,9 +129,9 @@ export function createWordPressDestination(
       const remoteId = creating ? created : request.remoteId;
       if (remoteId === null)
         return {
-          ok: false,
-          failure: {
-            code: "DESTINATION_RESPONSE_INVALID",
+          ok: null,
+          uncertainty: {
+            code: "DESTINATION_ACCEPTED_RESPONSE_UNVERIFIABLE",
             message: message
               ? `The destination accepted the post but named no id: ${message}`
               : "The destination accepted the post and said nothing about it.",
