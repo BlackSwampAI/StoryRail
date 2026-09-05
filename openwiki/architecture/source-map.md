@@ -243,6 +243,7 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `0073-research-budget-settings.sql` — per-site research call budget and turn limits
 - `0074-policy-run-source-roots.sql` — Source-rooted policy runs and reconcilable pre-Story workflows
 - `0075-policy-run-attempts.sql` — bounded Writer retry attempt tracking (up to 3 attempts) in policy payloads
+- `0076-story-delivery-instance-identity.sql` — destination installation instance identity and legacy mapping safety
 
 ## Documentation (`docs/`)
 

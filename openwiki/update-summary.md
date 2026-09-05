@@ -3,21 +3,19 @@ type: Reference
 title: OpenWiki Update Summary
 description: Summary of changes made to the StoryRail OpenWiki documentation during this update cycle.
 ---
-The StoryRail OpenWiki documentation is now current with the repository state at commit a71865c197626fbd5fd23d4ee001435e44643039.
+The StoryRail OpenWiki documentation is now current with the repository state at commit d39ecfb983cf472121fc2641d283a8da7b288073.
 
 Updated files:
 - /openwiki/quickstart.md
-- /openwiki/architecture/overview.md
 - /openwiki/architecture/domain-model.md
 - /openwiki/architecture/database-schema.md
-- /openwiki/architecture/adapters-and-runtime.md
 - /openwiki/architecture/application-workflows.md
 - /openwiki/architecture/http-api.md
-- /openwiki/architecture/newsroom-ui.md
 - /openwiki/architecture/source-map.md
 - /openwiki/update-summary.md
 
 The documentation reflects all changes including:
+- Destination instance identity binding in `storyrail.story_deliveries` (`destination_instance_id`), migration `0076-story-delivery-instance-identity.sql`, and legacy mapping safety (`DESTINATION_MAPPING_REQUIRES_REVIEW`) (`d39ecfb`)
 - Shared strict Zod schemas across domain, persistence decoders, and browser clients, ending drift between PostgreSQL and UI readers (`e0c46f8`, `a71865c`)
 - Bounded Writer retries (up to 3 attempts with fresh run identities) and migration `0075-policy-run-attempts.sql` (`18d219b`)
 - Pre-Story reconcilable policy runs with Source rooting and migration `0074-policy-run-source-roots.sql` (`9936048`)

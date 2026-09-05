@@ -246,13 +246,15 @@ Revision 1 is created by the [Writer draft workflow](application-workflows.md#wr
 
 `story-delivery-types.ts` and `story-delivery.ts` model the delivery of a published Story's Article Revision to an external destination (e.g., StudioCMS or WordPress). Delivery is an outbound write and is tracked as an explicit audit record:
 
-- A delivery record describes what was sent (`StoryDeliveryRequest`: `operation` ("create" | "update"), `slug`, `draft` boolean, `bodyCharacters`) and what came back (`outcome`: "running" | "succeeded" | "failed"), never storing the Article body itself.
+- A delivery record describes what was sent (`StoryDeliveryRequest`: `operation` ("create" | "update"), `slug`, `draft` boolean, `bodyCharacters`), the destination software name (`destination`), the destination installation identity (`destinationInstanceId`), and what came back (`outcome`: "running" | "succeeded" | "failed"), never storing the Article body itself.
+- Destination instance identity: `siteDestinationInstanceId(destinationSettings)` deterministically identifies the specific remote installation as `${kind}:${baseUrl.replace(/\/+$/, "")}` (typed as `DestinationInstanceId`). This ensures a remote page identifier (`remoteId`) recovered from one installation is never mistakenly used to overwrite content if the site's configured URL or connector changes.
+- Legacy mapping protection: Deliveries migrated from earlier schemas carry `destinationInstanceId: null`. If a delivery is attempted without an existing confirmed mapping for the current installation, the presence of an unbound legacy mapping triggers a fail-closed `DESTINATION_MAPPING_REQUIRES_REVIEW` error to prevent unintended remote mutations until reviewed.
 - Destinations support StudioCMS (`studiocms`) and WordPress (`wordpress`).
 - WordPress delivers block-by-block serialized Gutenberg markup (`<!-- wp:paragraph -->`, `<!-- wp:heading -->`), with requested vs. assigned slug tracking when WordPress uniquifies colliding slugs.
 - `DELIVERY_FAILURE_CODES`: `DESTINATION_UNREACHABLE`, `DESTINATION_REJECTED`, `DESTINATION_UNAUTHORIZED`, `DESTINATION_RESPONSE_INVALID`. Note: HTTP 500 status responses are classified as `DESTINATION_REJECTED` (since the server answered and rejected), whereas timeouts (408) and rate limits (429) remain `DESTINATION_UNREACHABLE`.
 - Durability pattern: Following `agent_tool_calls`, a delivery row is written as `running` before the HTTP request leaves the newsroom process, ensuring no write to the outside world occurs unrecorded. When the response arrives, the row is updated in place to `succeeded` or `failed`.
 - Slug generation: `storyDeliverySlug(headline)` derives a URL-safe slug (max 96 chars) deterministically from the headline.
-- Remote ID tracking: For `create`, destinations return the created page or post ID, which StoryRail stores in `remoteId`. Subsequent deliveries of newer revisions update the existing remote resource via `PATCH`/`POST` using this `remoteId`.
+- Remote ID tracking: For `create`, destinations return the created page or post ID, which StoryRail stores in `remoteId`. Subsequent deliveries of newer revisions to the same destination instance update the existing remote resource via `PATCH`/`POST` using this `remoteId`.
 
 ## Shared strict record schemas
 
