@@ -1515,6 +1515,70 @@ describe("story-client", () => {
     });
   });
 
+  it("returns structured legacy mapping review details", async () => {
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(409, {
+        ok: false,
+        error: {
+          code: "DESTINATION_MAPPING_REQUIRES_REVIEW",
+          message: "Review the legacy mapping.",
+          legacyDeliveryId: "delivery-legacy",
+          destination: "wordpress",
+          destinationInstanceId: "wordpress:https://newsroom.test",
+          remoteId: "412",
+        },
+      }),
+    );
+
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).deliverStory(STORY.id),
+    ).resolves.toEqual({
+      kind: "mapping-review-required",
+      error: {
+        code: "DESTINATION_MAPPING_REQUIRES_REVIEW",
+        message: "Review the legacy mapping.",
+      },
+      review: {
+        legacyDeliveryId: "delivery-legacy",
+        destination: "wordpress",
+        destinationInstanceId: "wordpress:https://newsroom.test",
+        remoteId: "412",
+      },
+    });
+  });
+
+  it("records a legacy mapping decision without sending destination or remote facts", async () => {
+    const resolution = {
+      id: "resolution-1",
+      storyId: STORY.id,
+      legacyDeliveryId: "delivery-legacy",
+      destination: "wordpress",
+      destinationInstanceId: "wordpress:https://newsroom.test",
+      remoteId: "412",
+      decision: "dismiss",
+      decidedBy: { type: "operator", operatorId: "operator-1" },
+      decidedAt: "2026-09-05T12:00:00.000Z",
+    } as const;
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(201, { ok: true, resolution }),
+    );
+
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).resolveLegacyDeliveryMapping(
+        STORY.id,
+        "delivery-legacy",
+        "dismiss",
+      ),
+    ).resolves.toEqual({ kind: "completed", value: resolution });
+    expect(fetch).toHaveBeenCalledWith(
+      `/api/sites/${SITE_ID}/stories/${STORY.id}/deliveries/legacy-mapping-resolution`,
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ legacyDeliveryId: "delivery-legacy", decision: "dismiss" }),
+      }),
+    );
+  });
+
   it("keeps a delivery the destination refused apart from one that was never attempted", async () => {
     const refused = vi.fn<StoryClientDependencies["fetch"]>(async () =>
       response(502, {

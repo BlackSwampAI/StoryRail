@@ -25,6 +25,7 @@ function makeRuntime(): StoryRuntime {
     rejectStory: vi.fn<StoryRuntime["rejectStory"]>(),
     publishStory: vi.fn(),
     deliverStory: vi.fn<StoryRuntime["deliverStory"]>(),
+    resolveLegacyDeliveryMapping: vi.fn<StoryRuntime["resolveLegacyDeliveryMapping"]>(),
     listStoryDeliveries: vi.fn<StoryRuntime["listStoryDeliveries"]>(),
     submitStoryReview: vi.fn<StoryRuntime["submitStoryReview"]>(),
     readSiteSettings: vi.fn<StoryRuntime["readSiteSettings"]>(),

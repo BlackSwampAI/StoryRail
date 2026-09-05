@@ -16,4 +16,5 @@ export * from "./credential-cipher";
 export * from "./site-credential-persistence";
 export * from "./site-settings-persistence";
 export * from "./story-delivery-persistence";
+export * from "./legacy-delivery-mapping-resolution-persistence";
 export * from "./story-delivery";

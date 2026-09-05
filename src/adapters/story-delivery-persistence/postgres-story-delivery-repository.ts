@@ -97,6 +97,16 @@ export function createPostgresStoryDeliveryRepository(dependencies: {
       return row ? decodePostgresStoryDelivery(row.payload) : null;
     },
 
+    async findSucceededById(query): Promise<StoryDelivery | null> {
+      const { rows } = await dependencies.pool.query<{ payload: unknown }>(
+        `SELECT payload FROM storyrail.story_deliveries
+         WHERE story_id = $1 AND delivery_id = $2 AND outcome = 'succeeded'
+         LIMIT 1`,
+        [query.storyId, query.deliveryId],
+      );
+      return rows[0] ? decodePostgresStoryDelivery(rows[0].payload) : null;
+    },
+
     async listByStoryId(storyId: StoryId): Promise<readonly StoryDelivery[]> {
       const { rows } = await dependencies.pool.query<{ payload: unknown }>(
         `SELECT payload FROM storyrail.story_deliveries

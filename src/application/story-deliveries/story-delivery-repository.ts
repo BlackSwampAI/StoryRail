@@ -1,4 +1,9 @@
-import type { DestinationInstanceId, StoryDelivery, StoryId } from "@/domain/editorial";
+import type {
+  DestinationInstanceId,
+  StoryDelivery,
+  StoryDeliveryId,
+  StoryId,
+} from "@/domain/editorial";
 
 export type AppendStoryDeliveryResult =
   | { readonly ok: true; readonly delivery: StoryDelivery }
@@ -38,6 +43,10 @@ export interface StoryDeliveryRepository {
   findLatestLegacySucceeded(query: {
     readonly storyId: StoryId;
     readonly destination: string;
+  }): Promise<StoryDelivery | null>;
+  findSucceededById(query: {
+    readonly storyId: StoryId;
+    readonly deliveryId: StoryDeliveryId;
   }): Promise<StoryDelivery | null>;
   listByStoryId(storyId: StoryId): Promise<readonly StoryDelivery[]>;
 }

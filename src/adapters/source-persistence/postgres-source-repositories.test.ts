@@ -29,6 +29,9 @@ import {
   type AgentProfile,
   credentialUnavailable,
   destinationInstanceId,
+  legacyDeliveryMappingResolutionId,
+  storyDeliveryId,
+  type LegacyDeliveryMappingResolution,
   type CanonicalSourceUrl,
   type CredentialSlot,
   type FailedSourceExtraction,
@@ -65,6 +68,7 @@ import { createPostgresAssignmentPersistence } from "../assignment-persistence/p
 import { createPostgresAgentToolCallRepository } from "@/adapters/agent-tool-call-persistence";
 import { createPostgresArchiveRepository } from "@/adapters/archive";
 import { createPostgresStoryDeliveryRepository } from "@/adapters/story-delivery-persistence";
+import { createPostgresLegacyDeliveryMappingResolutionRepository } from "@/adapters/legacy-delivery-mapping-resolution-persistence";
 import { createPostgresSiteRepository } from "@/adapters/site-persistence";
 import { createCreateSite } from "@/application/sites";
 import { createFirecrawlSourceExtractor } from "@/adapters/source-extraction";
@@ -221,6 +225,10 @@ const policyRunAttemptsMigrationPath = resolve(
 const destinationInstanceMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0076-story-delivery-instance-identity.sql",
+);
+const legacyDeliveryResolutionMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0077-legacy-delivery-mapping-resolutions.sql",
 );
 
 const DEFAULT_SITE = siteId("site-default");
@@ -461,6 +469,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let policySourceRootsMigrationSql: string;
   let policyRunAttemptsMigrationSql: string;
   let destinationInstanceMigrationSql: string;
+  let legacyDeliveryResolutionMigrationSql: string;
 
   /** Every migration, in order. One list so a rebuild can never drift from the first build. */
   const orderedMigrations = (): readonly string[] => [
@@ -500,6 +509,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     policySourceRootsMigrationSql,
     policyRunAttemptsMigrationSql,
     destinationInstanceMigrationSql,
+    legacyDeliveryResolutionMigrationSql,
   ];
   let destructiveSetupAllowed = false;
 
@@ -583,6 +593,10 @@ describePostgres("PostgreSQL persistence repositories", () => {
     policySourceRootsMigrationSql = await readFile(policySourceRootsMigrationPath, "utf8");
     policyRunAttemptsMigrationSql = await readFile(policyRunAttemptsMigrationPath, "utf8");
     destinationInstanceMigrationSql = await readFile(destinationInstanceMigrationPath, "utf8");
+    legacyDeliveryResolutionMigrationSql = await readFile(
+      legacyDeliveryResolutionMigrationPath,
+      "utf8",
+    );
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -613,7 +627,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     }
 
     await pool.query(
-      "TRUNCATE storyrail.story_deliveries, storyrail.newsroom_standards, storyrail.policy_runs, storyrail.agent_tool_calls, storyrail.review_decisions, storyrail.article_revisions, storyrail.articles, storyrail.agent_runs, storyrail.story_transition_receipts, storyrail.story_assignments, storyrail.source_evidence_preparations, storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.site_credentials, storyrail.stories RESTART IDENTITY",
+      "TRUNCATE storyrail.legacy_delivery_mapping_resolutions, storyrail.story_deliveries, storyrail.newsroom_standards, storyrail.policy_runs, storyrail.agent_tool_calls, storyrail.review_decisions, storyrail.article_revisions, storyrail.articles, storyrail.agent_runs, storyrail.story_transition_receipts, storyrail.story_assignments, storyrail.source_evidence_preparations, storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.site_credentials, storyrail.stories RESTART IDENTITY",
     );
     // Contract fixtures include built-in Profiles now that a role's built-in is found by role
     // rather than by identifier, so they have to be swept as well or they outlive their test.
@@ -2905,6 +2919,127 @@ describePostgres("PostgreSQL persistence repositories", () => {
         ),
       ).rejects.toMatchObject({ constraint: "story_deliveries_destination_format_check" });
     });
+
+    it("round-trips, replays, orders, and site-scopes legacy mapping resolutions", async () => {
+      const published = await publishReport("legacy-resolution", {
+        headline: "A delivered headline",
+        body: "The body of a delivered report.",
+        publishedAt: "2026-09-05T09:00:00.000Z",
+      });
+      const legacy = {
+        id: "delivery-legacy-resolution",
+        storyId: published.storyId,
+        revisionId: "revision-legacy-resolution",
+        destination: "studiocms",
+        destinationInstanceId: null,
+        remoteId: "legacy-page",
+        request: {
+          operation: "create",
+          slug: "a-delivered-headline",
+          draft: true,
+          bodyCharacters: 64,
+        },
+        startedAt: "2026-09-05T10:00:00.000Z",
+        completedAt: "2026-09-05T10:00:01.000Z",
+        outcome: "succeeded",
+        result: { status: 201, message: null },
+      };
+      await pool.query(
+        "ALTER TABLE storyrail.story_deliveries DISABLE TRIGGER story_deliveries_destination_instance_required",
+      );
+      try {
+        await pool.query(
+          `INSERT INTO storyrail.story_deliveries
+             (delivery_id, story_id, revision_id, destination, destination_instance_id, remote_id,
+              outcome, started_at, completed_at, payload)
+           VALUES ($1,$2,$3,$4,NULL,$5,'succeeded',$6,$7,$8::jsonb)`,
+          [
+            legacy.id,
+            legacy.storyId,
+            legacy.revisionId,
+            legacy.destination,
+            legacy.remoteId,
+            legacy.startedAt,
+            legacy.completedAt,
+            JSON.stringify(legacy),
+          ],
+        );
+      } finally {
+        await pool.query(
+          "ALTER TABLE storyrail.story_deliveries ENABLE TRIGGER story_deliveries_destination_instance_required",
+        );
+      }
+      const repository = createPostgresLegacyDeliveryMappingResolutionRepository({
+        pool,
+        siteId: DEFAULT_SITE,
+      });
+      const first: LegacyDeliveryMappingResolution = {
+        id: legacyDeliveryMappingResolutionId("legacy-resolution-first"),
+        storyId: published.storyId,
+        legacyDeliveryId: storyDeliveryId(legacy.id),
+        destination: legacy.destination,
+        destinationInstanceId: destinationInstanceId("studiocms:https://cms.example"),
+        remoteId: legacy.remoteId,
+        decision: "confirm",
+        decidedBy: { type: "operator", operatorId: operatorId("operator-resolution") },
+        decidedAt: "opaque-decision-first",
+      };
+
+      await expect(repository.append(first)).resolves.toEqual({ ok: true, resolution: first });
+      await expect(repository.append(first)).resolves.toEqual({ ok: true, resolution: first });
+      await expect(repository.append({ ...first, decision: "dismiss" })).resolves.toMatchObject({
+        ok: false,
+        error: { code: "LEGACY_DELIVERY_MAPPING_RESOLUTION_ID_CONFLICT" },
+      });
+
+      const latest: LegacyDeliveryMappingResolution = {
+        ...first,
+        id: legacyDeliveryMappingResolutionId("legacy-resolution-latest"),
+        decision: "dismiss",
+      };
+      await expect(repository.append(latest)).resolves.toMatchObject({ ok: true });
+      await expect(
+        repository.findLatest({
+          storyId: published.storyId,
+          legacyDeliveryId: storyDeliveryId(legacy.id),
+          destinationInstanceId: first.destinationInstanceId,
+        }),
+      ).resolves.toEqual(latest);
+      await expect(
+        createPostgresLegacyDeliveryMappingResolutionRepository({
+          pool,
+          siteId: OTHER_SITE,
+        }).findLatest({
+          storyId: published.storyId,
+          legacyDeliveryId: storyDeliveryId(legacy.id),
+          destinationInstanceId: first.destinationInstanceId,
+        }),
+      ).resolves.toBeNull();
+      await expect(
+        pool.query(
+          "UPDATE storyrail.legacy_delivery_mapping_resolutions SET decision = 'confirm' WHERE resolution_id = $1",
+          [latest.id],
+        ),
+      ).rejects.toThrow(/may not be changed or deleted/);
+      await expect(
+        repository.append({
+          ...latest,
+          id: legacyDeliveryMappingResolutionId("legacy-resolution-wrong-snapshot"),
+          remoteId: "other-page",
+        }),
+      ).rejects.toMatchObject({
+        constraint: "legacy_delivery_mapping_resolutions_legacy_snapshot_fk",
+      });
+      await expect(
+        repository.append({
+          ...latest,
+          id: legacyDeliveryMappingResolutionId("legacy-resolution-untrimmed-time"),
+          decidedAt: " opaque-decision ",
+        }),
+      ).rejects.toMatchObject({
+        constraint: "legacy_delivery_mapping_resolutions_decided_at_format_check",
+      });
+    });
   });
 
   describe("Article block grounding constraints", () => {
@@ -3536,6 +3671,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         "agent_tool_calls",
         "article_revisions",
         "articles",
+        "legacy_delivery_mapping_resolutions",
         "newsroom_standards",
         "policy_runs",
         "review_decisions",
@@ -3554,6 +3690,34 @@ describePostgres("PostgreSQL persistence repositories", () => {
       ]);
       expect(columns.rows).toEqual(
         expect.arrayContaining([
+          {
+            table_name: "legacy_delivery_mapping_resolutions",
+            column_name: "resolution_id",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "legacy_delivery_mapping_resolutions",
+            column_name: "insertion_position",
+            data_type: "bigint",
+            is_nullable: "NO",
+            is_identity: "YES",
+          },
+          {
+            table_name: "legacy_delivery_mapping_resolutions",
+            column_name: "decided_at",
+            data_type: "text",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "legacy_delivery_mapping_resolutions",
+            column_name: "payload",
+            data_type: "jsonb",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
           {
             table_name: "policy_runs",
             column_name: "source_id",
@@ -4133,7 +4297,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           },
         ]),
       );
-      expect(columns.rows).toHaveLength(132);
+      expect(columns.rows).toHaveLength(142);
     });
 
     it("creates the required primary, unique, foreign-key, and check constraints", async () => {

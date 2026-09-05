@@ -19,6 +19,7 @@ import { createPostgresStoryListingRepository } from "@/adapters/story-listing";
 import { createPostgresStoryRepository } from "@/adapters/story-persistence";
 import { createPostgresStoryPublicationPersistence } from "@/adapters/story-publication-persistence";
 import { createPostgresStoryDeliveryRepository } from "@/adapters/story-delivery-persistence";
+import { createPostgresLegacyDeliveryMappingResolutionRepository } from "@/adapters/legacy-delivery-mapping-resolution-persistence";
 import { createSiteDeliveryDestinationDirectory } from "@/adapters/story-delivery";
 import { createPostgresStoryRejectionPersistence } from "@/adapters/story-rejection-persistence";
 import { createPostgresStorySourceAttachmentRepository } from "@/adapters/story-source-persistence";
@@ -50,7 +51,9 @@ import { createCreateStory, type CreateStoryWorkflow } from "@/application/story
 import { createPublishStory, type PublishStoryWorkflow } from "@/application/story-publications";
 import {
   createDeliverStory,
+  createResolveLegacyDeliveryMapping,
   type DeliverStoryWorkflow,
+  type ResolveLegacyDeliveryMappingResult,
   type StoryDeliveryRepository,
 } from "@/application/story-deliveries";
 import { createRejectStory, type RejectStoryWorkflow } from "@/application/story-rejections";
@@ -72,6 +75,7 @@ import {
   agentProfileId,
   assignmentId,
   reviewDecisionId,
+  legacyDeliveryMappingResolutionId,
   storyDeliveryId,
   storyId,
   transitionId,
@@ -106,6 +110,12 @@ export interface StoryRuntime {
   readonly rejectStory: RejectStoryWorkflow;
   readonly publishStory: PublishStoryWorkflow;
   readonly deliverStory: DeliverStoryWorkflow;
+  readonly resolveLegacyDeliveryMapping: (command: {
+    readonly storyId: import("@/domain/editorial").StoryId;
+    readonly legacyDeliveryId: import("@/domain/editorial").StoryDeliveryId;
+    readonly decision: import("@/domain/editorial").LegacyDeliveryMappingDecision;
+    readonly decidedBy: OperatorActor;
+  }) => Promise<ResolveLegacyDeliveryMappingResult>;
   readonly listStoryDeliveries: StoryDeliveryRepository["listByStoryId"];
   readonly submitStoryReview: (command: {
     readonly storyId: import("@/domain/editorial").StoryId;
@@ -256,14 +266,28 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
     credentialKey: options.credentialKey ?? null,
   });
   const storyDeliveries = createPostgresStoryDeliveryRepository({ pool });
+  const legacyDeliveryMappingResolutions = createPostgresLegacyDeliveryMappingResolutionRepository({
+    pool,
+    siteId: site,
+  });
+  const deliveryDestinations = createSiteDeliveryDestinationDirectory({
+    settings: siteSettings,
+    resolveApiKey: siteStore.resolveApiKey,
+  });
   const deliverStory = createDeliverStory({
     inspections: inspectionRepository,
     deliveries: storyDeliveries,
-    destinations: createSiteDeliveryDestinationDirectory({
-      settings: siteSettings,
-      resolveApiKey: siteStore.resolveApiKey,
-    }),
+    resolutions: legacyDeliveryMappingResolutions,
+    destinations: deliveryDestinations,
     createDeliveryId: () => storyDeliveryId(createUuid()),
+    now,
+  });
+  const resolveLegacyDeliveryMapping = createResolveLegacyDeliveryMapping({
+    inspections: inspectionRepository,
+    deliveries: storyDeliveries,
+    resolutions: legacyDeliveryMappingResolutions,
+    destinations: deliveryDestinations,
+    createResolutionId: () => legacyDeliveryMappingResolutionId(createUuid()),
     now,
   });
   const setSiteCredential = createSetSiteCredential({
@@ -294,6 +318,7 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
     rejectStory,
     publishStory,
     deliverStory,
+    resolveLegacyDeliveryMapping,
     listStoryDeliveries: (identity: import("@/domain/editorial").StoryId) =>
       storyDeliveries.listByStoryId(identity),
     submitStoryReview,
