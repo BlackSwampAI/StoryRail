@@ -66,7 +66,7 @@ import { StoryRail } from "./story-rail";
 import { railActivity, railFailure } from "./story-rail-stops";
 import { WRITER_ASSIGNMENT_DROP_ID, WRITER_DRAG_TYPE, type StaffState } from "./newsroom-staff";
 import styles from "./newsroom-shell.module.css";
-import type { StoryClient } from "./story-client";
+import type { DeliverStoryOutcome, StoryClient } from "./story-client";
 
 function actorLabel(actor: EditorialActor): string {
   return actor.type === "operator"
@@ -879,6 +879,10 @@ export function StoryWorkspace({
   const [deliveryPending, setDeliveryPending] = useState(false);
   const [deliveryStatus, setDeliveryStatus] = useState<string | null>(null);
   const [deliveryConfirming, setDeliveryConfirming] = useState(false);
+  const [mappingReview, setMappingReview] = useState<
+    Extract<DeliverStoryOutcome, { readonly kind: "mapping-review-required" }> | undefined
+  >();
+  const [mappingResolutionPending, setMappingResolutionPending] = useState(false);
   const [editingAssignment, setEditingAssignment] = useState(false);
   const [proposalReady, setProposalReady] = useState(durableProposal !== undefined);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
@@ -984,15 +988,7 @@ export function StoryWorkspace({
     successfulDirectorRun?.review.revisionInstructions ??
     successfulDirectorRun?.review.summary ??
     null;
-  const { standing: deliveryStanding, delivered: deliveredPost } = readDeliveries(
-    inspection.deliveries,
-  );
-  // A destination that publishes live is not a draft a human still has to approve, so that one
-  // is confirmed first. It is known from the record of what has already been sent there, which
-  // is the only account of the destination this workspace holds.
-  const destinationPublishesLive = inspection.deliveries.some(
-    (delivery) => !delivery.request.draft,
-  );
+  const { standing: deliveryStanding } = readDeliveries(inspection.deliveries);
   const rejectionTransition = [...inspection.transitions]
     .reverse()
     .find((transition) => transition.nextState === "rejected");
@@ -1367,6 +1363,11 @@ export function StoryWorkspace({
         );
         return;
       }
+      if (result.kind === "mapping-review-required") {
+        setMappingReview(result);
+        return;
+      }
+      setMappingReview(undefined);
       setDeliveryStatus(
         result.kind === "delivered"
           ? `Delivered to ${result.delivery.destination}.`
@@ -1385,6 +1386,35 @@ export function StoryWorkspace({
       );
     } finally {
       setDeliveryPending(false);
+    }
+  }
+
+  async function resolveLegacyMapping(decision: "confirm" | "dismiss") {
+    if (!mappingReview || mappingResolutionPending) return;
+    setMappingResolutionPending(true);
+    setDeliveryStatus(null);
+    try {
+      const result = await requests.resolveLegacyDeliveryMapping(
+        story.id,
+        mappingReview.review.legacyDeliveryId,
+        decision,
+      );
+      if (result.kind !== "completed") {
+        setDeliveryStatus(
+          result.kind === "application-failure"
+            ? result.error.message
+            : "The mapping decision could not be confirmed. Reopen this Story and try again.",
+        );
+        return;
+      }
+      setMappingReview(undefined);
+      setDeliveryStatus(
+        decision === "confirm"
+          ? "Mapping confirmed. Click Deliver again to update that external post."
+          : "Mapping dismissed. Click Deliver again to create a fresh post.",
+      );
+    } finally {
+      setMappingResolutionPending(false);
     }
   }
 
@@ -1520,7 +1550,7 @@ export function StoryWorkspace({
       </header>
       <StoryRail
         state={story.state}
-        delivered={deliveredPost !== null}
+        delivered={inspection.deliveries.some((delivery) => delivery.outcome === "succeeded")}
         leftFrom={rejectionTransition?.previousState}
         activity={railActivity(runs)}
         failure={railFailure(runs)}
@@ -1745,11 +1775,50 @@ export function StoryWorkspace({
                     </p>
                   </div>
                 )}
+                {mappingReview ? (
+                  <section
+                    className={styles.deliveryMappingReview}
+                    aria-label="Legacy delivery mapping review"
+                  >
+                    <h3>Confirm where this legacy post belongs</h3>
+                    <p>
+                      StoryRail previously delivered this Story through{" "}
+                      {mappingReview.review.destination} as remote post{" "}
+                      <strong>{mappingReview.review.remoteId}</strong>, before destination
+                      installations had their own identity. The destination configured now is{" "}
+                      <code>{mappingReview.review.destinationInstanceId}</code>.
+                    </p>
+                    <p>
+                      Confirm only if that remote post belongs to this exact destination.
+                      Confirmation permits a later delivery to update that external post. Dismiss it
+                      if the post belongs elsewhere; a later delivery may then create a fresh post
+                      here.
+                    </p>
+                    <div className={styles.taskActions}>
+                      <button
+                        type="button"
+                        className={styles.primaryAction}
+                        disabled={mappingResolutionPending}
+                        onClick={() => void resolveLegacyMapping("confirm")}
+                      >
+                        Confirm this post belongs here
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.secondaryAction}
+                        disabled={mappingResolutionPending}
+                        onClick={() => void resolveLegacyMapping("dismiss")}
+                      >
+                        Dismiss and allow a fresh post
+                      </button>
+                    </div>
+                  </section>
+                ) : null}
                 {deliveryConfirming ? (
                   <div className={styles.taskActions}>
                     <p className={styles.formHint}>
-                      This destination publishes live rather than as a draft, so the post is visible
-                      to readers as soon as it arrives.
+                      The currently configured destination may publish immediately. Confirm only
+                      when you are ready for this delivery to become visible to readers.
                     </p>
                     <button
                       type="button"
@@ -1757,7 +1826,7 @@ export function StoryWorkspace({
                       disabled={deliveryPending}
                       onClick={() => void deliver()}
                     >
-                      {deliveryPending ? "Delivering…" : "Publish it live now"}
+                      {deliveryPending ? "Delivering…" : "Deliver to the current destination now"}
                     </button>
                     <button
                       type="button"
@@ -1773,16 +1842,9 @@ export function StoryWorkspace({
                     type="button"
                     className={styles.primaryAction}
                     disabled={deliveryPending}
-                    onClick={() => {
-                      if (destinationPublishesLive) setDeliveryConfirming(true);
-                      else void deliver();
-                    }}
+                    onClick={() => setDeliveryConfirming(true)}
                   >
-                    {deliveryPending
-                      ? "Delivering…"
-                      : deliveredPost
-                        ? "Update the delivered post"
-                        : "Deliver to the destination"}
+                    Deliver to the current destination
                   </button>
                 )}
                 {deliveryStatus ? (

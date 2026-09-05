@@ -9,13 +9,26 @@ import {
   type StoryDelivery,
   type StoryDeliveryId,
   type StoryId,
+  type DestinationInstanceId,
 } from "@/domain/editorial";
 
 import type { DeliveryDestinationDirectory } from "./delivery-destination";
+import type { LegacyDeliveryMappingResolutionRepository } from "./legacy-delivery-mapping-resolution-repository";
 import type { StoryDeliveryRepository } from "./story-delivery-repository";
 
 export type DeliverStoryResult =
   | { readonly ok: true; readonly delivery: StoryDelivery }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: "DESTINATION_MAPPING_REQUIRES_REVIEW";
+        readonly message: string;
+        readonly legacyDeliveryId: StoryDeliveryId;
+        readonly destination: string;
+        readonly destinationInstanceId: DestinationInstanceId;
+        readonly remoteId: string;
+      };
+    }
   | {
       readonly ok: false;
       readonly delivery?: StoryDelivery;
@@ -28,7 +41,6 @@ export type DeliverStoryResult =
               | "STORY_NOT_PUBLISHED"
               | "STORY_HAS_NO_ARTICLE"
               | "DESTINATION_NOT_CONFIGURED"
-              | "DESTINATION_MAPPING_REQUIRES_REVIEW"
               | "STORY_DELIVERY_NOT_RECORDED";
             readonly message: string;
           };
@@ -56,6 +68,7 @@ function latestRevision(revisions: readonly ArticleRevision[]): ArticleRevision 
 export function createDeliverStory(dependencies: {
   readonly inspections: StoryInspectionRepository;
   readonly deliveries: StoryDeliveryRepository;
+  readonly resolutions: LegacyDeliveryMappingResolutionRepository;
   readonly destinations: DeliveryDestinationDirectory;
   readonly createDeliveryId: () => StoryDeliveryId;
   readonly now: () => string;
@@ -103,22 +116,52 @@ export function createDeliverStory(dependencies: {
       storyId: story.id,
       destinationInstanceId: destination.instanceId,
     });
+    let resolvedLegacyRemoteId: string | null = null;
     if (!prior) {
       const legacy = await dependencies.deliveries.findLatestLegacySucceeded({
         storyId: story.id,
         destination: destination.name,
       });
-      if (legacy)
-        return {
-          ok: false,
-          error: {
-            code: "DESTINATION_MAPPING_REQUIRES_REVIEW",
-            message:
-              "A legacy delivery mapping must be confirmed or dismissed before delivering again.",
-          },
-        };
+      if (legacy) {
+        const legacyRemoteId = legacy.remoteId;
+        if (legacyRemoteId === null)
+          return {
+            ok: false,
+            error: {
+              code: "STORY_DELIVERY_NOT_RECORDED",
+              message: "The successful legacy delivery does not identify its remote post.",
+            },
+          };
+        const resolution = await dependencies.resolutions.findLatest({
+          storyId: story.id,
+          legacyDeliveryId: legacy.id,
+          destinationInstanceId: destination.instanceId,
+        });
+        const matchesSnapshot =
+          resolution?.storyId === story.id &&
+          resolution.legacyDeliveryId === legacy.id &&
+          resolution.destination === legacy.destination &&
+          resolution.destinationInstanceId === destination.instanceId &&
+          resolution.remoteId === legacyRemoteId;
+        if (!matchesSnapshot)
+          return {
+            ok: false,
+            error: {
+              code: "DESTINATION_MAPPING_REQUIRES_REVIEW",
+              message:
+                "A legacy delivery mapping must be confirmed or dismissed before delivering again.",
+              legacyDeliveryId: legacy.id,
+              destination: legacy.destination,
+              destinationInstanceId: destination.instanceId,
+              remoteId: legacyRemoteId,
+            },
+          };
+        if (resolution.decision === "confirm") resolvedLegacyRemoteId = resolution.remoteId;
+      }
     }
-    const remoteId = prior?.remoteId ?? null;
+    // An exact successful delivery always wins. Otherwise a matching confirmation adopts the
+    // immutable legacy snapshot; a dismissal deliberately starts a new destination page.
+    const remoteId = prior?.remoteId ?? resolvedLegacyRemoteId;
     const bodyMarkdown = articleBodyMarkdown(revision.blocks);
     const slug = storyDeliverySlug(revision.headline);
     const startedAt = dependencies.now();

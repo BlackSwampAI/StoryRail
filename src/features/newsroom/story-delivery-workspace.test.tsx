@@ -30,6 +30,7 @@ function requests(overrides: Partial<StoryClient> = {}): StoryClient {
     runDirectorReview: vi.fn(unavailable),
     recordReviewDecision: vi.fn(unavailable),
     deliverStory: vi.fn(unavailable),
+    resolveLegacyDeliveryMapping: vi.fn(unavailable),
     ...overrides,
   } as StoryClient;
 }
@@ -140,7 +141,7 @@ describe("delivering a published Story from the screen", () => {
     renderWorkspace(inspection({}), requests());
 
     expect(screen.getByText(/has not been sent anywhere/i)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Deliver to the destination" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Deliver to the current destination" })).toBeTruthy();
   });
 
   // Pinned to the foot of the viewport, this card covered about 200px of the Article at every
@@ -161,7 +162,7 @@ describe("delivering a published Story from the screen", () => {
   it("does not offer delivery for a Story that is not published", () => {
     renderWorkspace(inspection({ state: "approved" }), requests());
 
-    expect(screen.queryByRole("button", { name: /Deliver to the destination/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Deliver to the current destination/ })).toBeNull();
   });
 
   // The ISO value is the durable record and stays in the audit panel. An operator reading a
@@ -176,12 +177,11 @@ describe("delivering a published Story from the screen", () => {
     expect(screen.queryByText(/2026-08-25T09:00:04.000Z/)).toBeNull();
   });
 
-  // A second delivery is how a later Revision reaches the post already made, so the action stays
-  // available after a success and says it is an update rather than a new post.
-  it("reads a further delivery as an update to the post already made", () => {
+  it("does not infer the current operation from a historical successful delivery", () => {
     renderWorkspace(inspection({ deliveries: [DELIVERY] }), requests());
 
-    expect(screen.getByRole("button", { name: "Update the delivered post" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Deliver to the current destination" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Update/ })).toBeNull();
   });
 
   it("shows both addresses when the destination renamed the page", () => {
@@ -211,7 +211,7 @@ describe("delivering a published Story from the screen", () => {
 
     expect(screen.getByText(/refused the credential it was given/)).toBeTruthy();
     expect(screen.getByText(/\(DESTINATION_UNAUTHORIZED\)/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Deliver to the destination" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Deliver to the current destination" })).toBeTruthy();
   });
 
   it("says nothing was sent when no destination or credential is configured", async () => {
@@ -221,7 +221,8 @@ describe("delivering a published Story from the screen", () => {
     }));
     renderWorkspace(inspection({}), requests({ deliverStory }));
 
-    fireEvent.click(screen.getByRole("button", { name: "Deliver to the destination" }));
+    fireEvent.click(screen.getByRole("button", { name: "Deliver to the current destination" }));
+    fireEvent.click(screen.getByRole("button", { name: "Deliver to the current destination now" }));
 
     await waitFor(() => {
       expect(screen.getByRole("alert").textContent).toContain("Nothing was sent.");
@@ -237,16 +238,15 @@ describe("delivering a published Story from the screen", () => {
     }));
     renderWorkspace(inspection({}), requests({ deliverStory }));
 
-    fireEvent.click(screen.getByRole("button", { name: "Deliver to the destination" }));
+    fireEvent.click(screen.getByRole("button", { name: "Deliver to the current destination" }));
+    fireEvent.click(screen.getByRole("button", { name: "Deliver to the current destination now" }));
 
     await waitFor(() => {
       expect(screen.getByRole("alert").textContent).toContain("attempted and refused");
     });
   });
 
-  // A draft is a post a human still has to approve; a live one is not, so only that one is
-  // confirmed before it goes.
-  it("confirms before delivering to a destination known to publish live", async () => {
+  it("confirms every delivery without inferring current behavior from historical draft facts", async () => {
     const live = {
       ...DELIVERY,
       request: { ...DELIVERY.request, draft: false },
@@ -257,11 +257,13 @@ describe("delivering a published Story from the screen", () => {
     }));
     renderWorkspace(inspection({ deliveries: [live] }), requests({ deliverStory }));
 
-    fireEvent.click(screen.getByRole("button", { name: "Update the delivered post" }));
+    fireEvent.click(screen.getByRole("button", { name: "Deliver to the current destination" }));
     expect(deliverStory).not.toHaveBeenCalled();
-    expect(screen.getByText(/publishes live rather than as a draft/)).toBeTruthy();
+    expect(
+      screen.getByText(/currently configured destination may publish immediately/),
+    ).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Publish it live now" }));
+    fireEvent.click(screen.getByRole("button", { name: "Deliver to the current destination now" }));
     await waitFor(() => {
       expect(deliverStory).toHaveBeenCalledWith("story-71");
     });
@@ -278,10 +280,71 @@ describe("delivering a published Story from the screen", () => {
     }));
     renderWorkspace(inspection({}), requests({ deliverStory, inspectStory }));
 
-    fireEvent.click(screen.getByRole("button", { name: "Deliver to the destination" }));
+    fireEvent.click(screen.getByRole("button", { name: "Deliver to the current destination" }));
+    fireEvent.click(screen.getByRole("button", { name: "Deliver to the current destination now" }));
 
     await waitFor(() => {
       expect(inspectStory).toHaveBeenCalledWith("story-71");
     });
+  });
+
+  it.each([
+    ["confirm", "Confirm this post belongs here"],
+    ["dismiss", "Dismiss and allow a fresh post"],
+  ] as const)("records %s without automatically delivering afterward", async (decision, action) => {
+    const deliverStory = vi.fn<StoryClient["deliverStory"]>(async () => ({
+      kind: "mapping-review-required",
+      error: {
+        code: "DESTINATION_MAPPING_REQUIRES_REVIEW",
+        message: "Review the legacy mapping.",
+      },
+      review: {
+        legacyDeliveryId: "delivery-legacy",
+        destination: "wordpress",
+        destinationInstanceId: "wordpress:https://newsroom.test",
+        remoteId: "412",
+      },
+    }));
+    const resolveLegacyDeliveryMapping = vi.fn<StoryClient["resolveLegacyDeliveryMapping"]>(
+      async () => ({
+        kind: "completed",
+        value: {
+          id: "resolution-1",
+          storyId: "story-71",
+          legacyDeliveryId: "delivery-legacy",
+          destination: "wordpress",
+          destinationInstanceId: "wordpress:https://newsroom.test",
+          remoteId: "412",
+          decision,
+          decidedBy: { type: "operator", operatorId: "operator-71" },
+          decidedAt: "decided",
+        } as never,
+      }),
+    );
+    renderWorkspace(inspection({}), requests({ deliverStory, resolveLegacyDeliveryMapping }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Deliver to the current destination" }));
+    fireEvent.click(screen.getByRole("button", { name: "Deliver to the current destination now" }));
+    const review = await screen.findByRole("region", {
+      name: "Legacy delivery mapping review",
+    });
+    expect(review.textContent).toContain("412");
+    expect(screen.getByText(/permits a later delivery to update that external post/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: action }));
+    await waitFor(() => {
+      expect(resolveLegacyDeliveryMapping).toHaveBeenCalledWith(
+        "story-71",
+        "delivery-legacy",
+        decision,
+      );
+    });
+    expect(deliverStory).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("alert").textContent).toContain("Click Deliver again");
+    fireEvent.click(screen.getByRole("button", { name: "Deliver to the current destination" }));
+    expect(
+      screen.getByText(/currently configured destination may publish immediately/),
+    ).toBeTruthy();
+    expect(deliverStory).toHaveBeenCalledTimes(1);
   });
 });

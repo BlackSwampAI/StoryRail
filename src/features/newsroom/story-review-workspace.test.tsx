@@ -28,6 +28,7 @@ const requests: StoryClient = {
   runDirectorReview: vi.fn(unavailable),
   recordReviewDecision: vi.fn(unavailable),
   deliverStory: vi.fn(unavailable),
+  resolveLegacyDeliveryMapping: vi.fn(unavailable),
 };
 
 function inspection(): StoryInspection {

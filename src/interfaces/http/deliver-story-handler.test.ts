@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { DeliverStoryResult } from "@/application/story-deliveries";
+import { destinationInstanceId, storyDeliveryId } from "@/domain/editorial";
 import type { StoryRuntime } from "@/runtime";
 
 import { createDeliverStoryHttpHandler } from "./deliver-story-handler";
@@ -113,6 +114,10 @@ describe("deliver Story HTTP handler", () => {
       error: {
         code: "DESTINATION_MAPPING_REQUIRES_REVIEW",
         message: "Confirm or dismiss the legacy destination mapping before delivering.",
+        legacyDeliveryId: storyDeliveryId("delivery-legacy"),
+        destination: "wordpress",
+        destinationInstanceId: destinationInstanceId("wordpress:https://newsroom.test"),
+        remoteId: "412",
       },
     });
 

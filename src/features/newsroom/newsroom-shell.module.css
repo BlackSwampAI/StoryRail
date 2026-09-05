@@ -369,6 +369,18 @@
   color: var(--signal-15);
 }
 
+.deliveryMappingReview {
+  margin: 1rem 0;
+  border: 1px solid var(--signal-15);
+  border-radius: 0.7rem;
+  background: var(--tone-06);
+  padding: 1rem;
+}
+
+.deliveryMappingReview h3 {
+  margin-top: 0;
+}
+
 .reviewChecks {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));

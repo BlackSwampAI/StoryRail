@@ -29,6 +29,7 @@ function requests(): StoryClient {
     runDirectorReview: vi.fn(unavailable),
     recordReviewDecision: vi.fn(unavailable),
     deliverStory: vi.fn(unavailable),
+    resolveLegacyDeliveryMapping: vi.fn(unavailable),
   } as unknown as StoryClient;
 }
 

@@ -11,6 +11,8 @@ import {
   recordAgentRun,
   recordAgentToolCall,
   recordStoryDelivery,
+  recordLegacyDeliveryMappingResolution,
+  legacyDeliveryMappingResolutionSchema,
   reviewDecisionSchema,
   sourceEvidencePreparationSchema,
   sourceExtractionSchema,
@@ -30,6 +32,8 @@ import {
   type SourceEvidencePreparation,
   type Story,
   type StoryDelivery,
+  type LegacyDeliveryMappingDecision,
+  type LegacyDeliveryMappingResolution,
   type StoryTransitionReceipt,
   type StorySourceAttachment,
   type SiteId,
@@ -77,6 +81,16 @@ export type DeliverStoryOutcome =
       readonly delivery: StoryDelivery | null;
     }
   | { readonly kind: "not-attempted"; readonly error: StoryClientApplicationError }
+  | {
+      readonly kind: "mapping-review-required";
+      readonly error: StoryClientApplicationError;
+      readonly review: {
+        readonly legacyDeliveryId: string;
+        readonly destination: string;
+        readonly destinationInstanceId: string;
+        readonly remoteId: string;
+      };
+    }
   | { readonly kind: "application-failure"; readonly error: StoryClientApplicationError }
   | { readonly kind: "unavailable"; readonly message: typeof STORY_REQUEST_UNAVAILABLE_MESSAGE };
 
@@ -146,6 +160,11 @@ export interface StoryClient {
    * what goes, and where it goes is the Site's configured destination.
    */
   readonly deliverStory: (storyId: string) => Promise<DeliverStoryOutcome>;
+  readonly resolveLegacyDeliveryMapping: (
+    storyId: string,
+    legacyDeliveryId: string,
+    decision: LegacyDeliveryMappingDecision,
+  ) => Promise<StoryClientResult<LegacyDeliveryMappingResolution>>;
   readonly recordReviewDecision: (
     storyId: string,
     command: {
@@ -241,6 +260,46 @@ function isDelivery(value: unknown): value is StoryDelivery {
     delivery.outcome !== "succeeded" ||
     delivery.result.requestedSlug === undefined ||
     delivery.result.requestedSlug !== delivery.result.assignedSlug
+  );
+}
+
+function isLegacyDeliveryMappingResolution(
+  value: unknown,
+): value is LegacyDeliveryMappingResolution {
+  const parsed = legacyDeliveryMappingResolutionSchema.safeParse(value);
+  return (
+    parsed.success &&
+    recordLegacyDeliveryMappingResolution(parsed.data as unknown as LegacyDeliveryMappingResolution)
+      .ok
+  );
+}
+
+function isMappingReviewError(value: unknown): value is StoryClientApplicationError & {
+  readonly legacyDeliveryId: string;
+  readonly destination: string;
+  readonly destinationInstanceId: string;
+  readonly remoteId: string;
+} {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, [
+      "code",
+      "message",
+      "legacyDeliveryId",
+      "destination",
+      "destinationInstanceId",
+      "remoteId",
+    ]) &&
+    value.code === "DESTINATION_MAPPING_REQUIRES_REVIEW" &&
+    isString(value.message) &&
+    isString(value.legacyDeliveryId) &&
+    isString(value.destination) &&
+    isString(value.destinationInstanceId) &&
+    isString(value.remoteId) &&
+    value.legacyDeliveryId.trim().length > 0 &&
+    value.destination.trim().length > 0 &&
+    value.destinationInstanceId.trim().length > 0 &&
+    value.remoteId.trim().length > 0
   );
 }
 
@@ -609,11 +668,53 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
             delivery: isDelivery(body.delivery) ? body.delivery : null,
           };
         if (response.status === 503) return { kind: "not-attempted", error: body.error };
+        if (response.status === 409 && body.error.code === "DESTINATION_MAPPING_REQUIRES_REVIEW") {
+          if (!isMappingReviewError(body.error)) return unreadableOutcome;
+          return {
+            kind: "mapping-review-required",
+            error: { code: body.error.code, message: body.error.message },
+            review: {
+              legacyDeliveryId: body.error.legacyDeliveryId,
+              destination: body.error.destination,
+              destinationInstanceId: body.error.destinationInstanceId,
+              remoteId: body.error.remoteId,
+            },
+          };
+        }
         if (response.status === 404 || response.status === 409)
           return { kind: "application-failure", error: body.error };
         return unreadableOutcome;
       } catch {
         return unreadableOutcome;
+      }
+    },
+    async resolveLegacyDeliveryMapping(storyId, legacyDeliveryId, decision) {
+      try {
+        const response = await dependencies.fetch(
+          api(`/stories/${encodeURIComponent(storyId)}/deliveries/legacy-mapping-resolution`),
+          {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ legacyDeliveryId, decision }),
+          },
+        );
+        const body: unknown = await response.json();
+        if (!isRecord(body)) return unavailable();
+        if (
+          response.status === 201 &&
+          body.ok === true &&
+          isLegacyDeliveryMappingResolution(body.resolution)
+        )
+          return { kind: "completed", value: body.resolution };
+        if (
+          body.ok === false &&
+          isApplicationError(body.error) &&
+          [400, 404, 409, 415, 503].includes(response.status)
+        )
+          return { kind: "application-failure", error: body.error };
+        return unavailable();
+      } catch {
+        return unavailable();
       }
     },
     async assignStory(storyId, command) {

@@ -112,6 +112,10 @@ function storyRequests(): StoryClient {
       kind: "unavailable",
       message: "The Story request could not be completed.",
     })),
+    resolveLegacyDeliveryMapping: vi.fn<StoryClient["resolveLegacyDeliveryMapping"]>(async () => ({
+      kind: "unavailable",
+      message: "The Story request could not be completed.",
+    })),
   };
 }
 

@@ -30,6 +30,7 @@ const requests = {
   runDirectorReview: vi.fn(unavailable),
   recordReviewDecision: vi.fn(unavailable),
   deliverStory: vi.fn(unavailable),
+  resolveLegacyDeliveryMapping: vi.fn(unavailable),
 } as unknown as StoryClient;
 
 function inspection(state: StoryInspection["story"]["state"]): StoryInspection {
@@ -136,7 +137,7 @@ describe("what the Story workspace tells someone who is only watching", () => {
     ["in_progress", "Send this draft to the Director"],
     ["in_review", "Ask the Director to read it"],
     ["approved", "Publish this Story"],
-    ["published", "Deliver to the destination"],
+    ["published", "Deliver to the current destination"],
   ] as const)("offers one action in %s, named for its effect: %s", (state, action) => {
     const { container } = renderWorkspace(state);
 
