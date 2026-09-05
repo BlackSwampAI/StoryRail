@@ -874,6 +874,29 @@ describe("autopilot from a URL", () => {
     });
   });
 
+  it("stops on required delivery reconciliation and never retries", async () => {
+    const deliverStory = vi.fn(async () => ({
+      ok: false as const,
+      error: {
+        code: "DESTINATION_RECONCILIATION_REQUIRED",
+        message: "Check the destination before delivering again.",
+        deliveryId: "delivery-unknown",
+        destination: "wordpress",
+        destinationInstanceId: "wordpress:https://newsroom.test",
+        operation: "create" as const,
+        slug: "uncertain-report",
+        remoteId: null,
+      },
+    }));
+    const { result } = await runFromUrl(urlHarness({ deliverStory }));
+
+    expect(deliverStory).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      ok: true,
+      delivery: { kind: "failed", code: "DESTINATION_RECONCILIATION_REQUIRED" },
+    });
+  });
+
   it("treats a newsroom with nowhere to deliver as finished rather than failed", async () => {
     const deliverStory = vi.fn(async () => ({
       ok: false as const,

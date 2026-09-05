@@ -48,5 +48,13 @@ export interface StoryDeliveryRepository {
     readonly storyId: StoryId;
     readonly deliveryId: StoryDeliveryId;
   }): Promise<StoryDelivery | null>;
+  findLatestUnresolved(query: {
+    readonly storyId: StoryId;
+    readonly destinationInstanceId: DestinationInstanceId;
+  }): Promise<StoryDelivery | null>;
+  findUnresolvedById(query: {
+    readonly storyId: StoryId;
+    readonly deliveryId: StoryDeliveryId;
+  }): Promise<StoryDelivery | null>;
   listByStoryId(storyId: StoryId): Promise<readonly StoryDelivery[]>;
 }

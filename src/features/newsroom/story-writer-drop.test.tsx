@@ -135,6 +135,10 @@ function requests(): StoryClient {
       kind: "unavailable",
       message: STORY_REQUEST_UNAVAILABLE_MESSAGE,
     })),
+    reconcileStoryDelivery: vi.fn<StoryClient["reconcileStoryDelivery"]>(async () => ({
+      kind: "unavailable",
+      message: STORY_REQUEST_UNAVAILABLE_MESSAGE,
+    })),
   };
 }
 

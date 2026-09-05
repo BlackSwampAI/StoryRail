@@ -14,6 +14,7 @@ export type DeliveryStanding =
   | { readonly kind: "never-delivered" }
   | { readonly kind: "in-flight"; readonly delivery: StoryDelivery }
   | { readonly kind: "delivered"; readonly delivery: StoryDelivery }
+  | { readonly kind: "unknown"; readonly delivery: StoryDelivery }
   | { readonly kind: "failed"; readonly delivery: StoryDelivery };
 
 export interface DeliveryReading {
@@ -32,7 +33,9 @@ export function readDeliveries(deliveries: readonly StoryDelivery[]): DeliveryRe
     standing:
       latest.outcome === "succeeded"
         ? { kind: "delivered", delivery: latest }
-        : { kind: "failed", delivery: latest },
+        : latest.outcome === "unknown"
+          ? { kind: "unknown", delivery: latest }
+          : { kind: "failed", delivery: latest },
     delivered,
   };
 }

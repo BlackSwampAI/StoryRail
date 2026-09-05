@@ -1579,6 +1579,98 @@ describe("story-client", () => {
     );
   });
 
+  it("returns strict delivery reconciliation details for an unknowable outcome", async () => {
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(409, {
+        ok: false,
+        error: {
+          code: "DESTINATION_RECONCILIATION_REQUIRED",
+          message: "Check the destination.",
+          deliveryId: "delivery-unknown",
+          destination: "wordpress",
+          destinationInstanceId: "wordpress:https://newsroom.test",
+          operation: "create",
+          slug: "a-real-newsroom-story",
+          remoteId: null,
+        },
+      }),
+    );
+
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).deliverStory(STORY.id),
+    ).resolves.toMatchObject({
+      kind: "reconciliation-required",
+      review: { deliveryId: "delivery-unknown", operation: "create", remoteId: null },
+    });
+  });
+
+  it.each([
+    ["create", "unexpected-page"],
+    ["update", null],
+  ] as const)("rejects a malformed %s reconciliation requirement", async (operation, remoteId) => {
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(409, {
+        ok: false,
+        error: {
+          code: "DESTINATION_RECONCILIATION_REQUIRED",
+          message: "Check the destination.",
+          deliveryId: "delivery-unknown",
+          destination: "wordpress",
+          destinationInstanceId: "wordpress:https://newsroom.test",
+          operation,
+          slug: "a-real-newsroom-story",
+          remoteId,
+        },
+      }),
+    );
+
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).deliverStory(STORY.id),
+    ).resolves.toEqual({
+      kind: "unavailable",
+      message: STORY_REQUEST_UNAVAILABLE_MESSAGE,
+    });
+  });
+
+  it("records a delivery reconciliation without sending destination snapshots", async () => {
+    const reconciliation = {
+      id: "reconciliation-1",
+      storyId: STORY.id,
+      deliveryId: "delivery-unknown",
+      destination: "wordpress",
+      destinationInstanceId: "wordpress:https://newsroom.test",
+      operation: "create",
+      slug: "a-real-newsroom-story",
+      decision: "delivered",
+      remoteId: "412",
+      decidedBy: { type: "operator", operatorId: "operator-1" },
+      decidedAt: "opaque-time",
+    } as const;
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(201, { ok: true, reconciliation }),
+    );
+
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).reconcileStoryDelivery(
+        STORY.id,
+        "delivery-unknown",
+        "delivered",
+        "412",
+      ),
+    ).resolves.toEqual({ kind: "completed", value: reconciliation });
+    expect(fetch).toHaveBeenCalledWith(
+      `/api/sites/${SITE_ID}/stories/${STORY.id}/deliveries/reconciliation`,
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          deliveryId: "delivery-unknown",
+          decision: "delivered",
+          remoteId: "412",
+        }),
+      }),
+    );
+  });
+
   it("keeps a delivery the destination refused apart from one that was never attempted", async () => {
     const refused = vi.fn<StoryClientDependencies["fetch"]>(async () =>
       response(502, {

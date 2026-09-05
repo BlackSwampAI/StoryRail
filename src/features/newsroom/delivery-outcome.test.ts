@@ -80,6 +80,20 @@ describe("reading what became of a Story's deliveries", () => {
 
     expect(readDeliveries([running]).standing).toEqual({ kind: "in-flight", delivery: running });
   });
+
+  it("keeps an unknowable destination outcome distinct from failure", () => {
+    const unknown = {
+      ...base,
+      id: "delivery-unknown",
+      remoteId: null,
+      startedAt: "t1",
+      outcome: "unknown",
+      completedAt: "t1-done",
+      uncertainty: { code: "DESTINATION_REQUEST_OUTCOME_UNKNOWN", message: null },
+    } as unknown as StoryDelivery;
+
+    expect(readDeliveries([unknown]).standing).toEqual({ kind: "unknown", delivery: unknown });
+  });
 });
 
 describe("explaining a delivery outcome to an operator", () => {

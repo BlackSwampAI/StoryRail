@@ -31,9 +31,11 @@ import {
   destinationInstanceId,
   legacyDeliveryMappingResolutionId,
   storyDeliveryId,
+  storyDeliveryReconciliationId,
   type LegacyDeliveryMappingResolution,
   type CanonicalSourceUrl,
   type CredentialSlot,
+  type DestinationInstanceId,
   type FailedSourceExtraction,
   type OperatorActor,
   type PolicyRun,
@@ -44,6 +46,7 @@ import {
   type SourceTriageDecision,
   type SuccessfulSourceExtraction,
   type Story,
+  type StoryDelivery,
   type StorySourceAttachment,
   type UrlSource,
 } from "@/domain/editorial";
@@ -69,6 +72,7 @@ import { createPostgresAgentToolCallRepository } from "@/adapters/agent-tool-cal
 import { createPostgresArchiveRepository } from "@/adapters/archive";
 import { createPostgresStoryDeliveryRepository } from "@/adapters/story-delivery-persistence";
 import { createPostgresLegacyDeliveryMappingResolutionRepository } from "@/adapters/legacy-delivery-mapping-resolution-persistence";
+import { createPostgresStoryDeliveryReconciliationRepository } from "@/adapters/story-delivery-reconciliation-persistence";
 import { createPostgresSiteRepository } from "@/adapters/site-persistence";
 import { createCreateSite } from "@/application/sites";
 import { createFirecrawlSourceExtractor } from "@/adapters/source-extraction";
@@ -229,6 +233,10 @@ const destinationInstanceMigrationPath = resolve(
 const legacyDeliveryResolutionMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0077-legacy-delivery-mapping-resolutions.sql",
+);
+const ambiguousDeliveryReconciliationMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0078-ambiguous-delivery-reconciliation.sql",
 );
 
 const DEFAULT_SITE = siteId("site-default");
@@ -470,6 +478,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let policyRunAttemptsMigrationSql: string;
   let destinationInstanceMigrationSql: string;
   let legacyDeliveryResolutionMigrationSql: string;
+  let ambiguousDeliveryReconciliationMigrationSql: string;
 
   /** Every migration, in order. One list so a rebuild can never drift from the first build. */
   const orderedMigrations = (): readonly string[] => [
@@ -510,6 +519,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     policyRunAttemptsMigrationSql,
     destinationInstanceMigrationSql,
     legacyDeliveryResolutionMigrationSql,
+    ambiguousDeliveryReconciliationMigrationSql,
   ];
   let destructiveSetupAllowed = false;
 
@@ -597,6 +607,10 @@ describePostgres("PostgreSQL persistence repositories", () => {
       legacyDeliveryResolutionMigrationPath,
       "utf8",
     );
+    ambiguousDeliveryReconciliationMigrationSql = await readFile(
+      ambiguousDeliveryReconciliationMigrationPath,
+      "utf8",
+    );
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -627,7 +641,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     }
 
     await pool.query(
-      "TRUNCATE storyrail.legacy_delivery_mapping_resolutions, storyrail.story_deliveries, storyrail.newsroom_standards, storyrail.policy_runs, storyrail.agent_tool_calls, storyrail.review_decisions, storyrail.article_revisions, storyrail.articles, storyrail.agent_runs, storyrail.story_transition_receipts, storyrail.story_assignments, storyrail.source_evidence_preparations, storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.site_credentials, storyrail.stories RESTART IDENTITY",
+      "TRUNCATE storyrail.story_delivery_reconciliations, storyrail.legacy_delivery_mapping_resolutions, storyrail.story_deliveries, storyrail.newsroom_standards, storyrail.policy_runs, storyrail.agent_tool_calls, storyrail.review_decisions, storyrail.article_revisions, storyrail.articles, storyrail.agent_runs, storyrail.story_transition_receipts, storyrail.story_assignments, storyrail.source_evidence_preparations, storyrail.source_triage_decisions, storyrail.story_source_attachments, storyrail.source_extractions, storyrail.url_sources, storyrail.site_credentials, storyrail.stories RESTART IDENTITY",
     );
     // Contract fixtures include built-in Profiles now that a role's built-in is found by role
     // rather than by identifier, so they have to be swept as well or they outlive their test.
@@ -2335,23 +2349,40 @@ describePostgres("PostgreSQL persistence repositories", () => {
     });
   });
   describe("delivering a published Story outside the system", () => {
-    const intent = (options: {
+    type IntentOptions = {
       readonly id: string;
       readonly storyId: string;
       readonly revisionId: string;
       readonly remoteId: string | null;
-      readonly destinationInstanceId?: string | null;
       readonly operation?: "create" | "update";
-    }) =>
-      ({
-        id: options.id,
-        storyId: options.storyId,
-        revisionId: options.revisionId,
+    };
+    type CurrentStoryDelivery = StoryDelivery & {
+      readonly destinationInstanceId: DestinationInstanceId;
+    };
+    type LegacyStoryDelivery = StoryDelivery & {
+      readonly destinationInstanceId: null;
+    };
+
+    function intent(
+      options: IntentOptions & { readonly destinationInstanceId: null },
+    ): LegacyStoryDelivery;
+    function intent(
+      options: IntentOptions & { readonly destinationInstanceId?: string },
+    ): CurrentStoryDelivery;
+    function intent(
+      options: IntentOptions & { readonly destinationInstanceId?: string | null },
+    ): StoryDelivery {
+      return {
+        id: storyDeliveryId(options.id),
+        storyId: storyId(options.storyId),
+        revisionId: articleRevisionId(options.revisionId),
         destination: "studiocms",
         destinationInstanceId:
           options.destinationInstanceId === undefined
-            ? "studiocms:https://cms.example"
-            : options.destinationInstanceId,
+            ? destinationInstanceId("studiocms:https://cms.example")
+            : options.destinationInstanceId === null
+              ? null
+              : destinationInstanceId(options.destinationInstanceId),
         remoteId: options.remoteId,
         request: {
           operation: options.operation ?? "create",
@@ -2362,7 +2393,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
         startedAt: "2026-08-24T10:00:00.000Z",
         completedAt: null,
         outcome: "running",
-      }) as never;
+      };
+    }
 
     it("migrates legacy mappings fail closed while allowing an in-flight legacy row to finish", async () => {
       const before = orderedMigrations().slice(
@@ -3040,6 +3072,302 @@ describePostgres("PostgreSQL persistence repositories", () => {
         constraint: "legacy_delivery_mapping_resolutions_decided_at_format_check",
       });
     });
+
+    it("finds unresolved deliveries exactly and by latest installation without crossing instances", async () => {
+      const published = await publishReport("delivery-unresolved", {
+        headline: "An unresolved delivery",
+        body: "Its outcome requires a decision.",
+        publishedAt: "2026-09-05T09:00:00.000Z",
+      });
+      const repository = createPostgresStoryDeliveryRepository({ pool });
+      const first = intent({
+        id: "delivery-unresolved-first",
+        storyId: published.storyId,
+        revisionId: "revision-delivery-unresolved",
+        remoteId: null,
+      });
+      const latest = {
+        ...first,
+        id: storyDeliveryId("delivery-unresolved-latest"),
+        startedAt: "2026-09-05T09:00:01.000Z",
+      };
+      const other = intent({
+        id: "delivery-unresolved-other",
+        storyId: published.storyId,
+        revisionId: "revision-delivery-unresolved",
+        destinationInstanceId: "studiocms:https://other.example",
+        remoteId: null,
+      });
+      await repository.append(first);
+      await repository.append(latest);
+      await repository.append(other);
+      await expect(
+        repository.findUnresolvedById({ storyId: published.storyId, deliveryId: first.id }),
+      ).resolves.toEqual(first);
+      await expect(
+        repository.findLatestUnresolved({
+          storyId: published.storyId,
+          destinationInstanceId: first.destinationInstanceId,
+        }),
+      ).resolves.toEqual(latest);
+      await expect(
+        repository.findLatestUnresolved({
+          storyId: published.storyId,
+          destinationInstanceId: other.destinationInstanceId,
+        }),
+      ).resolves.toEqual(other);
+    });
+
+    it("round trips reconciliation replay, conflict, insertion ordering, and Site isolation", async () => {
+      const published = await publishReport("delivery-reconciliation", {
+        headline: "A reconciled delivery",
+        body: "An operator checked the destination.",
+        publishedAt: "2026-09-05T10:00:00.000Z",
+      });
+      const deliveries = createPostgresStoryDeliveryRepository({ pool });
+      const delivery = intent({
+        id: "delivery-reconciliation",
+        storyId: published.storyId,
+        revisionId: "revision-delivery-reconciliation",
+        remoteId: null,
+      });
+      await deliveries.append(delivery);
+      const repository = createPostgresStoryDeliveryReconciliationRepository({
+        pool,
+        siteId: DEFAULT_SITE,
+      });
+      const first = {
+        id: storyDeliveryReconciliationId("reconciliation-first"),
+        storyId: published.storyId,
+        deliveryId: delivery.id,
+        destination: delivery.destination,
+        destinationInstanceId: delivery.destinationInstanceId,
+        operation: delivery.request.operation,
+        slug: delivery.request.slug,
+        decision: "not_delivered" as const,
+        remoteId: null,
+        decidedBy: OPERATOR,
+        decidedAt: "opaque-later-clock",
+      };
+      const latest = {
+        ...first,
+        id: storyDeliveryReconciliationId("reconciliation-latest"),
+        decision: "delivered" as const,
+        remoteId: "page-recovered",
+        decidedAt: "opaque-earlier-clock",
+      };
+      await expect(repository.append(first)).resolves.toEqual({
+        ok: true,
+        reconciliation: first,
+      });
+      await expect(repository.append(first)).resolves.toEqual({
+        ok: true,
+        reconciliation: first,
+      });
+      await expect(
+        repository.append({ ...first, decision: "delivered", remoteId: "different-page" }),
+      ).resolves.toMatchObject({
+        ok: false,
+        error: { code: "STORY_DELIVERY_RECONCILIATION_CONFLICT" },
+      });
+      await expect(repository.append(latest)).resolves.toEqual({
+        ok: true,
+        reconciliation: latest,
+      });
+      const query = {
+        storyId: published.storyId,
+        deliveryId: delivery.id,
+        destinationInstanceId: delivery.destinationInstanceId,
+      };
+      await expect(repository.findLatest(query)).resolves.toEqual(latest);
+      await expect(
+        createPostgresStoryDeliveryReconciliationRepository({
+          pool,
+          siteId: OTHER_SITE,
+        }).findLatest(query),
+      ).resolves.toBeNull();
+    });
+
+    it("enforces reconciliation snapshots, update identity, and append-only history", async () => {
+      const published = await publishReport("delivery-reconciliation-constraints", {
+        headline: "A constrained reconciliation",
+        body: "The database owns the boundary.",
+        publishedAt: "2026-09-05T11:00:00.000Z",
+      });
+      const delivery = intent({
+        id: "delivery-reconciliation-update",
+        storyId: published.storyId,
+        revisionId: "revision-delivery-reconciliation-constraints",
+        operation: "update",
+        remoteId: "existing-page",
+      });
+      const deliveryRepository = createPostgresStoryDeliveryRepository({ pool });
+      await deliveryRepository.append(delivery);
+      const repository = createPostgresStoryDeliveryReconciliationRepository({
+        pool,
+        siteId: DEFAULT_SITE,
+      });
+      const fact = {
+        id: storyDeliveryReconciliationId("reconciliation-update"),
+        storyId: published.storyId,
+        deliveryId: delivery.id,
+        destination: delivery.destination,
+        destinationInstanceId: delivery.destinationInstanceId,
+        operation: "update" as const,
+        slug: delivery.request.slug,
+        decision: "delivered" as const,
+        remoteId: "existing-page",
+        decidedBy: OPERATOR,
+        decidedAt: "opaque-decision",
+      };
+      await repository.append(fact);
+      const numericDelivery = intent({
+        id: "delivery-reconciliation-numeric",
+        storyId: published.storyId,
+        revisionId: "revision-delivery-reconciliation-constraints",
+        operation: "update",
+        remoteId: "42",
+      });
+      await deliveryRepository.append(numericDelivery);
+      await expect(
+        deliveryRepository.complete({
+          ...numericDelivery,
+          outcome: "unknown",
+          completedAt: "2026-09-05T11:00:01.000Z",
+          uncertainty: {
+            code: "DESTINATION_REQUEST_OUTCOME_UNKNOWN",
+            message: " padded uncertainty ",
+          },
+        }),
+      ).rejects.toMatchObject({
+        constraint: "story_deliveries_uncertainty_check",
+      });
+      await expect(
+        pool.query(
+          `INSERT INTO storyrail.story_delivery_reconciliations
+             (reconciliation_id, story_id, delivery_id, destination,
+              destination_instance_id, operation, slug, decision, remote_id, decided_at, payload)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)`,
+          [
+            "reconciliation-numeric-remote-id",
+            numericDelivery.storyId,
+            numericDelivery.id,
+            numericDelivery.destination,
+            numericDelivery.destinationInstanceId,
+            numericDelivery.request.operation,
+            numericDelivery.request.slug,
+            "delivered",
+            "42",
+            fact.decidedAt,
+            JSON.stringify({
+              ...fact,
+              id: "reconciliation-numeric-remote-id",
+              deliveryId: numericDelivery.id,
+              remoteId: 42,
+              slug: numericDelivery.request.slug,
+            }),
+          ],
+        ),
+      ).rejects.toMatchObject({
+        constraint: "story_delivery_reconciliations_payload_shape_check",
+      });
+      await expect(
+        repository.append({
+          ...fact,
+          id: storyDeliveryReconciliationId("reconciliation-wrong-id"),
+          remoteId: "different-page",
+        }),
+      ).rejects.toMatchObject({
+        constraint: "story_delivery_reconciliations_delivery_snapshot_fk",
+      });
+      await expect(
+        repository.append({
+          ...fact,
+          id: storyDeliveryReconciliationId("reconciliation-wrong-slug"),
+          slug: "different-slug",
+        }),
+      ).rejects.toMatchObject({
+        constraint: "story_delivery_reconciliations_delivery_snapshot_fk",
+      });
+      await expect(
+        repository.append({
+          ...fact,
+          id: storyDeliveryReconciliationId("reconciliation-wrong-instance"),
+          destinationInstanceId: destinationInstanceId("studiocms:https://wrong.example"),
+        }),
+      ).rejects.toMatchObject({
+        constraint: "story_delivery_reconciliations_delivery_snapshot_fk",
+      });
+      await expect(
+        pool.query(
+          "UPDATE storyrail.story_delivery_reconciliations SET decided_at = 'changed' WHERE reconciliation_id = $1",
+          [fact.id],
+        ),
+      ).rejects.toThrow(/may not be changed or deleted/);
+      await expect(
+        pool.query(
+          "DELETE FROM storyrail.story_delivery_reconciliations WHERE reconciliation_id = $1",
+          [fact.id],
+        ),
+      ).rejects.toThrow(/may not be changed or deleted/);
+    });
+
+    it("adds reconciliation without rewriting deliveries recorded by earlier migrations", async () => {
+      const before = orderedMigrations().slice(
+        0,
+        orderedMigrations().indexOf(ambiguousDeliveryReconciliationMigrationSql),
+      );
+      try {
+        await pool.query("DROP SCHEMA storyrail CASCADE");
+        for (const migration of before) await pool.query(migration);
+        const published = await publishReport("delivery-reconciliation-migration", {
+          headline: "A historical delivery",
+          body: "It remains exact.",
+          publishedAt: "2026-09-05T12:00:00.000Z",
+        });
+        const delivery = intent({
+          id: "delivery-before-reconciliation",
+          storyId: published.storyId,
+          revisionId: "revision-delivery-reconciliation-migration",
+          remoteId: null,
+        });
+        const succeeded = {
+          ...delivery,
+          id: storyDeliveryId("delivery-before-reconciliation-succeeded"),
+          remoteId: "historical-page",
+          outcome: "succeeded" as const,
+          completedAt: "2026-09-05T12:00:01.000Z",
+          result: { status: 201, message: null },
+        };
+        const failed = {
+          ...delivery,
+          id: storyDeliveryId("delivery-before-reconciliation-failed"),
+          outcome: "failed" as const,
+          completedAt: "2026-09-05T12:00:02.000Z",
+          failure: { code: "DESTINATION_REJECTED" as const, message: "Rejected." },
+        };
+        const repository = createPostgresStoryDeliveryRepository({ pool });
+        await repository.append(delivery);
+        await repository.append(succeeded);
+        await repository.append(failed);
+        const original = await repository.listByStoryId(published.storyId);
+        await pool.query(ambiguousDeliveryReconciliationMigrationSql);
+        await expect(
+          createPostgresStoryDeliveryRepository({ pool }).findUnresolvedById({
+            storyId: published.storyId,
+            deliveryId: delivery.id,
+          }),
+        ).resolves.toEqual(delivery);
+        await expect(
+          createPostgresStoryDeliveryRepository({ pool }).listByStoryId(published.storyId),
+        ).resolves.toEqual(original);
+      } finally {
+        await pool.query("DROP SCHEMA storyrail CASCADE");
+        for (const migration of orderedMigrations()) await pool.query(migration);
+        await addSecondSite(pool);
+        await addSecondSiteWriter(pool);
+      }
+    });
   });
 
   describe("Article block grounding constraints", () => {
@@ -3684,6 +4012,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         "stories",
         "story_assignments",
         "story_deliveries",
+        "story_delivery_reconciliations",
         "story_source_attachments",
         "story_transition_receipts",
         "url_sources",
@@ -3718,6 +4047,26 @@ describePostgres("PostgreSQL persistence repositories", () => {
             is_nullable: "NO",
             is_identity: "NO",
           },
+          ...[
+            ["reconciliation_id", "text", "NO", "NO"],
+            ["insertion_position", "bigint", "NO", "YES"],
+            ["story_id", "text", "NO", "NO"],
+            ["delivery_id", "text", "NO", "NO"],
+            ["destination", "text", "NO", "NO"],
+            ["destination_instance_id", "text", "NO", "NO"],
+            ["operation", "text", "NO", "NO"],
+            ["slug", "text", "NO", "NO"],
+            ["decision", "text", "NO", "NO"],
+            ["remote_id", "text", "YES", "NO"],
+            ["decided_at", "text", "NO", "NO"],
+            ["payload", "jsonb", "NO", "NO"],
+          ].map(([column_name, data_type, is_nullable, is_identity]) => ({
+            table_name: "story_delivery_reconciliations",
+            column_name,
+            data_type,
+            is_nullable,
+            is_identity,
+          })),
           {
             table_name: "policy_runs",
             column_name: "source_id",
@@ -4297,7 +4646,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           },
         ]),
       );
-      expect(columns.rows).toHaveLength(142);
+      expect(columns.rows).toHaveLength(154);
     });
 
     it("creates the required primary, unique, foreign-key, and check constraints", async () => {
@@ -4319,6 +4668,31 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
       expect(constraints.rows).toEqual(
         expect.arrayContaining([
+          {
+            table_name: "story_delivery_reconciliations",
+            constraint_name: "story_delivery_reconciliations_pkey",
+            constraint_type: "p",
+          },
+          {
+            table_name: "story_delivery_reconciliations",
+            constraint_name: "story_delivery_reconciliations_story_id_fkey",
+            constraint_type: "f",
+          },
+          {
+            table_name: "story_delivery_reconciliations",
+            constraint_name: "story_delivery_reconciliations_delivery_id_fkey",
+            constraint_type: "f",
+          },
+          {
+            table_name: "story_delivery_reconciliations",
+            constraint_name: "story_delivery_reconciliations_decision_check",
+            constraint_type: "c",
+          },
+          {
+            table_name: "story_delivery_reconciliations",
+            constraint_name: "story_delivery_reconciliations_payload_shape_check",
+            constraint_type: "c",
+          },
           {
             table_name: "agent_runs",
             constraint_name: "agent_runs_pkey",

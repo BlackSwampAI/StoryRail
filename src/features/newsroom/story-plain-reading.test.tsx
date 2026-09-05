@@ -29,6 +29,7 @@ const requests: StoryClient = {
   recordReviewDecision: vi.fn(unavailable),
   deliverStory: vi.fn(unavailable),
   resolveLegacyDeliveryMapping: vi.fn(unavailable),
+  reconcileStoryDelivery: vi.fn(unavailable),
 };
 
 const WRITTEN_STATES = [

@@ -883,6 +883,11 @@ export function StoryWorkspace({
     Extract<DeliverStoryOutcome, { readonly kind: "mapping-review-required" }> | undefined
   >();
   const [mappingResolutionPending, setMappingResolutionPending] = useState(false);
+  const [reconciliationReview, setReconciliationReview] = useState<
+    Extract<DeliverStoryOutcome, { readonly kind: "reconciliation-required" }> | undefined
+  >();
+  const [reconciliationPending, setReconciliationPending] = useState(false);
+  const [reconciliationRemoteId, setReconciliationRemoteId] = useState("");
   const [editingAssignment, setEditingAssignment] = useState(false);
   const [proposalReady, setProposalReady] = useState(durableProposal !== undefined);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
@@ -1367,7 +1372,13 @@ export function StoryWorkspace({
         setMappingReview(result);
         return;
       }
+      if (result.kind === "reconciliation-required") {
+        setReconciliationReview(result);
+        setReconciliationRemoteId(result.review.remoteId ?? "");
+        return;
+      }
       setMappingReview(undefined);
+      setReconciliationReview(undefined);
       setDeliveryStatus(
         result.kind === "delivered"
           ? `Delivered to ${result.delivery.destination}.`
@@ -1415,6 +1426,42 @@ export function StoryWorkspace({
       );
     } finally {
       setMappingResolutionPending(false);
+    }
+  }
+
+  async function reconcileDelivery(decision: "delivered" | "not_delivered") {
+    if (!reconciliationReview || reconciliationPending) return;
+    const remoteId = decision === "delivered" ? reconciliationRemoteId.trim() : null;
+    if (decision === "delivered" && !remoteId) {
+      setDeliveryStatus("Enter the remote post ID before recording that it was delivered.");
+      return;
+    }
+    setReconciliationPending(true);
+    setDeliveryStatus(null);
+    try {
+      const result = await requests.reconcileStoryDelivery(
+        story.id,
+        reconciliationReview.review.deliveryId,
+        decision,
+        remoteId,
+      );
+      if (result.kind !== "completed") {
+        setDeliveryStatus(
+          result.kind === "application-failure"
+            ? result.error.message
+            : "The delivery decision could not be confirmed. Reopen this Story and try again.",
+        );
+        return;
+      }
+      setReconciliationReview(undefined);
+      setReconciliationRemoteId("");
+      setDeliveryStatus(
+        decision === "delivered"
+          ? "Delivery recorded. Click Deliver again when you are ready to update that external post."
+          : "Not delivered recorded. Click Deliver again when you are ready to create or update the destination.",
+      );
+    } finally {
+      setReconciliationPending(false);
     }
   }
 
@@ -1758,6 +1805,21 @@ export function StoryWorkspace({
                       </p>
                     ) : null}
                   </div>
+                ) : deliveryStanding.kind === "unknown" ? (
+                  <div className={styles.deliveryRecord}>
+                    <p>
+                      StoryRail cannot confirm whether {deliveryStanding.delivery.destination}
+                      applied this delivery. Check the destination before deciding what happened.
+                    </p>
+                    <p>
+                      The uncertain attempt completed at{" "}
+                      {readableTime(
+                        deliveryStanding.delivery.completedAt ??
+                          deliveryStanding.delivery.startedAt,
+                      )}
+                      .
+                    </p>
+                  </div>
                 ) : (
                   <div className={styles.deliveryRecord}>
                     <p>
@@ -1814,6 +1876,56 @@ export function StoryWorkspace({
                     </div>
                   </section>
                 ) : null}
+                {reconciliationReview ? (
+                  <section
+                    className={styles.deliveryMappingReview}
+                    aria-label="Delivery reconciliation required"
+                  >
+                    <h3>Check the destination before delivering again</h3>
+                    <p>
+                      StoryRail cannot confirm whether the {reconciliationReview.review.operation}
+                      request for <code>{reconciliationReview.review.slug}</code> was applied by{" "}
+                      {reconciliationReview.review.destination}. Check destination instance{" "}
+                      <code>{reconciliationReview.review.destinationInstanceId}</code> directly.
+                    </p>
+                    <p>
+                      Recording this decision does not deliver anything. Afterward, click Deliver
+                      again and confirm the separate delivery action.
+                    </p>
+                    <label>
+                      Remote post ID
+                      <input
+                        value={reconciliationRemoteId}
+                        onChange={(event) => setReconciliationRemoteId(event.target.value)}
+                        disabled={
+                          reconciliationPending ||
+                          reconciliationReview.review.operation === "update"
+                        }
+                        required
+                      />
+                    </label>
+                    <div className={styles.taskActions}>
+                      <button
+                        type="button"
+                        className={styles.primaryAction}
+                        disabled={
+                          reconciliationPending || reconciliationRemoteId.trim().length === 0
+                        }
+                        onClick={() => void reconcileDelivery("delivered")}
+                      >
+                        It was delivered
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.secondaryAction}
+                        disabled={reconciliationPending}
+                        onClick={() => void reconcileDelivery("not_delivered")}
+                      >
+                        It was not delivered
+                      </button>
+                    </div>
+                  </section>
+                ) : null}
                 {deliveryConfirming ? (
                   <div className={styles.taskActions}>
                     <p className={styles.formHint}>
@@ -1823,7 +1935,7 @@ export function StoryWorkspace({
                     <button
                       type="button"
                       className={styles.primaryAction}
-                      disabled={deliveryPending}
+                      disabled={deliveryPending || reconciliationReview !== undefined}
                       onClick={() => void deliver()}
                     >
                       {deliveryPending ? "Delivering…" : "Deliver to the current destination now"}
@@ -1841,7 +1953,7 @@ export function StoryWorkspace({
                   <button
                     type="button"
                     className={styles.primaryAction}
-                    disabled={deliveryPending}
+                    disabled={deliveryPending || reconciliationReview !== undefined}
                     onClick={() => setDeliveryConfirming(true)}
                   >
                     Deliver to the current destination
