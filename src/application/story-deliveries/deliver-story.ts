@@ -28,6 +28,7 @@ export type DeliverStoryResult =
               | "STORY_NOT_PUBLISHED"
               | "STORY_HAS_NO_ARTICLE"
               | "DESTINATION_NOT_CONFIGURED"
+              | "DESTINATION_MAPPING_REQUIRES_REVIEW"
               | "STORY_DELIVERY_NOT_RECORDED";
             readonly message: string;
           };
@@ -100,8 +101,23 @@ export function createDeliverStory(dependencies: {
     // back and a Writer revised keeps the one page it already has rather than gaining a second.
     const prior = await dependencies.deliveries.findLatestSucceeded({
       storyId: story.id,
-      destination: destination.name,
+      destinationInstanceId: destination.instanceId,
     });
+    if (!prior) {
+      const legacy = await dependencies.deliveries.findLatestLegacySucceeded({
+        storyId: story.id,
+        destination: destination.name,
+      });
+      if (legacy)
+        return {
+          ok: false,
+          error: {
+            code: "DESTINATION_MAPPING_REQUIRES_REVIEW",
+            message:
+              "A legacy delivery mapping must be confirmed or dismissed before delivering again.",
+          },
+        };
+    }
     const remoteId = prior?.remoteId ?? null;
     const bodyMarkdown = articleBodyMarkdown(revision.blocks);
     const slug = storyDeliverySlug(revision.headline);
@@ -112,6 +128,7 @@ export function createDeliverStory(dependencies: {
       storyId: story.id,
       revisionId: revision.id,
       destination: destination.name,
+      destinationInstanceId: destination.instanceId,
       // Null on a first delivery. The destination mints the identifier and discards any sent to
       // it, so a running row that named one would name a page that does not exist under that
       // name. The slug it does carry is the identifier StoryRail chose and the destination keeps.

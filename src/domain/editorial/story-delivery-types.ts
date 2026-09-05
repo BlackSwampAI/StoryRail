@@ -1,4 +1,4 @@
-import type { ArticleRevisionId, StoryDeliveryId, StoryId } from "./types";
+import type { ArticleRevisionId, DestinationInstanceId, StoryDeliveryId, StoryId } from "./types";
 
 export const DELIVERY_FAILURE_CODES = [
   /** The destination could not be reached at all — no response, or one that never arrived. */
@@ -65,6 +65,8 @@ interface StoryDeliveryCommon {
    * instead of constraining what may be.
    */
   readonly destination: string;
+  /** Null marks a legacy mapping that has not been bound to an installation. */
+  readonly destinationInstanceId: DestinationInstanceId | null;
   /**
    * What the destination calls the page, or null until it says. The create endpoint discards
    * any identifier sent with the request and mints its own, so a delivery cannot know one in

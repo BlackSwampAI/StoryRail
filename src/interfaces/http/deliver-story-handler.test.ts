@@ -18,6 +18,7 @@ const DELIVERY = {
   storyId: "story-43",
   revisionId: "revision-1",
   destination: "studiocms",
+  destinationInstanceId: "studiocms:https://cms.example.test",
   remoteId: "426bfa0f-1c3d-4f1e-9a5b-7c2d0e8f1234",
   request: { operation: "create", slug: "a-headline", draft: true, bodyCharacters: 42 },
   startedAt: "started",
@@ -100,6 +101,18 @@ describe("deliver Story HTTP handler", () => {
       error: {
         code: "STORY_NOT_PUBLISHED",
         message: "Only a published Story is delivered to a destination.",
+      },
+    });
+
+    expect((await respond(request({}), context)).status).toBe(409);
+  });
+
+  it("answers a legacy destination mapping that requires review as a conflict", async () => {
+    const { respond } = handler({
+      ok: false,
+      error: {
+        code: "DESTINATION_MAPPING_REQUIRES_REVIEW",
+        message: "Confirm or dismiss the legacy destination mapping before delivering.",
       },
     });
 

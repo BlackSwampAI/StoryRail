@@ -8,6 +8,7 @@ const common = {
   storyId: nonEmptyText,
   revisionId: nonEmptyText,
   destination: nonEmptyText,
+  destinationInstanceId: nonEmptyText.nullable(),
   // A delivery still in flight has not been told the identifier the destination assigned.
   remoteId: nonEmptyText.nullable(),
   request: z

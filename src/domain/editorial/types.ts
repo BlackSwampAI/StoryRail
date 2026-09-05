@@ -20,6 +20,7 @@ export type AgentToolCallId = Identifier<"AgentToolCallId">;
 export type PolicyRunId = Identifier<"PolicyRunId">;
 export type NewsroomStandardsId = Identifier<"NewsroomStandardsId">;
 export type StoryDeliveryId = Identifier<"StoryDeliveryId">;
+export type DestinationInstanceId = Identifier<"DestinationInstanceId">;
 export type SiteId = Identifier<"SiteId">;
 
 export const sourceId = (value: string): SourceId => value as SourceId;
@@ -40,6 +41,8 @@ export const policyRunId = (value: string): PolicyRunId => value as PolicyRunId;
 export const newsroomStandardsId = (value: string): NewsroomStandardsId =>
   value as NewsroomStandardsId;
 export const storyDeliveryId = (value: string): StoryDeliveryId => value as StoryDeliveryId;
+export const destinationInstanceId = (value: string): DestinationInstanceId =>
+  value as DestinationInstanceId;
 export const siteId = (value: string): SiteId => value as SiteId;
 export const reviewDecisionId = (value: string): ReviewDecisionId => value as ReviewDecisionId;
 

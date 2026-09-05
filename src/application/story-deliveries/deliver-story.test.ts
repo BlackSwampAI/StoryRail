@@ -8,6 +8,7 @@ import {
   articleRevisionId,
   assignmentId,
   credentialUnavailable,
+  destinationInstanceId,
   operatorId,
   storyDeliveryId,
   storyId,
@@ -151,7 +152,20 @@ function deliveryStore() {
           .filter(
             (row) =>
               row.storyId === query.storyId &&
+              row.destinationInstanceId === query.destinationInstanceId &&
+              row.outcome === "succeeded",
+          )
+          .at(-1) ?? null
+      );
+    },
+    async findLatestLegacySucceeded(query) {
+      return (
+        [...rows.values()]
+          .filter(
+            (row) =>
+              row.storyId === query.storyId &&
               row.destination === query.destination &&
+              row.destinationInstanceId === null &&
               row.outcome === "succeeded",
           )
           .at(-1) ?? null
@@ -167,7 +181,12 @@ function deliveryStore() {
 function destination(
   behaviour: (request: DeliveryRequest) => ReturnType<DeliveryDestination["deliver"]>,
 ): DeliveryDestination {
-  return { name: "studiocms", draft: true, deliver: behaviour };
+  return {
+    name: "studiocms",
+    instanceId: destinationInstanceId("studiocms:https://cms.test"),
+    draft: true,
+    deliver: behaviour,
+  };
 }
 
 function workflow(options: {
@@ -211,6 +230,7 @@ describe("delivering a published Story to a destination", () => {
       outcome: "running",
       completedAt: null,
       remoteId: null,
+      destinationInstanceId: "studiocms:https://cms.test",
       request: { operation: "create", slug: "council-approves-the-harbour-plan" },
     });
   });
@@ -348,6 +368,97 @@ describe("delivering a published Story to a destination", () => {
       revisionId: "revision-2",
       remoteId: "page-made",
     });
+  });
+
+  it("creates a separate page when the configured installation changes", async () => {
+    const store = deliveryStore();
+    const requests: DeliveryRequest[] = [];
+    await workflow({
+      store,
+      destination: destination(async (request) => {
+        requests.push(request);
+        return { ok: true, remoteId: "old-page", result: { status: 200, message: "Saved" } };
+      }),
+    })({ storyId: STORY });
+
+    const replacement = {
+      ...destination(async (request) => {
+        requests.push(request);
+        return { ok: true, remoteId: "new-page", result: { status: 200, message: "Saved" } };
+      }),
+      instanceId: destinationInstanceId("studiocms:https://replacement.test"),
+    };
+    await workflow({ store, destination: replacement, deliveryIds: ["delivery-2"] })({
+      storyId: STORY,
+    });
+
+    expect(requests.map(({ operation, remoteId }) => ({ operation, remoteId }))).toEqual([
+      { operation: "create", remoteId: null },
+      { operation: "create", remoteId: null },
+    ]);
+  });
+
+  it("blocks an unbound legacy mapping when no mapping exists for the current installation", async () => {
+    const store = deliveryStore();
+    store.rows.set("legacy", {
+      id: storyDeliveryId("legacy"),
+      storyId: STORY,
+      revisionId: articleRevisionId("revision-1"),
+      destination: "studiocms",
+      destinationInstanceId: null,
+      remoteId: "legacy-page",
+      request: { operation: "create", slug: "old", draft: true, bodyCharacters: 1 },
+      startedAt: "started",
+      outcome: "succeeded",
+      completedAt: "completed",
+      result: { status: 200, message: "Saved" },
+    });
+    let attempted = false;
+
+    await expect(
+      workflow({
+        store,
+        destination: destination(async () => {
+          attempted = true;
+          throw new Error("must not deliver");
+        }),
+      })({ storyId: STORY }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "DESTINATION_MAPPING_REQUIRES_REVIEW" },
+    });
+    expect(attempted).toBe(false);
+    expect(store.rows.size).toBe(1);
+    expect(store.rows.has("delivery-1")).toBe(false);
+  });
+
+  it("uses a confirmed current mapping even when an older legacy mapping remains", async () => {
+    const store = deliveryStore();
+    const accept = destination(async () => ({
+      ok: true,
+      remoteId: "current-page",
+      result: { status: 200, message: "Saved" },
+    }));
+    await workflow({ store, destination: accept })({ storyId: STORY });
+    const current = store.rows.get("delivery-1")!;
+    store.rows.set("legacy", {
+      ...current,
+      id: storyDeliveryId("legacy"),
+      destinationInstanceId: null,
+      remoteId: "legacy-page",
+    });
+    let request: DeliveryRequest | undefined;
+
+    await workflow({
+      store,
+      destination: destination(async (sent) => {
+        request = sent;
+        return { ok: true, remoteId: sent.remoteId!, result: { status: 200, message: "Saved" } };
+      }),
+      deliveryIds: ["delivery-2"],
+    })({ storyId: STORY });
+
+    expect(request).toMatchObject({ operation: "update", remoteId: "current-page" });
   });
 
   it("records how large the body was rather than a second copy of it", async () => {

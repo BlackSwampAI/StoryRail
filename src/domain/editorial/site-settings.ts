@@ -9,9 +9,17 @@ import {
   type SiteSearchSettings,
   type SiteSettings,
 } from "./site-settings-types";
+import { destinationInstanceId, type DestinationInstanceId } from "./types";
 
 function trimmedString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+/** Identifies the remote installation independently of the connector used to reach it. */
+export function siteDestinationInstanceId(
+  destination: SiteDestinationSettings,
+): DestinationInstanceId {
+  return destinationInstanceId(`${destination.kind}:${destination.baseUrl.replace(/\/+$/, "")}`);
 }
 
 /**

@@ -28,6 +28,7 @@ import {
   type AgentRun,
   type AgentProfile,
   credentialUnavailable,
+  destinationInstanceId,
   type CanonicalSourceUrl,
   type CredentialSlot,
   type FailedSourceExtraction,
@@ -216,6 +217,10 @@ const policySourceRootsMigrationPath = resolve(
 const policyRunAttemptsMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0075-policy-run-attempts.sql",
+);
+const destinationInstanceMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0076-story-delivery-instance-identity.sql",
 );
 
 const DEFAULT_SITE = siteId("site-default");
@@ -455,6 +460,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let researchBudgetMigrationSql: string;
   let policySourceRootsMigrationSql: string;
   let policyRunAttemptsMigrationSql: string;
+  let destinationInstanceMigrationSql: string;
 
   /** Every migration, in order. One list so a rebuild can never drift from the first build. */
   const orderedMigrations = (): readonly string[] => [
@@ -493,6 +499,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     researchBudgetMigrationSql,
     policySourceRootsMigrationSql,
     policyRunAttemptsMigrationSql,
+    destinationInstanceMigrationSql,
   ];
   let destructiveSetupAllowed = false;
 
@@ -575,6 +582,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     researchBudgetMigrationSql = await readFile(researchBudgetMigrationPath, "utf8");
     policySourceRootsMigrationSql = await readFile(policySourceRootsMigrationPath, "utf8");
     policyRunAttemptsMigrationSql = await readFile(policyRunAttemptsMigrationPath, "utf8");
+    destinationInstanceMigrationSql = await readFile(destinationInstanceMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -2318,6 +2326,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       readonly storyId: string;
       readonly revisionId: string;
       readonly remoteId: string | null;
+      readonly destinationInstanceId?: string | null;
       readonly operation?: "create" | "update";
     }) =>
       ({
@@ -2325,6 +2334,10 @@ describePostgres("PostgreSQL persistence repositories", () => {
         storyId: options.storyId,
         revisionId: options.revisionId,
         destination: "studiocms",
+        destinationInstanceId:
+          options.destinationInstanceId === undefined
+            ? "studiocms:https://cms.example"
+            : options.destinationInstanceId,
         remoteId: options.remoteId,
         request: {
           operation: options.operation ?? "create",
@@ -2336,6 +2349,165 @@ describePostgres("PostgreSQL persistence repositories", () => {
         completedAt: null,
         outcome: "running",
       }) as never;
+
+    it("migrates legacy mappings fail closed while allowing an in-flight legacy row to finish", async () => {
+      const before = orderedMigrations().slice(
+        0,
+        orderedMigrations().indexOf(destinationInstanceMigrationSql),
+      );
+      try {
+        await pool.query("DROP SCHEMA storyrail CASCADE");
+        for (const migration of before) await pool.query(migration);
+        const published = await publishReport("delivery-instance-migration", {
+          headline: "A delivered headline",
+          body: "The body of a delivered report.",
+          publishedAt: "2026-08-24T09:00:00.000Z",
+        });
+        const legacyPayload = (id: string, outcome: "running" | "succeeded" | "failed") => ({
+          id,
+          storyId: published.storyId,
+          revisionId: "revision-delivery-instance-migration",
+          destination: "studiocms",
+          remoteId: outcome === "succeeded" ? "legacy-page" : null,
+          request: {
+            operation: "create",
+            slug: "a-delivered-headline",
+            draft: true,
+            bodyCharacters: 64,
+          },
+          startedAt: "2026-08-24T10:00:00.000Z",
+          completedAt: outcome === "running" ? null : "2026-08-24T10:00:01.000Z",
+          outcome,
+          ...(outcome === "succeeded" ? { result: { status: 201, message: null } } : {}),
+          ...(outcome === "failed"
+            ? { failure: { code: "DESTINATION_REJECTED", message: "Not accepted." } }
+            : {}),
+        });
+        const legacyPayloads = (["succeeded", "failed", "running"] as const).map((outcome) =>
+          legacyPayload(`delivery-legacy-${outcome}`, outcome),
+        );
+        for (const payload of legacyPayloads) {
+          await pool.query(
+            `INSERT INTO storyrail.story_deliveries
+               (delivery_id, story_id, revision_id, destination, remote_id, outcome, started_at, completed_at, payload)
+             VALUES ($1, $2, $3, 'studiocms', $4, $5, $6, $7, $8::jsonb)`,
+            [
+              payload.id,
+              published.storyId,
+              payload.revisionId,
+              payload.remoteId,
+              payload.outcome,
+              payload.startedAt,
+              payload.completedAt,
+              JSON.stringify(payload),
+            ],
+          );
+        }
+
+        await pool.query(destinationInstanceMigrationSql);
+        const repository = createPostgresStoryDeliveryRepository({ pool });
+        const migrated = await pool.query<{
+          destination_instance_id: string | null;
+          payload: Record<string, unknown>;
+        }>(
+          `SELECT destination_instance_id, payload
+           FROM storyrail.story_deliveries ORDER BY delivery_id`,
+        );
+        expect(migrated.rows).toEqual(
+          legacyPayloads
+            .map((payload) => ({
+              destination_instance_id: null,
+              payload: { ...payload, destinationInstanceId: null },
+            }))
+            .sort((left, right) => String(left.payload.id).localeCompare(String(right.payload.id))),
+        );
+        await expect(repository.listByStoryId(published.storyId)).resolves.toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              id: "delivery-legacy-succeeded",
+              destinationInstanceId: null,
+              remoteId: "legacy-page",
+              outcome: "succeeded",
+              request: expect.objectContaining({
+                operation: "create",
+                slug: "a-delivered-headline",
+              }),
+              result: { status: 201, message: null },
+            }),
+            expect.objectContaining({
+              id: "delivery-legacy-failed",
+              destinationInstanceId: null,
+              remoteId: null,
+              outcome: "failed",
+              request: expect.objectContaining({
+                operation: "create",
+                slug: "a-delivered-headline",
+              }),
+              failure: { code: "DESTINATION_REJECTED", message: "Not accepted." },
+            }),
+            expect.objectContaining({
+              id: "delivery-legacy-running",
+              destinationInstanceId: null,
+              remoteId: null,
+              outcome: "running",
+              completedAt: null,
+            }),
+          ]),
+        );
+        await expect(
+          repository.findLatestLegacySucceeded({
+            storyId: published.storyId,
+            destination: "studiocms",
+          }),
+        ).resolves.toMatchObject({ remoteId: "legacy-page", destinationInstanceId: null });
+        await expect(
+          repository.findLatestSucceeded({
+            storyId: published.storyId,
+            destinationInstanceId: destinationInstanceId("studiocms:https://cms.example"),
+          }),
+        ).resolves.toBeNull();
+
+        const running = await repository
+          .listByStoryId(published.storyId)
+          .then((deliveries) =>
+            deliveries.find((delivery) => delivery.id === "delivery-legacy-running"),
+          );
+        expect(running).toBeDefined();
+        const completion = await repository.complete({
+          ...(running as unknown as Record<string, unknown>),
+          completedAt: "2026-08-24T10:00:02.000Z",
+          outcome: "failed",
+          failure: { code: "DESTINATION_UNREACHABLE", message: null },
+        } as never);
+        expect(completion).toMatchObject({
+          ok: true,
+          delivery: { destinationInstanceId: null, outcome: "failed" },
+        });
+        await expect(
+          repository.append(
+            intent({
+              id: "delivery-new-without-instance",
+              storyId: published.storyId,
+              revisionId: "revision-delivery-instance-migration",
+              destinationInstanceId: null,
+              remoteId: null,
+            }),
+          ),
+        ).rejects.toMatchObject({ constraint: "story_deliveries_destination_instance_required" });
+        await expect(
+          pool.query(
+            `UPDATE storyrail.story_deliveries
+             SET destination_instance_id = 'studiocms:https://cms.example'
+             WHERE delivery_id = 'delivery-legacy-succeeded'`,
+          ),
+        ).rejects.toThrow("already complete");
+      } finally {
+        await pool.query("DROP SCHEMA storyrail CASCADE");
+        for (const migration of orderedMigrations()) await pool.query(migration);
+        await addSecondSite(pool);
+        await addSecondSiteWriter(pool);
+      }
+    });
 
     // The row exists while the delivery is still an intention, so a process that died having
     // already made a page on a website leaves something an operator can find. It cannot name the
@@ -2443,8 +2615,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await expect(
         pool.query(
           `INSERT INTO storyrail.story_deliveries
-             (delivery_id, story_id, revision_id, destination, remote_id, outcome, started_at, completed_at, payload)
-           VALUES ('delivery-nameless', $1, $2, 'studiocms', NULL, 'succeeded', $3, $3, $4::jsonb)`,
+             (delivery_id, story_id, revision_id, destination, destination_instance_id, remote_id, outcome, started_at, completed_at, payload)
+           VALUES ('delivery-nameless', $1, $2, 'studiocms', 'studiocms:https://cms.example', NULL, 'succeeded', $3, $3, $4::jsonb)`,
           [
             published.storyId,
             "revision-delivery-nameless",
@@ -2454,6 +2626,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
               storyId: published.storyId,
               revisionId: "revision-delivery-nameless",
               destination: "studiocms",
+              destinationInstanceId: "studiocms:https://cms.example",
               remoteId: null,
               request: {
                 operation: "create",
@@ -2587,14 +2760,14 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await expect(
         repository.findLatestSucceeded({
           storyId: published.storyId,
-          destination: "studiocms",
+          destinationInstanceId: destinationInstanceId("studiocms:https://cms.example"),
         }),
       ).resolves.toMatchObject({ remoteId: "page-prior" });
-      // A refusal never becomes the page a later Revision is written over.
+      // A success at another configured installation never becomes the page this one writes over.
       await expect(
         repository.findLatestSucceeded({
           storyId: published.storyId,
-          destination: "somebody_elses_cms",
+          destinationInstanceId: destinationInstanceId("studiocms:https://other.example"),
         }),
       ).resolves.toBeNull();
     });
@@ -2609,8 +2782,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await expect(
         pool.query(
           `INSERT INTO storyrail.story_deliveries
-             (delivery_id, story_id, revision_id, destination, remote_id, outcome, started_at, completed_at, payload)
-           VALUES ('delivery-half', $1, $2, 'studiocms', 'page-half', 'succeeded', $3, NULL, $4::jsonb)`,
+             (delivery_id, story_id, revision_id, destination, destination_instance_id, remote_id, outcome, started_at, completed_at, payload)
+           VALUES ('delivery-half', $1, $2, 'studiocms', 'studiocms:https://cms.example', 'page-half', 'succeeded', $3, NULL, $4::jsonb)`,
           [
             published.storyId,
             "revision-delivery-half-finished",
@@ -2620,6 +2793,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
               storyId: published.storyId,
               revisionId: "revision-delivery-half-finished",
               destination: "studiocms",
+              destinationInstanceId: "studiocms:https://cms.example",
               remoteId: "page-half",
               request: {
                 operation: "create",
@@ -2647,8 +2821,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await expect(
         pool.query(
           `INSERT INTO storyrail.story_deliveries
-             (delivery_id, story_id, revision_id, destination, remote_id, outcome, started_at, completed_at, payload)
-           VALUES ('delivery-oversized', $1, $2, 'studiocms', 'page-oversized', 'succeeded', $3, $3, $4::jsonb)`,
+             (delivery_id, story_id, revision_id, destination, destination_instance_id, remote_id, outcome, started_at, completed_at, payload)
+           VALUES ('delivery-oversized', $1, $2, 'studiocms', 'studiocms:https://cms.example', 'page-oversized', 'succeeded', $3, $3, $4::jsonb)`,
           [
             published.storyId,
             "revision-delivery-oversized",
@@ -2658,6 +2832,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
               storyId: published.storyId,
               revisionId: "revision-delivery-oversized",
               destination: "studiocms",
+              destinationInstanceId: "studiocms:https://cms.example",
               remoteId: "page-oversized",
               request: {
                 operation: "create",
@@ -2685,8 +2860,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await expect(
         pool.query(
           `INSERT INTO storyrail.story_deliveries
-             (delivery_id, story_id, revision_id, destination, remote_id, outcome, started_at, completed_at, payload)
-           VALUES ('delivery-unnamed', $1, $2, 'studiocms', 'page-unnamed', 'failed', $3, $3, $4::jsonb)`,
+             (delivery_id, story_id, revision_id, destination, destination_instance_id, remote_id, outcome, started_at, completed_at, payload)
+           VALUES ('delivery-unnamed', $1, $2, 'studiocms', 'studiocms:https://cms.example', 'page-unnamed', 'failed', $3, $3, $4::jsonb)`,
           [
             published.storyId,
             "revision-delivery-unnamed-failure",
@@ -2696,6 +2871,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
               storyId: published.storyId,
               revisionId: "revision-delivery-unnamed-failure",
               destination: "studiocms",
+              destinationInstanceId: "studiocms:https://cms.example",
               remoteId: "page-unnamed",
               request: {
                 operation: "create",
@@ -2723,8 +2899,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await expect(
         pool.query(
           `INSERT INTO storyrail.story_deliveries
-             (delivery_id, story_id, revision_id, destination, remote_id, outcome, started_at, completed_at, payload)
-           VALUES ('delivery-blank', $1, $2, '  ', 'page-blank', 'running', $3, NULL, '{}'::jsonb)`,
+             (delivery_id, story_id, revision_id, destination, destination_instance_id, remote_id, outcome, started_at, completed_at, payload)
+           VALUES ('delivery-blank', $1, $2, '  ', 'studiocms:https://cms.example', 'page-blank', 'running', $3, NULL, '{}'::jsonb)`,
           [published.storyId, "revision-delivery-unnamed-destination", "2026-08-24T10:00:00.000Z"],
         ),
       ).rejects.toMatchObject({ constraint: "story_deliveries_destination_format_check" });
@@ -3893,6 +4069,13 @@ describePostgres("PostgreSQL persistence repositories", () => {
           },
           {
             table_name: "story_deliveries",
+            column_name: "destination_instance_id",
+            data_type: "text",
+            is_nullable: "YES",
+            is_identity: "NO",
+          },
+          {
+            table_name: "story_deliveries",
             column_name: "remote_id",
             data_type: "text",
             // Null until the destination says which page it made.
@@ -3950,7 +4133,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           },
         ]),
       );
-      expect(columns.rows).toHaveLength(131);
+      expect(columns.rows).toHaveLength(132);
     });
 
     it("creates the required primary, unique, foreign-key, and check constraints", async () => {

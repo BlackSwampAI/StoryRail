@@ -4,6 +4,7 @@ import {
   MAXIMUM_DELIVERY_RECORD_CHARACTERS,
   MAXIMUM_DELIVERY_SLUG_LENGTH,
   articleRevisionId,
+  destinationInstanceId,
   recordStoryDelivery,
   storyDeliveryId,
   storyDeliverySlug,
@@ -16,6 +17,7 @@ const base = {
   storyId: storyId("story-1"),
   revisionId: articleRevisionId("revision-1"),
   destination: "studiocms",
+  destinationInstanceId: destinationInstanceId("studiocms:https://cms.test"),
   remoteId: "page-1",
   request: { operation: "create", slug: "a-headline", draft: true, bodyCharacters: 120 },
   startedAt: "started",
@@ -31,6 +33,13 @@ const succeeded = (overrides: Partial<StoryDelivery> = {}): StoryDelivery =>
   }) as StoryDelivery;
 
 describe("recording what was delivered outside the system", () => {
+  it("refuses a blank destination instance identity", () => {
+    expect(recordStoryDelivery(succeeded({ destinationInstanceId: "  " as never }))).toMatchObject({
+      ok: false,
+      error: { code: "STORY_DELIVERY_IDENTITY_INVALID" },
+    });
+  });
+
   it("records the intention to deliver before any response exists", () => {
     expect(recordStoryDelivery({ ...base, outcome: "running", completedAt: null })).toMatchObject({
       ok: true,

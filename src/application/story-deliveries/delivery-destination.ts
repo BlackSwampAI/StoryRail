@@ -2,6 +2,7 @@ import type {
   ArticleBlock,
   ArticleRevisionId,
   CredentialUnavailableError,
+  DestinationInstanceId,
   DeliveryFailureCode,
   StoryDeliveryOutcomeResult,
   StoryId,
@@ -62,6 +63,7 @@ export type DeliveryAttemptResult =
 export interface DeliveryDestination {
   /** The name recorded against every delivery made through it, such as `studiocms`. */
   readonly name: string;
+  readonly instanceId: DestinationInstanceId;
   /**
    * Whether pages arrive unpublished. It is read from the destination rather than decided by the
    * workflow so that the audit record states what was actually sent, not what a caller assumed.

@@ -14,6 +14,7 @@ const base = {
   storyId: "story-delivery",
   revisionId: "revision-delivery",
   destination: "wordpress",
+  destinationInstanceId: "wordpress:https://newsroom.test",
   request: {
     operation: "create" as const,
     slug: "a-delivered-headline",
