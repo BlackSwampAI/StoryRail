@@ -47,38 +47,81 @@ export type VerifyArticleGroundingResult =
  * writing a line break as the two characters `\n`, or a quotation mark as `\"`. Normalising those away keeps the check about whether the words
  * are present, not about how they were rendered.
  *
- * Inline Markdown is the same kind of difference. Evidence arrives as Markdown, so a sentence in
- * the record may read `starts at **$2,499** for [education](https://…)` while the same sentence
- * on the page — and in any honest quotation of it — reads `starts at $2,499 for education`. The
- * asterisks and the address are how the passage was rendered, not words it contains, and a
- * Writer that reproduced them would be quoting the file rather than the source. Emphasis, code
- * ticks, link syntax and images are therefore removed; a link keeps its text, an image leaves
- * nothing, because an image carries no words a passage can quote.
+ * Balanced inline Markdown is the same kind of difference. Evidence arrives as Markdown, so a
+ * sentence in the record may read `starts at **$2,499** for [education](https://…)` while the
+ * same sentence on the page — and in any honest quotation of it — reads
+ * `starts at $2,499 for education`. The balanced asterisks and the address are how the passage
+ * was rendered, not words it contains.
+ * Recognised emphasis, code ticks, link syntax and images are therefore extracted conservatively;
+ * a link keeps its text and an image leaves nothing because it carries no words a passage can
+ * quote. Unmatched markers remain literal content.
  *
- * The same transformation is applied to the evidence, so a source that genuinely contains an
- * escape sequence still matches a quote that reproduces it — and so this cannot let a reworded
- * passage through. Both sides are reduced identically, which removes ways of writing the same
- * words and never makes two different sets of words equal.
+ * The same conservative transformation is applied to the evidence. It intentionally recognises
+ * only bounded, balanced constructs: a lossy transform can collapse different content even when
+ * applied to both sides, so literal punctuation is preserved whenever its Markdown role is not
+ * clear.
  *
  * Nothing else is normalised. Case, spelling, word order, and punctuation beyond this list stay
  * significant, so a passage that was reworded rather than quoted still fails.
  */
-function comparable(value: string): string {
+function visibleMarkdownOutsideCode(value: string): string {
   return (
     value
-      // An image carries no words a passage can quote, so it leaves nothing behind.
-      .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
-      // A link reads as its text. The address is markup around the sentence, not part of it.
-      .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-      .replace(/(\*\*|__|\*|_|`)/g, "")
-      .replace(/[‘’‛′]/g, "'")
-      .replace(/[“”‟″]/g, '"')
-      .replace(/[‐-―−]/g, "-")
-      .replace(/\\[nrt]/g, " ")
-      .replace(/\\(["'\\])/g, "$1")
-      .replace(/\s+/g, " ")
-      .trim()
+      // Keep this deliberately bounded to one line and a simple destination. Malformed or more
+      // elaborate Markdown remains literal rather than letting punctuation erase arbitrary text.
+      .replace(/!\[[^\]\n]*\]\([^()\n]*\)/g, " ")
+      .replace(/\[([^\]\n]+)\]\([^()\n]*\)/g, "$1")
+      // Emphasis delimiters are presentation only when the whole span is bounded like ordinary
+      // Markdown. Intraword punctuation such as foo*bar*baz remains literal content.
+      .replace(/(^|[^\p{L}\p{N}])\*\*([^*\s](?:[^*\n]*[^*\s])?)\*\*(?=$|[^\p{L}\p{N}])/gu, "$1$2")
+      .replace(/(^|[^\p{L}\p{N}])__([^_\s](?:[^_\n]*[^_\s])?)__(?=$|[^\p{L}\p{N}])/gu, "$1$2")
+      .replace(/(^|[^\p{L}\p{N}])\*([^*\s](?:[^*\n]*[^*\s])?)\*(?=$|[^\p{L}\p{N}])/gu, "$1$2")
+      .replace(/(^|[^\p{L}\p{N}])_([^_\s](?:[^_\n]*[^_\s])?)_(?=$|[^\p{L}\p{N}])/gu, "$1$2")
   );
+}
+
+function visibleInlineMarkdown(value: string): string {
+  const visible: string[] = [];
+  let outsideCode = "";
+  const flushOutsideCode = () => {
+    visible.push(visibleMarkdownOutsideCode(outsideCode));
+    outsideCode = "";
+  };
+
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] === "\\" && value[index + 1] === "`") {
+      outsideCode += "\\`";
+      index += 1;
+      continue;
+    }
+    if (value[index] !== "`") {
+      outsideCode += value[index];
+      continue;
+    }
+    const closing = value.indexOf("`", index + 1);
+    if (closing === -1 || value.slice(index + 1, closing).includes("\n")) {
+      outsideCode += "`";
+      continue;
+    }
+    flushOutsideCode();
+    // Code delimiters are presentation, but everything between them is literal visible text and
+    // must bypass emphasis and link parsing.
+    visible.push(value.slice(index + 1, closing));
+    index = closing;
+  }
+  flushOutsideCode();
+  return visible.join("");
+}
+
+function comparable(value: string): string {
+  return visibleInlineMarkdown(value)
+    .replace(/[‘’‛′]/g, "'")
+    .replace(/[“”‟″]/g, '"')
+    .replace(/[‐-―−]/g, "-")
+    .replace(/\\[nrt]/g, " ")
+    .replace(/\\(["'\\])/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /** A Markdown list, block quote, or fenced block continues the paragraph that introduces it. */
@@ -136,7 +179,10 @@ export function verifyArticleGrounding(
         return;
       }
       const quoted = comparable(citation.quote);
-      if (!passages(cited.content).some((passage) => passage.includes(quoted)))
+      if (
+        quoted.length === 0 ||
+        !passages(cited.content).some((passage) => passage.includes(quoted))
+      )
         findings.push(at("CITATION_QUOTE_UNSUPPORTED"));
     });
   });
@@ -247,7 +293,7 @@ export function unsupportedDirectorQuotes(
   return Object.entries(review.checks)
     .filter(([, check]) => {
       const quoted = comparable(check.quoted);
-      return !written.some((passage) => passage.includes(quoted));
+      return quoted.length === 0 || !written.some((passage) => passage.includes(quoted));
     })
     .map(([name]) => name);
 }
