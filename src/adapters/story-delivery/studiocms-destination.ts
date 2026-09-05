@@ -3,7 +3,7 @@ import type {
   DeliveryDestination,
   DeliveryRequest,
 } from "@/application/story-deliveries";
-import type { SiteDestinationSettings } from "@/domain/editorial";
+import { siteDestinationInstanceId, type SiteDestinationSettings } from "@/domain/editorial";
 
 import { bounded, failureCodeFor, isRecord, readJsonBody } from "./destination-response";
 
@@ -54,6 +54,7 @@ export function createStudioCmsDestination(
 
   return {
     name: STUDIOCMS_DESTINATION_NAME,
+    instanceId: siteDestinationInstanceId(options.settings),
     draft: options.settings.draft,
 
     async deliver(request: DeliveryRequest): Promise<DeliveryAttemptResult> {

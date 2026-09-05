@@ -16,6 +16,7 @@ function status(result: DeliverStoryResult): number {
       return 404;
     case "STORY_NOT_PUBLISHED":
     case "STORY_HAS_NO_ARTICLE":
+    case "DESTINATION_MAPPING_REQUIRES_REVIEW":
       return 409;
     case "STORY_DELIVERY_NOT_RECORDED":
       return 500;

@@ -10,6 +10,7 @@ const payload = {
   storyId: "story-decoder",
   revisionId: "revision-decoder",
   destination: "studiocms",
+  destinationInstanceId: "studiocms:https://cms.test",
   remoteId: "page-decoder",
   request: { operation: "create", slug: "decoder-story", draft: true, bodyCharacters: 240 },
   startedAt: "opaque-started",
@@ -28,6 +29,21 @@ describe("PostgreSQL Story delivery decoder", () => {
 
   it("rejects an unexpected top-level key with the persistence invariant", () => {
     expect(() => decodePostgresStoryDelivery({ ...payload, unexpected: true })).toThrow(
+      PostgresStoryDeliveryInvariantError,
+    );
+  });
+
+  it("accepts an explicit null identity for a legacy payload", () => {
+    expect(decodePostgresStoryDelivery({ ...payload, destinationInstanceId: null })).toMatchObject({
+      destinationInstanceId: null,
+    });
+  });
+
+  it("rejects a payload that omits the destination identity fact", () => {
+    const withoutIdentity: Record<string, unknown> = { ...payload };
+    delete withoutIdentity.destinationInstanceId;
+
+    expect(() => decodePostgresStoryDelivery(withoutIdentity)).toThrow(
       PostgresStoryDeliveryInvariantError,
     );
   });

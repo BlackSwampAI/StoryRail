@@ -1290,6 +1290,7 @@ describe("story-client", () => {
       storyId: STORY.id,
       revisionId: "revision-0021",
       destination: "wordpress",
+      destinationInstanceId: "wordpress:https://newsroom.test",
       remoteId: "412",
       request: {
         operation: "create",
@@ -1315,6 +1316,91 @@ describe("story-client", () => {
     await expect(
       createStoryClient({ siteId: SITE_ID, fetch }).inspectStory(STORY.id),
     ).resolves.toEqual({ kind: "completed", value: inspection });
+  });
+
+  it("refuses an inspection whose delivery omits its destination identity fact", async () => {
+    const delivery = {
+      id: "delivery-without-instance",
+      storyId: STORY.id,
+      revisionId: "revision-0021",
+      destination: "wordpress",
+      remoteId: "412",
+      request: {
+        operation: "create",
+        slug: "a-real-newsroom-story",
+        draft: true,
+        bodyCharacters: 640,
+      },
+      startedAt: "2026-08-25T09:00:00.000Z",
+      outcome: "succeeded",
+      completedAt: "2026-08-25T09:00:04.000Z",
+      result: { status: 201, message: null },
+    };
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(200, { ok: true, inspection: { ...INSPECTION, deliveries: [delivery] } }),
+    );
+
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).inspectStory(STORY.id),
+    ).resolves.toEqual({ kind: "unavailable", message: STORY_REQUEST_UNAVAILABLE_MESSAGE });
+  });
+
+  it("reads an explicit null destination identity as a legacy delivery", async () => {
+    const delivery = {
+      id: "delivery-legacy-instance",
+      storyId: STORY.id,
+      revisionId: "revision-0021",
+      destination: "wordpress",
+      destinationInstanceId: null,
+      remoteId: "412",
+      request: {
+        operation: "create",
+        slug: "a-real-newsroom-story",
+        draft: true,
+        bodyCharacters: 640,
+      },
+      startedAt: "2026-08-25T09:00:00.000Z",
+      outcome: "succeeded",
+      completedAt: "2026-08-25T09:00:04.000Z",
+      result: { status: 201, message: null },
+    } as const;
+    const inspection = { ...INSPECTION, deliveries: [delivery] };
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(200, { ok: true, inspection }),
+    );
+
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).inspectStory(STORY.id),
+    ).resolves.toEqual({ kind: "completed", value: inspection });
+  });
+
+  it("refuses an inspection whose delivery carries an extra identity fact", async () => {
+    const delivery = {
+      id: "delivery-with-extra-instance",
+      storyId: STORY.id,
+      revisionId: "revision-0021",
+      destination: "wordpress",
+      destinationInstanceId: null,
+      destinationInstallationId: "wordpress:https://newsroom.test",
+      remoteId: "412",
+      request: {
+        operation: "create",
+        slug: "a-real-newsroom-story",
+        draft: true,
+        bodyCharacters: 640,
+      },
+      startedAt: "2026-08-25T09:00:00.000Z",
+      outcome: "succeeded",
+      completedAt: "2026-08-25T09:00:04.000Z",
+      result: { status: 201, message: null },
+    };
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(200, { ok: true, inspection: { ...INSPECTION, deliveries: [delivery] } }),
+    );
+
+    await expect(
+      createStoryClient({ siteId: SITE_ID, fetch }).inspectStory(STORY.id),
+    ).resolves.toEqual({ kind: "unavailable", message: STORY_REQUEST_UNAVAILABLE_MESSAGE });
   });
 
   it("reads back an inspection carrying the tool calls a run made", async () => {
@@ -1374,6 +1460,7 @@ describe("story-client", () => {
       storyId: STORY.id,
       revisionId: "revision-0021",
       destination: "wordpress",
+      destinationInstanceId: "wordpress:https://newsroom.test",
       remoteId: null,
       request: {
         operation: "create",
@@ -1401,6 +1488,7 @@ describe("story-client", () => {
       storyId: STORY.id,
       revisionId: "revision-0021",
       destination: "wordpress",
+      destinationInstanceId: "wordpress:https://newsroom.test",
       remoteId: "412",
       request: {
         operation: "update",

@@ -60,7 +60,11 @@ describe("resolving the destination a newsroom delivers to", () => {
 
     await expect(directory.resolve()).resolves.toMatchObject({
       ok: true,
-      destination: { name: "wordpress", draft: false },
+      destination: {
+        name: "wordpress",
+        instanceId: "wordpress:https://newsroom.test",
+        draft: false,
+      },
     });
     expect(reads).toEqual([WORDPRESS_APPLICATION_PASSWORD_SLOT]);
   });
@@ -96,7 +100,11 @@ describe("resolving the destination a newsroom delivers to", () => {
     expect(reads).toEqual([]);
     await expect(directory.resolve()).resolves.toMatchObject({
       ok: true,
-      destination: { name: "studiocms", draft: true },
+      destination: {
+        name: "studiocms",
+        instanceId: "studiocms:https://newsroom.test/studiocms_api/rest/v1",
+        draft: true,
+      },
     });
     expect(reads).toEqual([STUDIOCMS_API_TOKEN_SLOT]);
   });

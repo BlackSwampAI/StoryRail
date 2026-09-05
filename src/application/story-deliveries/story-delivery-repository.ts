@@ -1,4 +1,4 @@
-import type { StoryDelivery, StoryId } from "@/domain/editorial";
+import type { DestinationInstanceId, StoryDelivery, StoryId } from "@/domain/editorial";
 
 export type AppendStoryDeliveryResult =
   | { readonly ok: true; readonly delivery: StoryDelivery }
@@ -25,12 +25,17 @@ export interface StoryDeliveryRepository {
   append(delivery: StoryDelivery): Promise<AppendStoryDeliveryResult>;
   complete(delivery: StoryDelivery): Promise<CompleteStoryDeliveryResult>;
   /**
-   * The most recent delivery of this Story to this destination that was accepted, which is how a
+   * The most recent delivery of this Story to this destination installation that was accepted,
+   * which is how a
    * later Revision finds the page to update. The record is the authority on what StoryRail has
    * put there; the destination is never asked what exists, because a page an operator made by
    * hand is not one this system created.
    */
   findLatestSucceeded(query: {
+    readonly storyId: StoryId;
+    readonly destinationInstanceId: DestinationInstanceId;
+  }): Promise<StoryDelivery | null>;
+  findLatestLegacySucceeded(query: {
     readonly storyId: StoryId;
     readonly destination: string;
   }): Promise<StoryDelivery | null>;

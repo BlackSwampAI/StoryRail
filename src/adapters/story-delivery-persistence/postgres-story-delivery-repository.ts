@@ -17,13 +17,14 @@ export function createPostgresStoryDeliveryRepository(dependencies: {
       try {
         await dependencies.pool.query(
           `INSERT INTO storyrail.story_deliveries
-             (delivery_id, story_id, revision_id, destination, remote_id, outcome, started_at, completed_at, payload)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)`,
+             (delivery_id, story_id, revision_id, destination, destination_instance_id, remote_id, outcome, started_at, completed_at, payload)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)`,
           [
             delivery.id,
             delivery.storyId,
             delivery.revisionId,
             delivery.destination,
+            delivery.destinationInstanceId,
             delivery.remoteId,
             delivery.outcome,
             delivery.startedAt,
@@ -74,7 +75,20 @@ export function createPostgresStoryDeliveryRepository(dependencies: {
     async findLatestSucceeded(query): Promise<StoryDelivery | null> {
       const { rows } = await dependencies.pool.query<{ payload: unknown }>(
         `SELECT payload FROM storyrail.story_deliveries
-         WHERE story_id = $1 AND destination = $2 AND outcome = 'succeeded'
+         WHERE story_id = $1 AND destination_instance_id = $2 AND outcome = 'succeeded'
+         ORDER BY started_at DESC
+         LIMIT 1`,
+        [query.storyId, query.destinationInstanceId],
+      );
+      const row = rows[0];
+      return row ? decodePostgresStoryDelivery(row.payload) : null;
+    },
+
+    async findLatestLegacySucceeded(query): Promise<StoryDelivery | null> {
+      const { rows } = await dependencies.pool.query<{ payload: unknown }>(
+        `SELECT payload FROM storyrail.story_deliveries
+         WHERE story_id = $1 AND destination = $2 AND destination_instance_id IS NULL
+           AND outcome = 'succeeded'
          ORDER BY started_at DESC
          LIMIT 1`,
         [query.storyId, query.destination],

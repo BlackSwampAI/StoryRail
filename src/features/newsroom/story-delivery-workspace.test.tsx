@@ -39,6 +39,7 @@ const DELIVERY = {
   storyId: "story-71",
   revisionId: "revision-71",
   destination: "wordpress",
+  destinationInstanceId: "wordpress:https://newsroom.test",
   remoteId: "412",
   request: {
     operation: "create" as const,

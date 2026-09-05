@@ -62,6 +62,7 @@ export function recordStoryDelivery(candidate: StoryDelivery): RecordStoryDelive
     !nonEmpty(candidate.storyId) ||
     !nonEmpty(candidate.revisionId) ||
     !nonEmpty(candidate.destination) ||
+    (candidate.destinationInstanceId !== null && !nonEmpty(candidate.destinationInstanceId)) ||
     (candidate.remoteId !== null && !nonEmpty(candidate.remoteId)) ||
     !nonEmpty(candidate.startedAt) ||
     (candidate.outcome === "running"
