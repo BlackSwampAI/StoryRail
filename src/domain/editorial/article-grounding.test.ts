@@ -69,8 +69,8 @@ describe("verifying that an Article Revision is grounded", () => {
   });
 
   it("still refuses a rewording once the Markdown is set aside", () => {
-    // The normalisation removes ways of writing the same words; it never makes two different sets
-    // of words equal, because both sides are reduced identically.
+    // Recognized presentation syntax is ignored, but ordinary changes to the wording remain
+    // unsupported quotations.
     const page: readonly GroundingEvidence[] = [
       {
         sourceId: SOURCE,
@@ -81,6 +81,96 @@ describe("verifying that an Article Revision is grounded", () => {
     ];
     expect(
       verifyArticleGrounding(claim("Mac Studio with M5 Max costs $2,499 for students."), page),
+    ).toMatchObject({ ok: false, findings: [{ code: "CITATION_QUOTE_UNSUPPORTED" }] });
+  });
+
+  it("only removes complete, bounded inline Markdown constructs", () => {
+    const page: readonly GroundingEvidence[] = [
+      {
+        sourceId: SOURCE,
+        evidenceId: EVIDENCE,
+        content: "The identifier unsupported remains literal.",
+      },
+    ];
+
+    expect(
+      verifyArticleGrounding(claim("The identifier `unsupported` remains literal."), page),
+    ).toEqual({ ok: true });
+    expect(
+      verifyArticleGrounding(claim("The identifier un`supported remains literal."), page),
+    ).toMatchObject({ ok: false, findings: [{ code: "CITATION_QUOTE_UNSUPPORTED" }] });
+  });
+
+  it.each(["", "**", "![proof](https://example.test/x)"])(
+    "refuses an empty or markup-only quotation %j",
+    (quote) => {
+      expect(verifyArticleGrounding(claim(quote), evidence)).toMatchObject({
+        ok: false,
+        findings: [{ code: "CITATION_QUOTE_UNSUPPORTED" }],
+      });
+    },
+  );
+
+  it.each([
+    ["2*3", "23"],
+    ["foo_bar", "foobar"],
+  ])("does not collapse literal %s into %s", (quote, content) => {
+    expect(
+      verifyArticleGrounding(claim(quote), [{ sourceId: SOURCE, evidenceId: EVIDENCE, content }]),
+    ).toMatchObject({ ok: false, findings: [{ code: "CITATION_QUOTE_UNSUPPORTED" }] });
+  });
+
+  it("accepts the visible text of balanced emphasis, links, and inline code", () => {
+    const page: readonly GroundingEvidence[] = [
+      {
+        sourceId: SOURCE,
+        evidenceId: EVIDENCE,
+        content: "The **$2,499** plan includes [education](https://example.test) and `Future`.",
+      },
+    ];
+
+    expect(
+      verifyArticleGrounding(claim("The $2,499 plan includes education and Future."), page),
+    ).toEqual({ ok: true });
+  });
+
+  it("keeps Markdown-looking inline-code content literal", () => {
+    const page: readonly GroundingEvidence[] = [
+      { sourceId: SOURCE, evidenceId: EVIDENCE, content: "The value is `*literal*`." },
+    ];
+
+    expect(verifyArticleGrounding(claim("The value is `*literal*`."), page)).toEqual({ ok: true });
+    expect(verifyArticleGrounding(claim("The value is literal."), page)).toMatchObject({
+      ok: false,
+      findings: [{ code: "CITATION_QUOTE_UNSUPPORTED" }],
+    });
+  });
+
+  it("does not interpret paired intraword stars as emphasis", () => {
+    expect(
+      verifyArticleGrounding(claim("foo*bar*baz"), [
+        { sourceId: SOURCE, evidenceId: EVIDENCE, content: "foobarbaz" },
+      ]),
+    ).toMatchObject({ ok: false, findings: [{ code: "CITATION_QUOTE_UNSUPPORTED" }] });
+  });
+
+  it("does not interpret delimiters padded with whitespace as emphasis", () => {
+    expect(
+      verifyArticleGrounding(claim("left * middle * right"), [
+        { sourceId: SOURCE, evidenceId: EVIDENCE, content: "left middle right" },
+      ]),
+    ).toMatchObject({ ok: false, findings: [{ code: "CITATION_QUOTE_UNSUPPORTED" }] });
+  });
+
+  it("does not join visible text across an image", () => {
+    expect(
+      verifyArticleGrounding(claim("leftright"), [
+        {
+          sourceId: SOURCE,
+          evidenceId: EVIDENCE,
+          content: "left![proof](https://example.test/x)right",
+        },
+      ]),
     ).toMatchObject({ ok: false, findings: [{ code: "CITATION_QUOTE_UNSUPPORTED" }] });
   });
 
@@ -275,6 +365,71 @@ describe("holding a Director to the standard it enforces", () => {
         article,
       ),
     ).toEqual([]);
+  });
+
+  it("accepts complete inline Markdown while preserving unmatched markers", () => {
+    expect(
+      unsupportedDirectorQuotes(
+        {
+          checks: {
+            assignment: check("Rust 2024 is the **largest** edition"),
+            style: check("Adoption is expected to take `months`."),
+          },
+        },
+        article,
+      ),
+    ).toEqual([]);
+    expect(
+      unsupportedDirectorQuotes(
+        { checks: { assignment: check("Rust 2024 is the *largest edition") } },
+        article,
+      ),
+    ).toEqual(["assignment"]);
+  });
+
+  it("names checks with empty or markup-only quotations", () => {
+    expect(
+      unsupportedDirectorQuotes(
+        {
+          checks: {
+            assignment: check(""),
+            accuracy: check("![Invented passage](https://example.test/image.png)"),
+          },
+        },
+        article,
+      ),
+    ).toEqual(["assignment", "accuracy"]);
+  });
+
+  it("preserves literal punctuation at the Director boundary", () => {
+    expect(
+      unsupportedDirectorQuotes(
+        {
+          checks: {
+            emptyEmphasis: check("**"),
+            image: check("![proof](https://example.test/x)"),
+            multiplication: check("2*3"),
+            identifier: check("foo_bar"),
+          },
+        },
+        "The Article contains 23 and foobar.",
+      ),
+    ).toEqual(["emptyEmphasis", "image", "multiplication", "identifier"]);
+  });
+
+  it("keeps inline-code markers and intraword stars literal for the Director", () => {
+    expect(
+      unsupportedDirectorQuotes(
+        {
+          checks: {
+            code: check("The value is literal."),
+            intraword: check("foobarbaz"),
+            emphasis: check("Ordinary **balanced emphasis** works."),
+          },
+        },
+        "The value is `*literal*`. foo*bar*baz. Ordinary balanced emphasis works.",
+      ),
+    ).toEqual(["code", "intraword"]);
   });
 
   it("names the checks that quote something the Article does not contain", () => {
