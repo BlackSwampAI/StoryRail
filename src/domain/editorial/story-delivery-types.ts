@@ -12,6 +12,14 @@ export const DELIVERY_FAILURE_CODES = [
 ] as const;
 export type DeliveryFailureCode = (typeof DELIVERY_FAILURE_CODES)[number];
 
+export const DELIVERY_UNCERTAINTY_CODES = [
+  /** The request left StoryRail, but no trustworthy response established what happened. */
+  "DESTINATION_REQUEST_OUTCOME_UNKNOWN",
+  /** The destination accepted the request, but its response cannot identify the resulting page. */
+  "DESTINATION_ACCEPTED_RESPONSE_UNVERIFIABLE",
+] as const;
+export type DeliveryUncertaintyCode = (typeof DELIVERY_UNCERTAINTY_CODES)[number];
+
 /**
  * A delivery records what was sent and what came back, never the Article itself. The Revision is
  * already durable and immutable; a copy here would be a second version of the same prose with no
@@ -98,6 +106,14 @@ export type StoryDelivery = StoryDeliveryCommon &
         readonly completedAt: string;
         readonly failure: {
           readonly code: DeliveryFailureCode;
+          readonly message: string | null;
+        };
+      }
+    | {
+        readonly outcome: "unknown";
+        readonly completedAt: string;
+        readonly uncertainty: {
+          readonly code: DeliveryUncertaintyCode;
           readonly message: string | null;
         };
       }

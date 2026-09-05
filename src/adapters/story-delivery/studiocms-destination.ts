@@ -101,9 +101,9 @@ export function createStudioCmsDestination(
         });
       } catch (caught) {
         return {
-          ok: false,
-          failure: {
-            code: "DESTINATION_UNREACHABLE",
+          ok: null,
+          uncertainty: {
+            code: "DESTINATION_REQUEST_OUTCOME_UNKNOWN",
             message: bounded(caught instanceof Error ? caught.message : "The request failed."),
           },
         };
@@ -111,14 +111,24 @@ export function createStudioCmsDestination(
 
       const read = await readJsonBody(response);
       // An unreadable body on a successful status is still an outcome nothing can vouch for,
-      // so it is recorded as an invalid response rather than as a delivery that worked.
+      // so it is recorded as unknown rather than as either success or failure.
       if (!read.ok)
         return {
-          ok: false,
-          failure: {
-            code: response.ok ? "DESTINATION_RESPONSE_INVALID" : failureCodeFor(response.status),
-            message: `The destination answered ${response.status} with a body that is not JSON.`,
-          },
+          ...(response.ok
+            ? {
+                ok: null,
+                uncertainty: {
+                  code: "DESTINATION_ACCEPTED_RESPONSE_UNVERIFIABLE" as const,
+                  message: `The destination answered ${response.status} with a body that is not JSON.`,
+                },
+              }
+            : {
+                ok: false as const,
+                failure: {
+                  code: failureCodeFor(response.status),
+                  message: `The destination answered ${response.status} with a body that is not JSON.`,
+                },
+              }),
         };
       const body = read.body;
 
@@ -135,16 +145,16 @@ export function createStudioCmsDestination(
         };
 
       // An update already knows which page it wrote. A create only learns it from the message,
-      // and one that cannot be read is recorded as a failure rather than as a success naming
-      // nothing: the next Revision would otherwise make a second page instead of updating this.
+      // and one that cannot be read is recorded as unknown and gated for reconciliation rather
+      // than as a success naming nothing.
       const remoteId = creating
         ? (CREATED_PAGE_ID.exec(message ?? "")?.[1] ?? null)
         : request.remoteId;
       if (remoteId === null)
         return {
-          ok: false,
-          failure: {
-            code: "DESTINATION_RESPONSE_INVALID",
+          ok: null,
+          uncertainty: {
+            code: "DESTINATION_ACCEPTED_RESPONSE_UNVERIFIABLE",
             message: message
               ? `The destination accepted the page but named no id: ${message}`
               : "The destination accepted the page and said nothing about it.",

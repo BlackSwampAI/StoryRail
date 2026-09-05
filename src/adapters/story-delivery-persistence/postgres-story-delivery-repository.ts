@@ -76,7 +76,7 @@ export function createPostgresStoryDeliveryRepository(dependencies: {
       const { rows } = await dependencies.pool.query<{ payload: unknown }>(
         `SELECT payload FROM storyrail.story_deliveries
          WHERE story_id = $1 AND destination_instance_id = $2 AND outcome = 'succeeded'
-         ORDER BY started_at DESC
+         ORDER BY started_at DESC, delivery_id DESC
          LIMIT 1`,
         [query.storyId, query.destinationInstanceId],
       );
@@ -89,7 +89,7 @@ export function createPostgresStoryDeliveryRepository(dependencies: {
         `SELECT payload FROM storyrail.story_deliveries
          WHERE story_id = $1 AND destination = $2 AND destination_instance_id IS NULL
            AND outcome = 'succeeded'
-         ORDER BY started_at DESC
+         ORDER BY started_at DESC, delivery_id DESC
          LIMIT 1`,
         [query.storyId, query.destination],
       );
@@ -101,6 +101,29 @@ export function createPostgresStoryDeliveryRepository(dependencies: {
       const { rows } = await dependencies.pool.query<{ payload: unknown }>(
         `SELECT payload FROM storyrail.story_deliveries
          WHERE story_id = $1 AND delivery_id = $2 AND outcome = 'succeeded'
+         LIMIT 1`,
+        [query.storyId, query.deliveryId],
+      );
+      return rows[0] ? decodePostgresStoryDelivery(rows[0].payload) : null;
+    },
+
+    async findLatestUnresolved(query): Promise<StoryDelivery | null> {
+      const { rows } = await dependencies.pool.query<{ payload: unknown }>(
+        `SELECT payload FROM storyrail.story_deliveries
+         WHERE story_id = $1 AND destination_instance_id = $2
+           AND outcome IN ('running', 'unknown')
+         ORDER BY started_at DESC, delivery_id DESC
+         LIMIT 1`,
+        [query.storyId, query.destinationInstanceId],
+      );
+      return rows[0] ? decodePostgresStoryDelivery(rows[0].payload) : null;
+    },
+
+    async findUnresolvedById(query): Promise<StoryDelivery | null> {
+      const { rows } = await dependencies.pool.query<{ payload: unknown }>(
+        `SELECT payload FROM storyrail.story_deliveries
+         WHERE story_id = $1 AND delivery_id = $2
+           AND outcome IN ('running', 'unknown')
          LIMIT 1`,
         [query.storyId, query.deliveryId],
       );

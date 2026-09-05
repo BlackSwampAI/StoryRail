@@ -226,8 +226,11 @@ describe("delivering to a WordPress install", () => {
     });
 
     await expect(destination.deliver(REQUEST)).resolves.toMatchObject({
-      ok: false,
-      failure: { code: "DESTINATION_UNREACHABLE", message: "connect ECONNREFUSED" },
+      ok: null,
+      uncertainty: {
+        code: "DESTINATION_REQUEST_OUTCOME_UNKNOWN",
+        message: "connect ECONNREFUSED",
+      },
     });
   });
 
@@ -240,9 +243,20 @@ describe("delivering to a WordPress install", () => {
     });
 
     await expect(destination.deliver(REQUEST)).resolves.toMatchObject({
-      ok: false,
-      failure: { code: "DESTINATION_RESPONSE_INVALID" },
+      ok: null,
+      uncertainty: { code: "DESTINATION_ACCEPTED_RESPONSE_UNVERIFIABLE" },
     });
+  });
+
+  it("keeps a non-success response a failure even when its body is unreadable", async () => {
+    const { fetchImplementation } = fixture(new Response("bad gateway", { status: 502 }));
+    const destination = createWordPressDestination({
+      settings: SETTINGS,
+      applicationPassword: "abcd efgh ijkl",
+      fetch: fetchImplementation,
+    });
+
+    await expect(destination.deliver(REQUEST)).resolves.toMatchObject({ ok: false });
   });
 
   it("authenticates as the configured user and keeps the password out of the record", async () => {

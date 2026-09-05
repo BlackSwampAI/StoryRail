@@ -19,6 +19,7 @@ import { createPostgresStoryListingRepository } from "@/adapters/story-listing";
 import { createPostgresStoryRepository } from "@/adapters/story-persistence";
 import { createPostgresStoryPublicationPersistence } from "@/adapters/story-publication-persistence";
 import { createPostgresStoryDeliveryRepository } from "@/adapters/story-delivery-persistence";
+import { createPostgresStoryDeliveryReconciliationRepository } from "@/adapters/story-delivery-reconciliation-persistence";
 import { createPostgresLegacyDeliveryMappingResolutionRepository } from "@/adapters/legacy-delivery-mapping-resolution-persistence";
 import { createSiteDeliveryDestinationDirectory } from "@/adapters/story-delivery";
 import { createPostgresStoryRejectionPersistence } from "@/adapters/story-rejection-persistence";
@@ -52,7 +53,9 @@ import { createPublishStory, type PublishStoryWorkflow } from "@/application/sto
 import {
   createDeliverStory,
   createResolveLegacyDeliveryMapping,
+  createReconcileStoryDelivery,
   type DeliverStoryWorkflow,
+  type ReconcileStoryDeliveryResult,
   type ResolveLegacyDeliveryMappingResult,
   type StoryDeliveryRepository,
 } from "@/application/story-deliveries";
@@ -77,6 +80,7 @@ import {
   reviewDecisionId,
   legacyDeliveryMappingResolutionId,
   storyDeliveryId,
+  storyDeliveryReconciliationId,
   storyId,
   transitionId,
   type AgentRunId,
@@ -116,6 +120,13 @@ export interface StoryRuntime {
     readonly decision: import("@/domain/editorial").LegacyDeliveryMappingDecision;
     readonly decidedBy: OperatorActor;
   }) => Promise<ResolveLegacyDeliveryMappingResult>;
+  readonly reconcileStoryDelivery: (command: {
+    readonly storyId: import("@/domain/editorial").StoryId;
+    readonly deliveryId: import("@/domain/editorial").StoryDeliveryId;
+    readonly decision: import("@/domain/editorial").StoryDeliveryReconciliationDecision;
+    readonly remoteId: string | null;
+    readonly decidedBy: OperatorActor;
+  }) => Promise<ReconcileStoryDeliveryResult>;
   readonly listStoryDeliveries: StoryDeliveryRepository["listByStoryId"];
   readonly submitStoryReview: (command: {
     readonly storyId: import("@/domain/editorial").StoryId;
@@ -270,6 +281,10 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
     pool,
     siteId: site,
   });
+  const storyDeliveryReconciliations = createPostgresStoryDeliveryReconciliationRepository({
+    pool,
+    siteId: site,
+  });
   const deliveryDestinations = createSiteDeliveryDestinationDirectory({
     settings: siteSettings,
     resolveApiKey: siteStore.resolveApiKey,
@@ -278,6 +293,7 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
     inspections: inspectionRepository,
     deliveries: storyDeliveries,
     resolutions: legacyDeliveryMappingResolutions,
+    reconciliations: storyDeliveryReconciliations,
     destinations: deliveryDestinations,
     createDeliveryId: () => storyDeliveryId(createUuid()),
     now,
@@ -288,6 +304,14 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
     resolutions: legacyDeliveryMappingResolutions,
     destinations: deliveryDestinations,
     createResolutionId: () => legacyDeliveryMappingResolutionId(createUuid()),
+    now,
+  });
+  const reconcileStoryDelivery = createReconcileStoryDelivery({
+    inspections: inspectionRepository,
+    deliveries: storyDeliveries,
+    reconciliations: storyDeliveryReconciliations,
+    destinations: deliveryDestinations,
+    createReconciliationId: () => storyDeliveryReconciliationId(createUuid()),
     now,
   });
   const setSiteCredential = createSetSiteCredential({
@@ -319,6 +343,7 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
     publishStory,
     deliverStory,
     resolveLegacyDeliveryMapping,
+    reconcileStoryDelivery,
     listStoryDeliveries: (identity: import("@/domain/editorial").StoryId) =>
       storyDeliveries.listByStoryId(identity),
     submitStoryReview,

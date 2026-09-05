@@ -1,7 +1,11 @@
 import { z } from "zod";
 
 import { nonEmptyText } from "./schema-primitives";
-import { DELIVERY_FAILURE_CODES, DELIVERY_OPERATIONS } from "./story-delivery-types";
+import {
+  DELIVERY_FAILURE_CODES,
+  DELIVERY_OPERATIONS,
+  DELIVERY_UNCERTAINTY_CODES,
+} from "./story-delivery-types";
 
 const common = {
   id: nonEmptyText,
@@ -48,6 +52,16 @@ export const storyDeliverySchema = z.union([
       completedAt: nonEmptyText,
       failure: z
         .object({ code: z.enum(DELIVERY_FAILURE_CODES), message: nonEmptyText.nullable() })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...common,
+      outcome: z.literal("unknown"),
+      completedAt: nonEmptyText,
+      uncertainty: z
+        .object({ code: z.enum(DELIVERY_UNCERTAINTY_CODES), message: nonEmptyText.nullable() })
         .strict(),
     })
     .strict(),

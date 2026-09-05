@@ -31,6 +31,7 @@ const requests = {
   recordReviewDecision: vi.fn(unavailable),
   deliverStory: vi.fn(unavailable),
   resolveLegacyDeliveryMapping: vi.fn(unavailable),
+  reconcileStoryDelivery: vi.fn(unavailable),
 } as unknown as StoryClient;
 
 function inspection(state: StoryInspection["story"]["state"]): StoryInspection {

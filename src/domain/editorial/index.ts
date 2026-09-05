@@ -60,3 +60,6 @@ export * from "./story-delivery-schema";
 export * from "./legacy-delivery-mapping-resolution-types";
 export * from "./legacy-delivery-mapping-resolution";
 export * from "./legacy-delivery-mapping-resolution-schema";
+export * from "./story-delivery-reconciliation-types";
+export * from "./story-delivery-reconciliation";
+export * from "./story-delivery-reconciliation-schema";

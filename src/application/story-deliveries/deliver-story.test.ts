@@ -17,6 +17,7 @@ import {
   type CredentialSlot,
   type StoryDelivery,
   type LegacyDeliveryMappingResolution,
+  type StoryDeliveryReconciliation,
 } from "@/domain/editorial";
 
 import { createDeliverStory } from "./deliver-story";
@@ -176,6 +177,25 @@ function deliveryStore() {
       const row = rows.get(query.deliveryId);
       return row?.storyId === query.storyId && row.outcome === "succeeded" ? row : null;
     },
+    async findLatestUnresolved(query) {
+      return (
+        [...rows.values()]
+          .filter(
+            (row) =>
+              row.storyId === query.storyId &&
+              row.destinationInstanceId === query.destinationInstanceId &&
+              (row.outcome === "running" || row.outcome === "unknown"),
+          )
+          .at(-1) ?? null
+      );
+    },
+    async findUnresolvedById(query) {
+      const row = rows.get(query.deliveryId);
+      return row?.storyId === query.storyId &&
+        (row.outcome === "running" || row.outcome === "unknown")
+        ? row
+        : null;
+    },
     async listByStoryId(identity) {
       return [...rows.values()].filter((row) => row.storyId === identity);
     },
@@ -200,6 +220,7 @@ function workflow(options: {
   readonly inspection?: StoryInspection | null;
   readonly deliveryIds?: readonly string[];
   readonly resolution?: LegacyDeliveryMappingResolution | null;
+  readonly reconciliation?: StoryDeliveryReconciliation | null;
 }) {
   const deliveryIds = [...(options.deliveryIds ?? ["delivery-1", "delivery-2"])];
   return createDeliverStory({
@@ -208,6 +229,10 @@ function workflow(options: {
     resolutions: {
       append: async (resolution) => ({ ok: true, resolution }),
       findLatest: async () => options.resolution ?? null,
+    },
+    reconciliations: {
+      append: async (reconciliation) => ({ ok: true, reconciliation }),
+      findLatest: async () => options.reconciliation ?? null,
     },
     destinations: { resolve: async () => ({ ok: true, destination: options.destination }) },
     createDeliveryId: () => storyDeliveryId(deliveryIds.shift() ?? "delivery-exhausted"),
@@ -307,6 +332,246 @@ describe("delivering a published Story to a destination", () => {
     });
   });
 
+  it("persists an unknowable attempt and requires reconciliation before another request", async () => {
+    const store = deliveryStore();
+    let attempts = 0;
+    const uncertain = destination(async () => {
+      attempts += 1;
+      return {
+        ok: null,
+        uncertainty: {
+          code: "DESTINATION_REQUEST_OUTCOME_UNKNOWN",
+          message: "The connection ended before a response arrived.",
+        },
+      };
+    });
+
+    await expect(
+      workflow({ store, destination: uncertain })({ storyId: STORY }),
+    ).resolves.toMatchObject({
+      ok: false,
+      delivery: { outcome: "unknown" },
+      error: { code: "DESTINATION_RECONCILIATION_REQUIRED", deliveryId: "delivery-1" },
+    });
+    await expect(
+      workflow({ store, destination: uncertain, deliveryIds: ["delivery-2"] })({ storyId: STORY }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "DESTINATION_RECONCILIATION_REQUIRED",
+        deliveryId: "delivery-1",
+        operation: "create",
+      },
+    });
+    expect(attempts).toBe(1);
+  });
+
+  it("updates the page an exact delivered reconciliation identified", async () => {
+    const store = deliveryStore();
+    const uncertain = workflow({
+      store,
+      destination: destination(async () => ({
+        ok: null,
+        uncertainty: { code: "DESTINATION_ACCEPTED_RESPONSE_UNVERIFIABLE", message: null },
+      })),
+    });
+    await uncertain({ storyId: STORY });
+    let sent: DeliveryRequest | undefined;
+    await workflow({
+      store,
+      deliveryIds: ["delivery-2"],
+      destination: destination(async (request) => {
+        sent = request;
+        return { ok: true, remoteId: "page-found", result: { status: 200, message: "Saved" } };
+      }),
+      reconciliation: {
+        id: "reconciliation-1" as never,
+        storyId: STORY,
+        deliveryId: storyDeliveryId("delivery-1"),
+        destination: "studiocms",
+        destinationInstanceId: destinationInstanceId("studiocms:https://cms.test"),
+        operation: "create",
+        slug: "council-approves-the-harbour-plan",
+        decision: "delivered",
+        remoteId: "page-found",
+        decidedBy: OPERATOR,
+        decidedAt: "decided",
+      },
+    })({ storyId: STORY });
+
+    expect(sent).toMatchObject({ operation: "update", remoteId: "page-found" });
+  });
+
+  it("retains a verified mapping after an uncertain update was not delivered", async () => {
+    const store = deliveryStore();
+    const uncertain = destination(async () => ({
+      ok: null,
+      uncertainty: { code: "DESTINATION_REQUEST_OUTCOME_UNKNOWN", message: null },
+    }));
+    await workflow({ store, destination: uncertain })({ storyId: STORY });
+
+    const deliveredCreate: StoryDeliveryReconciliation = {
+      id: "reconciliation-create" as never,
+      storyId: STORY,
+      deliveryId: storyDeliveryId("delivery-1"),
+      destination: "studiocms",
+      destinationInstanceId: destinationInstanceId("studiocms:https://cms.test"),
+      operation: "create",
+      slug: "council-approves-the-harbour-plan",
+      decision: "delivered",
+      remoteId: "page-a",
+      decidedBy: OPERATOR,
+      decidedAt: "decided-create",
+    };
+    await workflow({
+      store,
+      destination: uncertain,
+      deliveryIds: ["delivery-2"],
+      reconciliation: deliveredCreate,
+    })({ storyId: STORY });
+    expect(store.rows.get("delivery-2")).toMatchObject({
+      outcome: "unknown",
+      remoteId: "page-a",
+      request: { operation: "update" },
+    });
+
+    let nextRequest: DeliveryRequest | undefined;
+    const notDeliveredUpdate: StoryDeliveryReconciliation = {
+      ...deliveredCreate,
+      id: "reconciliation-update" as never,
+      deliveryId: storyDeliveryId("delivery-2"),
+      operation: "update",
+      decision: "not_delivered",
+      remoteId: null,
+      decidedAt: "decided-update",
+    };
+    await workflow({
+      store,
+      deliveryIds: ["delivery-3"],
+      reconciliation: notDeliveredUpdate,
+      destination: destination(async (request) => {
+        nextRequest = request;
+        return { ok: true, remoteId: "page-a", result: { status: 200, message: "Saved" } };
+      }),
+    })({ storyId: STORY });
+
+    expect(nextRequest).toMatchObject({ operation: "update", remoteId: "page-a" });
+  });
+
+  it("permits a fresh create after an uncertain create was not delivered", async () => {
+    const store = deliveryStore();
+    await workflow({
+      store,
+      destination: destination(async () => ({
+        ok: null,
+        uncertainty: { code: "DESTINATION_REQUEST_OUTCOME_UNKNOWN", message: null },
+      })),
+    })({ storyId: STORY });
+    let nextRequest: DeliveryRequest | undefined;
+    await workflow({
+      store,
+      deliveryIds: ["delivery-2"],
+      reconciliation: {
+        id: "reconciliation-1" as never,
+        storyId: STORY,
+        deliveryId: storyDeliveryId("delivery-1"),
+        destination: "studiocms",
+        destinationInstanceId: destinationInstanceId("studiocms:https://cms.test"),
+        operation: "create",
+        slug: "council-approves-the-harbour-plan",
+        decision: "not_delivered",
+        remoteId: null,
+        decidedBy: OPERATOR,
+        decidedAt: "decided",
+      },
+      destination: destination(async (request) => {
+        nextRequest = request;
+        return { ok: true, remoteId: "page-new", result: { status: 200, message: "Saved" } };
+      }),
+    })({ storyId: STORY });
+
+    expect(nextRequest).toMatchObject({ operation: "create", remoteId: null });
+  });
+
+  it("blocks a stranded running intent before calling the destination", async () => {
+    const store = deliveryStore();
+    store.rows.set("delivery-running", {
+      id: storyDeliveryId("delivery-running"),
+      storyId: STORY,
+      revisionId: articleRevisionId("revision-1"),
+      destination: "studiocms",
+      destinationInstanceId: destinationInstanceId("studiocms:https://cms.test"),
+      remoteId: null,
+      request: {
+        operation: "create",
+        slug: "council-approves-the-harbour-plan",
+        draft: true,
+        bodyCharacters: 42,
+      },
+      startedAt: "started",
+      outcome: "running",
+      completedAt: null,
+    });
+    let attempted = false;
+
+    await expect(
+      workflow({
+        store,
+        destination: destination(async () => {
+          attempted = true;
+          throw new Error("must not deliver");
+        }),
+      })({ storyId: STORY }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "DESTINATION_RECONCILIATION_REQUIRED",
+        deliveryId: "delivery-running",
+      },
+    });
+    expect(attempted).toBe(false);
+    expect(store.rows.size).toBe(1);
+  });
+
+  it("does not apply a reconciliation from another destination instance", async () => {
+    const store = deliveryStore();
+    await workflow({
+      store,
+      destination: destination(async () => ({
+        ok: null,
+        uncertainty: { code: "DESTINATION_REQUEST_OUTCOME_UNKNOWN", message: null },
+      })),
+    })({ storyId: STORY });
+    let attempted = false;
+
+    await expect(
+      workflow({
+        store,
+        reconciliation: {
+          id: "reconciliation-other" as never,
+          storyId: STORY,
+          deliveryId: storyDeliveryId("delivery-1"),
+          destination: "studiocms",
+          destinationInstanceId: destinationInstanceId("studiocms:https://other.test"),
+          operation: "create",
+          slug: "council-approves-the-harbour-plan",
+          decision: "delivered",
+          remoteId: "other-page",
+          decidedBy: OPERATOR,
+          decidedAt: "decided",
+        },
+        destination: destination(async () => {
+          attempted = true;
+          throw new Error("must not deliver");
+        }),
+      })({ storyId: STORY }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "DESTINATION_RECONCILIATION_REQUIRED" },
+    });
+    expect(attempted).toBe(false);
+  });
+
   it("writes nothing down when the credential cannot be read", async () => {
     const store = deliveryStore();
     let reached = false;
@@ -315,6 +580,10 @@ describe("delivering a published Story to a destination", () => {
       deliveries: store.repository,
       resolutions: {
         append: async (resolution) => ({ ok: true, resolution }),
+        findLatest: async () => null,
+      },
+      reconciliations: {
+        append: async (reconciliation) => ({ ok: true, reconciliation }),
         findLatest: async () => null,
       },
       destinations: {
@@ -609,6 +878,10 @@ describe("delivering a published Story to a destination", () => {
       deliveries: store.repository,
       resolutions: {
         append: async (resolution) => ({ ok: true, resolution }),
+        findLatest: async () => null,
+      },
+      reconciliations: {
+        append: async (reconciliation) => ({ ok: true, reconciliation }),
         findLatest: async () => null,
       },
       destinations: {

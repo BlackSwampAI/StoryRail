@@ -36,6 +36,8 @@ function workflow(options: { exact?: StoryDelivery | null; latest?: StoryDeliver
       append: async (delivery) => ({ ok: true, delivery }),
       complete: async (delivery) => ({ ok: true, delivery }),
       findLatestSucceeded: async () => null,
+      findLatestUnresolved: async () => null,
+      findUnresolvedById: async () => null,
       findLatestLegacySucceeded: async () =>
         options.latest === undefined ? legacy : options.latest,
       findSucceededById: async () => (options.exact === undefined ? legacy : options.exact),

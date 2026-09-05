@@ -1,5 +1,6 @@
 import {
   DELIVERY_FAILURE_CODES,
+  DELIVERY_UNCERTAINTY_CODES,
   MAXIMUM_DELIVERY_RECORD_CHARACTERS,
   type RecordStoryDeliveryResult,
   type StoryDelivery,
@@ -127,6 +128,24 @@ export function recordStoryDelivery(candidate: StoryDelivery): RecordStoryDelive
       return invalid(
         "STORY_DELIVERY_RECORD_TOO_LARGE",
         "A delivery result is an audit record, not a copy of what was delivered.",
+      );
+    return { ok: true, delivery: structuredClone(candidate) };
+  }
+
+  if (candidate.outcome === "unknown") {
+    if (
+      (candidate.request.operation === "create"
+        ? candidate.remoteId !== null
+        : !nonEmpty(candidate.remoteId)) ||
+      !(DELIVERY_UNCERTAINTY_CODES as readonly string[]).includes(candidate.uncertainty?.code) ||
+      (candidate.uncertainty.message !== null && !nonEmpty(candidate.uncertainty.message))
+    )
+      return invalid("STORY_DELIVERY_OUTCOME_INVALID", "Unknown delivery outcome is invalid.");
+    const uncertaintySize = measured(candidate.uncertainty);
+    if (uncertaintySize === null || uncertaintySize > MAXIMUM_DELIVERY_RECORD_CHARACTERS)
+      return invalid(
+        "STORY_DELIVERY_RECORD_TOO_LARGE",
+        "A delivery uncertainty is an audit record, not a copy of the response.",
       );
     return { ok: true, delivery: structuredClone(candidate) };
   }

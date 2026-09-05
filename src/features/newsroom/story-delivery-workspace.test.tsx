@@ -31,6 +31,7 @@ function requests(overrides: Partial<StoryClient> = {}): StoryClient {
     recordReviewDecision: vi.fn(unavailable),
     deliverStory: vi.fn(unavailable),
     resolveLegacyDeliveryMapping: vi.fn(unavailable),
+    reconcileStoryDelivery: vi.fn(unavailable),
     ...overrides,
   } as StoryClient;
 }
@@ -347,4 +348,60 @@ describe("delivering a published Story from the screen", () => {
     ).toBeTruthy();
     expect(deliverStory).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    ["delivered", "It was delivered", "412"],
+    ["not_delivered", "It was not delivered", null],
+  ] as const)(
+    "records an uncertain delivery as %s without delivering again",
+    async (decision, action, remoteId) => {
+      const deliverStory = vi.fn<StoryClient["deliverStory"]>(async () => ({
+        kind: "reconciliation-required",
+        error: {
+          code: "DESTINATION_RECONCILIATION_REQUIRED",
+          message: "Check the destination.",
+        },
+        delivery: null,
+        review: {
+          deliveryId: "delivery-uncertain",
+          destination: "wordpress",
+          destinationInstanceId: "wordpress:https://newsroom.test",
+          operation: "create",
+          slug: "uncertain-report",
+          remoteId: null,
+        },
+      }));
+      const reconcileStoryDelivery = vi.fn<StoryClient["reconcileStoryDelivery"]>(async () => ({
+        kind: "completed",
+        value: {} as never,
+      }));
+      renderWorkspace(inspection({}), requests({ deliverStory, reconcileStoryDelivery }));
+
+      fireEvent.click(screen.getByRole("button", { name: "Deliver to the current destination" }));
+      fireEvent.click(
+        screen.getByRole("button", { name: "Deliver to the current destination now" }),
+      );
+      const review = await screen.findByRole("region", {
+        name: "Delivery reconciliation required",
+      });
+      expect(review.textContent).toContain("uncertain-report");
+      expect(review.textContent).toContain("does not deliver anything");
+      if (decision === "delivered")
+        fireEvent.change(screen.getByRole("textbox", { name: "Remote post ID" }), {
+          target: { value: "412" },
+        });
+      fireEvent.click(screen.getByRole("button", { name: action }));
+
+      await waitFor(() => {
+        expect(reconcileStoryDelivery).toHaveBeenCalledWith(
+          "story-71",
+          "delivery-uncertain",
+          decision,
+          remoteId,
+        );
+      });
+      expect(deliverStory).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("alert").textContent).toContain("Click Deliver again");
+    },
+  );
 });

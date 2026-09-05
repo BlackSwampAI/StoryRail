@@ -124,6 +124,24 @@ describe("deliver Story HTTP handler", () => {
     expect((await respond(request({}), context)).status).toBe(409);
   });
 
+  it("answers an uncertain delivery that requires reconciliation as a conflict", async () => {
+    const { respond } = handler({
+      ok: false,
+      error: {
+        code: "DESTINATION_RECONCILIATION_REQUIRED",
+        message: "Check the destination before delivering again.",
+        deliveryId: storyDeliveryId("delivery-unknown"),
+        destination: "wordpress",
+        destinationInstanceId: destinationInstanceId("wordpress:https://newsroom.test"),
+        operation: "create",
+        slug: "uncertain-report",
+        remoteId: null,
+      },
+    });
+
+    expect((await respond(request({}), context)).status).toBe(409);
+  });
+
   it("answers a Story that does not exist as a Story that does not exist", async () => {
     const { respond } = handler({
       ok: false,

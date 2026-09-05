@@ -104,6 +104,8 @@ function makeRuntime(overrides: Partial<StoryRuntime> = {}): StoryRuntime {
     resolveLegacyDeliveryMapping:
       overrides.resolveLegacyDeliveryMapping ??
       vi.fn<StoryRuntime["resolveLegacyDeliveryMapping"]>(),
+    reconcileStoryDelivery:
+      overrides.reconcileStoryDelivery ?? vi.fn<StoryRuntime["reconcileStoryDelivery"]>(),
   };
 }
 

@@ -12,7 +12,9 @@ import {
   recordAgentToolCall,
   recordStoryDelivery,
   recordLegacyDeliveryMappingResolution,
+  recordStoryDeliveryReconciliation,
   legacyDeliveryMappingResolutionSchema,
+  storyDeliveryReconciliationSchema,
   reviewDecisionSchema,
   sourceEvidencePreparationSchema,
   sourceExtractionSchema,
@@ -34,6 +36,8 @@ import {
   type StoryDelivery,
   type LegacyDeliveryMappingDecision,
   type LegacyDeliveryMappingResolution,
+  type StoryDeliveryReconciliation,
+  type StoryDeliveryReconciliationDecision,
   type StoryTransitionReceipt,
   type StorySourceAttachment,
   type SiteId,
@@ -89,6 +93,19 @@ export type DeliverStoryOutcome =
         readonly destination: string;
         readonly destinationInstanceId: string;
         readonly remoteId: string;
+      };
+    }
+  | {
+      readonly kind: "reconciliation-required";
+      readonly error: StoryClientApplicationError;
+      readonly delivery: StoryDelivery | null;
+      readonly review: {
+        readonly deliveryId: string;
+        readonly destination: string;
+        readonly destinationInstanceId: string;
+        readonly operation: "create" | "update";
+        readonly slug: string;
+        readonly remoteId: string | null;
       };
     }
   | { readonly kind: "application-failure"; readonly error: StoryClientApplicationError }
@@ -165,6 +182,12 @@ export interface StoryClient {
     legacyDeliveryId: string,
     decision: LegacyDeliveryMappingDecision,
   ) => Promise<StoryClientResult<LegacyDeliveryMappingResolution>>;
+  readonly reconcileStoryDelivery: (
+    storyId: string,
+    deliveryId: string,
+    decision: StoryDeliveryReconciliationDecision,
+    remoteId: string | null,
+  ) => Promise<StoryClientResult<StoryDeliveryReconciliation>>;
   readonly recordReviewDecision: (
     storyId: string,
     command: {
@@ -271,6 +294,54 @@ function isLegacyDeliveryMappingResolution(
     parsed.success &&
     recordLegacyDeliveryMappingResolution(parsed.data as unknown as LegacyDeliveryMappingResolution)
       .ok
+  );
+}
+
+function isStoryDeliveryReconciliation(value: unknown): value is StoryDeliveryReconciliation {
+  const parsed = storyDeliveryReconciliationSchema.safeParse(value);
+  return (
+    parsed.success &&
+    recordStoryDeliveryReconciliation(parsed.data as unknown as StoryDeliveryReconciliation).ok
+  );
+}
+
+function isReconciliationRequiredError(value: unknown): value is StoryClientApplicationError & {
+  readonly deliveryId: string;
+  readonly destination: string;
+  readonly destinationInstanceId: string;
+  readonly operation: "create" | "update";
+  readonly slug: string;
+  readonly remoteId: string | null;
+} {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "code",
+      "message",
+      "deliveryId",
+      "destination",
+      "destinationInstanceId",
+      "operation",
+      "slug",
+      "remoteId",
+    ])
+  )
+    return false;
+  return (
+    value.code === "DESTINATION_RECONCILIATION_REQUIRED" &&
+    isString(value.message) &&
+    isString(value.deliveryId) &&
+    value.deliveryId.trim().length > 0 &&
+    isString(value.destination) &&
+    value.destination.trim().length > 0 &&
+    isString(value.destinationInstanceId) &&
+    value.destinationInstanceId.trim().length > 0 &&
+    isString(value.slug) &&
+    value.slug.trim().length > 0 &&
+    ((value.operation === "create" && value.remoteId === null) ||
+      (value.operation === "update" &&
+        isString(value.remoteId) &&
+        value.remoteId.trim().length > 0))
   );
 }
 
@@ -668,6 +739,22 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
             delivery: isDelivery(body.delivery) ? body.delivery : null,
           };
         if (response.status === 503) return { kind: "not-attempted", error: body.error };
+        if (response.status === 409 && body.error.code === "DESTINATION_RECONCILIATION_REQUIRED") {
+          if (!isReconciliationRequiredError(body.error)) return unreadableOutcome;
+          return {
+            kind: "reconciliation-required",
+            error: { code: body.error.code, message: body.error.message },
+            delivery: isDelivery(body.delivery) ? body.delivery : null,
+            review: {
+              deliveryId: body.error.deliveryId,
+              destination: body.error.destination,
+              destinationInstanceId: body.error.destinationInstanceId,
+              operation: body.error.operation,
+              slug: body.error.slug,
+              remoteId: body.error.remoteId,
+            },
+          };
+        }
         if (response.status === 409 && body.error.code === "DESTINATION_MAPPING_REQUIRES_REVIEW") {
           if (!isMappingReviewError(body.error)) return unreadableOutcome;
           return {
@@ -706,6 +793,35 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
           isLegacyDeliveryMappingResolution(body.resolution)
         )
           return { kind: "completed", value: body.resolution };
+        if (
+          body.ok === false &&
+          isApplicationError(body.error) &&
+          [400, 404, 409, 415, 503].includes(response.status)
+        )
+          return { kind: "application-failure", error: body.error };
+        return unavailable();
+      } catch {
+        return unavailable();
+      }
+    },
+    async reconcileStoryDelivery(storyId, deliveryId, decision, remoteId) {
+      try {
+        const response = await dependencies.fetch(
+          api(`/stories/${encodeURIComponent(storyId)}/deliveries/reconciliation`),
+          {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ deliveryId, decision, remoteId }),
+          },
+        );
+        const body: unknown = await response.json();
+        if (!isRecord(body)) return unavailable();
+        if (
+          response.status === 201 &&
+          body.ok === true &&
+          isStoryDeliveryReconciliation(body.reconciliation)
+        )
+          return { kind: "completed", value: body.reconciliation };
         if (
           body.ok === false &&
           isApplicationError(body.error) &&

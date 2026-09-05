@@ -4,6 +4,7 @@ import type {
   CredentialUnavailableError,
   DestinationInstanceId,
   DeliveryFailureCode,
+  DeliveryUncertaintyCode,
   StoryDeliveryOutcomeResult,
   StoryId,
 } from "@/domain/editorial";
@@ -53,6 +54,13 @@ export type DeliveryAttemptResult =
   | {
       readonly ok: false;
       readonly failure: { readonly code: DeliveryFailureCode; readonly message: string | null };
+    }
+  | {
+      readonly ok: null;
+      readonly uncertainty: {
+        readonly code: DeliveryUncertaintyCode;
+        readonly message: string | null;
+      };
     };
 
 /**

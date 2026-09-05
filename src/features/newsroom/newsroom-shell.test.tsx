@@ -116,6 +116,10 @@ function storyRequests(): StoryClient {
       kind: "unavailable",
       message: "The Story request could not be completed.",
     })),
+    reconcileStoryDelivery: vi.fn<StoryClient["reconcileStoryDelivery"]>(async () => ({
+      kind: "unavailable",
+      message: "The Story request could not be completed.",
+    })),
   };
 }
 
