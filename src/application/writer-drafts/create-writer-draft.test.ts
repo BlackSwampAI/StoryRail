@@ -333,6 +333,167 @@ describe("createWriterDraft", () => {
     expect(persist).not.toHaveBeenCalled();
   });
 
+  it("terminalizes the started run before returning a draft persistence conflict", async () => {
+    const facts = fixture();
+    const complete = vi.fn(async (run: AgentRun) => ({ ok: true as const, run }));
+    const workflow = createWriterDraft({
+      inspections: {
+        inspect: vi.fn(async () => ({ ok: true as const, inspection: facts.inspection })),
+      },
+      runs: {
+        append: vi.fn(async (run: AgentRun) => ({ ok: true as const, run })),
+        complete,
+        listByStoryId: vi.fn(),
+      },
+      persistence: {
+        persist: vi.fn(async () => ({
+          ok: false as const,
+          error: {
+            code: "WRITER_DRAFT_CONFLICT" as const,
+            message: "The Story changed before the draft could be saved.",
+            storyId: facts.story.id,
+          },
+        })),
+      },
+      resolveModel: async () => ({
+        ok: true,
+        model: {
+          descriptor: { provider: "openrouter", model: "writer" },
+          limits: { maximumInputCharacters: 60_000 },
+          generateStructured: vi.fn(async () => ({
+            ok: true as const,
+            output: {
+              headline: "Draft",
+              dek: null,
+              blocks: [
+                {
+                  kind: "claim",
+                  markdown: "The evidence says so.",
+                  citations: [
+                    { sourceId: "source-a", evidenceId: "prepared-a", quote: "Evidence" },
+                  ],
+                },
+              ],
+            },
+          })) as StructuredModel["generateStructured"],
+        },
+      }),
+      createAgentRunId: () => agentRunId("run-persistence-conflict"),
+      createArticleId: () => articleId("article-conflict"),
+      createRevisionId: () => articleRevisionId("revision-conflict"),
+      createTransitionId: () => transitionId("transition-conflict"),
+      now: () => "now",
+    });
+
+    await expect(
+      settleAgentRun(
+        workflow({ storyId: facts.story.id, requestedBy: facts.assignment.assignedBy }),
+      ),
+    ).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "WRITER_DRAFT_CONFLICT",
+        message: "The Story changed before the draft could be saved.",
+        storyId: facts.story.id,
+      },
+    });
+    expect(complete).toHaveBeenCalledOnce();
+    expect(complete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: agentRunId("run-persistence-conflict"),
+        outcome: "failed",
+        failure: { code: "MODEL_RUN_ABANDONED", retryable: true },
+      }),
+    );
+  });
+
+  it("terminalizes a durable run when a local read rejects before the model call", async () => {
+    const facts = fixture();
+    const complete = vi.fn(async (run: AgentRun) => ({ ok: true as const, run }));
+    const generateStructured = vi.fn();
+    const workflow = createWriterDraft({
+      inspections: {
+        inspect: vi.fn(async () => ({ ok: true as const, inspection: facts.inspection })),
+      },
+      runs: {
+        append: vi.fn(async (run: AgentRun) => ({ ok: true as const, run })),
+        complete,
+        listByStoryId: vi.fn(),
+      },
+      persistence: { persist: vi.fn() },
+      resolveModel: async () => ({
+        ok: true,
+        model: {
+          descriptor: { provider: "openrouter", model: "writer" },
+          limits: { maximumInputCharacters: 60_000 },
+          generateStructured: generateStructured as StructuredModel["generateStructured"],
+        },
+      }),
+      readNewsroomStandards: async () => {
+        throw new Error("database connection disappeared");
+      },
+      createAgentRunId: () => agentRunId("run-local-rejection"),
+      createArticleId: () => articleId("unused"),
+      createRevisionId: () => articleRevisionId("unused"),
+      createTransitionId: () => transitionId("unused"),
+      now: () => "now",
+    });
+
+    await expect(
+      settleAgentRun(
+        workflow({ storyId: facts.story.id, requestedBy: facts.assignment.assignedBy }),
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      run: {
+        outcome: "failed",
+        failure: { code: "MODEL_RUN_ABANDONED", retryable: true },
+      },
+    });
+    expect(generateStructured).not.toHaveBeenCalled();
+    expect(complete).toHaveBeenCalledOnce();
+  });
+
+  it("rejects recovery when completion returns a different durable run", async () => {
+    const facts = fixture();
+    const workflow = createWriterDraft({
+      inspections: {
+        inspect: vi.fn(async () => ({ ok: true as const, inspection: facts.inspection })),
+      },
+      runs: {
+        append: vi.fn(async (run: AgentRun) => ({ ok: true as const, run })),
+        complete: vi.fn(async (run: AgentRun) => ({
+          ok: true as const,
+          run: { ...run, id: agentRunId("another-run") },
+        })),
+        listByStoryId: vi.fn(),
+      },
+      persistence: { persist: vi.fn() },
+      resolveModel: async () => ({
+        ok: true,
+        model: {
+          descriptor: { provider: "openrouter", model: "writer" },
+          limits: { maximumInputCharacters: 60_000 },
+          generateStructured: vi.fn() as StructuredModel["generateStructured"],
+        },
+      }),
+      readNewsroomStandards: async () => {
+        throw new Error("database connection disappeared");
+      },
+      createAgentRunId: () => agentRunId("run-invalid-recovery"),
+      createArticleId: () => articleId("unused"),
+      createRevisionId: () => articleRevisionId("unused"),
+      createTransitionId: () => transitionId("unused"),
+      now: () => "now",
+    });
+
+    await expect(
+      settleAgentRun(
+        workflow({ storyId: facts.story.id, requestedBy: facts.assignment.assignedBy }),
+      ),
+    ).rejects.toThrow("The durable abandoned Writer AgentRun changed unexpectedly.");
+  });
+
   it.each([
     [
       "a quote that is absent from the cited evidence",

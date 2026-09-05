@@ -83,7 +83,10 @@ import { createPostgresSiteCredentialRepository } from "@/adapters/site-credenti
 import { createPostgresSiteSettingsRepository } from "@/adapters/site-settings-persistence";
 import { createPostgresNewsroomStandardsRepository } from "@/adapters/newsroom-standards-persistence";
 import { createPostgresPolicyRunRepository } from "@/adapters/policy-run-persistence";
-import { createPostgresAgentRunRepository } from "../agent-run-persistence/postgres-agent-run-repository";
+import {
+  createPostgresAgentRunRepository,
+  createPostgresStaleAgentRunRepository,
+} from "../agent-run-persistence/postgres-agent-run-repository";
 import { createPostgresWriterDraftPersistence } from "../article-persistence/postgres-writer-draft-persistence";
 import {
   createPostgresReviewDecisionPersistence,
@@ -237,6 +240,10 @@ const legacyDeliveryResolutionMigrationPath = resolve(
 const ambiguousDeliveryReconciliationMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0078-ambiguous-delivery-reconciliation.sql",
+);
+const agentRunRecoveryMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0079-agent-run-recovery.sql",
 );
 
 const DEFAULT_SITE = siteId("site-default");
@@ -479,6 +486,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let destinationInstanceMigrationSql: string;
   let legacyDeliveryResolutionMigrationSql: string;
   let ambiguousDeliveryReconciliationMigrationSql: string;
+  let agentRunRecoveryMigrationSql: string;
 
   /** Every migration, in order. One list so a rebuild can never drift from the first build. */
   const orderedMigrations = (): readonly string[] => [
@@ -520,6 +528,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     destinationInstanceMigrationSql,
     legacyDeliveryResolutionMigrationSql,
     ambiguousDeliveryReconciliationMigrationSql,
+    agentRunRecoveryMigrationSql,
   ];
   let destructiveSetupAllowed = false;
 
@@ -611,6 +620,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       ambiguousDeliveryReconciliationMigrationPath,
       "utf8",
     );
+    agentRunRecoveryMigrationSql = await readFile(agentRunRecoveryMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -1391,6 +1401,96 @@ describePostgres("PostgreSQL persistence repositories", () => {
   });
 
   describe("AgentRuns", () => {
+    it("lists only this Site's stale running runs in durable age order", async () => {
+      const ours = makeStory("stale-agent-ours");
+      const theirs = makeStory("stale-agent-theirs");
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story: ours });
+      await createPostgresStoryRepository({ pool, siteId: OTHER_SITE }).persist({ story: theirs });
+      const running = (story: Story, suffix: string) => {
+        const { proposal: _proposal, ...started } = makeAgentRun(story, suffix) as never as {
+          proposal: unknown;
+        } & Record<string, unknown>;
+        return { ...started, completedAt: null, outcome: "running" } as unknown as AgentRun;
+      };
+      const first = running(ours, "stale-first");
+      const second = running(ours, "stale-second");
+      const foreign = running(theirs, "stale-foreign");
+      const recent = running(ours, "stale-recent");
+      const terminal = {
+        ...running(ours, "stale-terminal"),
+        completedAt: "completed",
+        outcome: "failed",
+        failure: { code: "MODEL_RUN_ABANDONED", retryable: true },
+      } as AgentRun;
+      for (const [run, recordedAt] of [
+        [first, "2026-08-23T10:00:00.000Z"],
+        [second, "2026-08-23T10:00:00.000Z"],
+        [foreign, "2026-08-23T09:00:00.000Z"],
+        [recent, "2026-08-23T11:59:00.000Z"],
+        [terminal, "2026-08-23T09:30:00.000Z"],
+      ] as const)
+        await pool.query(
+          `INSERT INTO storyrail.agent_runs
+             (run_id, story_id, profile_id, role, operation, outcome, payload, recorded_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::timestamptz)`,
+          [
+            run.id,
+            run.storyId,
+            run.profileId,
+            run.role,
+            run.operation,
+            run.outcome,
+            JSON.stringify(run),
+            recordedAt,
+          ],
+        );
+
+      await expect(
+        createPostgresStaleAgentRunRepository({ pool, siteId: DEFAULT_SITE }).listStaleRunning(
+          "2026-08-23T11:00:00.000Z",
+        ),
+      ).resolves.toEqual([first, second]);
+    });
+
+    it("keeps the database-recorded recovery instant immutable during completion", async () => {
+      const story = makeStory("agent-run-recorded-at");
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
+      const { proposal: _proposal, ...started } = makeAgentRun(story, "recorded-at") as never as {
+        proposal: unknown;
+      } & Record<string, unknown>;
+      const run = { ...started, completedAt: null, outcome: "running" } as unknown as AgentRun;
+      const repository = createPostgresAgentRunRepository({ pool });
+      await repository.append(run);
+      const recorded = await pool.query<{ recorded_at: Date }>(
+        "SELECT recorded_at FROM storyrail.agent_runs WHERE run_id = $1",
+        [run.id],
+      );
+
+      await expect(
+        pool.query(
+          `UPDATE storyrail.agent_runs SET recorded_at = recorded_at - interval '1 hour',
+             outcome = 'failed',
+             payload = payload || '{"outcome":"failed","completedAt":"now","failure":{"code":"MODEL_RUN_ABANDONED","retryable":true}}'::jsonb
+           WHERE run_id = $1`,
+          [run.id],
+        ),
+      ).rejects.toMatchObject({
+        message: expect.stringContaining("may only record its completion"),
+      });
+
+      await repository.complete({
+        ...run,
+        completedAt: "completed",
+        outcome: "failed",
+        failure: { code: "MODEL_RUN_ABANDONED", retryable: true },
+      } as AgentRun);
+      const completed = await pool.query<{ recorded_at: Date }>(
+        "SELECT recorded_at FROM storyrail.agent_runs WHERE run_id = $1",
+        [run.id],
+      );
+      expect(completed.rows[0]?.recorded_at).toEqual(recorded.rows[0]?.recorded_at);
+    });
+
     it("completes a run that is still in flight and refuses to reopen it", async () => {
       const story = makeStory("agent-run-in-flight");
       await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
@@ -4132,6 +4232,13 @@ describePostgres("PostgreSQL persistence repositories", () => {
           },
           {
             table_name: "agent_runs",
+            column_name: "recorded_at",
+            data_type: "timestamp with time zone",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
+            table_name: "agent_runs",
             column_name: "review_article_id",
             data_type: "text",
             is_nullable: "YES",
@@ -4646,7 +4753,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           },
         ]),
       );
-      expect(columns.rows).toHaveLength(154);
+      expect(columns.rows).toHaveLength(155);
     });
 
     it("creates the required primary, unique, foreign-key, and check constraints", async () => {
@@ -5187,6 +5294,27 @@ describePostgres("PostgreSQL persistence repositories", () => {
           is_unique: false,
           columns: "story_id,append_position",
         },
+      ]);
+    });
+
+    it("creates the ordered partial index used to recover stale AgentRuns", async () => {
+      const indexes = await pool.query<{ columns: string; predicate: string }>(
+        `SELECT string_agg(attribute.attname::text, ',' ORDER BY key.ordinality) AS columns,
+                pg_get_expr(idx.indpred, idx.indrelid) AS predicate
+         FROM pg_index AS idx
+         JOIN pg_class AS table_class ON table_class.oid = idx.indrelid
+         JOIN pg_namespace AS namespace ON namespace.oid = table_class.relnamespace
+         JOIN pg_class AS index_class ON index_class.oid = idx.indexrelid
+         JOIN unnest(idx.indkey) WITH ORDINALITY AS key(attribute_number, ordinality) ON true
+         JOIN pg_attribute AS attribute
+           ON attribute.attrelid = table_class.oid AND attribute.attnum = key.attribute_number
+         WHERE namespace.nspname = 'storyrail'
+           AND index_class.relname = 'agent_runs_stale_running_idx'
+         GROUP BY idx.indpred, idx.indrelid`,
+      );
+
+      expect(indexes.rows).toEqual([
+        { columns: "recorded_at,append_position", predicate: "(outcome = 'running'::text)" },
       ]);
     });
 
@@ -7614,6 +7742,44 @@ describePostgres("PostgreSQL persistence repositories", () => {
           "SELECT count(*) AS count FROM storyrail.policy_runs WHERE story_id IS NULL AND policy_run_id <> 'policy-migration-0072'",
         );
         expect(orphans.rows[0]?.count).toBe("0");
+      } finally {
+        await pool.query("DROP SCHEMA storyrail CASCADE");
+        for (const migration of orderedMigrations()) await pool.query(migration);
+        await addSecondSite(pool);
+        await addSecondSiteWriter(pool);
+      }
+    });
+
+    it("gives legacy running AgentRuns a fresh recovery window when 0079 is applied", async () => {
+      const before = orderedMigrations().slice(
+        0,
+        orderedMigrations().indexOf(agentRunRecoveryMigrationSql),
+      );
+      try {
+        await pool.query("DROP SCHEMA storyrail CASCADE");
+        for (const migration of before) await pool.query(migration);
+        const story = makeStory("migration-0079-running");
+        await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
+        const { proposal: _proposal, ...started } = makeAgentRun(
+          story,
+          "migration-0079",
+        ) as never as {
+          proposal: unknown;
+        } & Record<string, unknown>;
+        const run = { ...started, completedAt: null, outcome: "running" } as unknown as AgentRun;
+        await createPostgresAgentRunRepository({ pool }).append(run);
+
+        await pool.query(agentRunRecoveryMigrationSql);
+        const cutoff = await pool.query<{ threshold: Date }>(
+          "SELECT CURRENT_TIMESTAMP - interval '15 minutes' AS threshold",
+        );
+
+        await expect(
+          createPostgresStaleAgentRunRepository({
+            pool,
+            siteId: DEFAULT_SITE,
+          }).listStaleRunning(cutoff.rows[0]?.threshold.toISOString() ?? "missing threshold"),
+        ).resolves.toEqual([]);
       } finally {
         await pool.query("DROP SCHEMA storyrail CASCADE");
         for (const migration of orderedMigrations()) await pool.query(migration);

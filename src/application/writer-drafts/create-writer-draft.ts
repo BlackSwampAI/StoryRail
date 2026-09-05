@@ -320,7 +320,30 @@ export function createWriterDraft(dependencies: {
     }
     // The run is durable now, so the caller can stop waiting. Only the model call and the
     // completion it produces continue past this point.
-    const completion = (async (): Promise<CreateWriterDraftResult> => {
+    const terminalizeAbandonedRun = async () => {
+      const failed = recordAgentRun({
+        ...identity,
+        completedAt: dependencies.now(),
+        outcome: "failed",
+        failure: { code: "MODEL_RUN_ABANDONED", retryable: true },
+      });
+      if (!failed.ok)
+        throw new Error("The application could not construct an abandoned Writer AgentRun.");
+      const completed = await dependencies.runs.complete(failed.run);
+      if (!completed.ok)
+        throw new Error("The in-flight Writer AgentRun could not be terminalized safely.");
+      if (
+        completed.run.id !== started.run.id ||
+        completed.run.role !== "writer" ||
+        completed.run.operation !== "article_draft" ||
+        completed.run.outcome !== "failed" ||
+        completed.run.failure.code !== "MODEL_RUN_ABANDONED"
+      )
+        throw new Error("The durable abandoned Writer AgentRun changed unexpectedly.");
+      return completed.run;
+    };
+
+    const execute = async (): Promise<CreateWriterDraftResult> => {
       const standards = (await dependencies.readNewsroomStandards?.()) ?? null;
       const newsroom = (await dependencies.readNewsroomIdentity?.()) ?? null;
       const modelInput = {
@@ -454,7 +477,7 @@ export function createWriterDraft(dependencies: {
         runResult.run.outcome !== "succeeded"
       )
         throw new Error("The application produced an invalid successful Writer AgentRun.");
-      return dependencies.persistence.persist({
+      const persisted = await dependencies.persistence.persist({
         expectedStory: story,
         run: runResult.run,
         article: articleResult.article,
@@ -462,7 +485,23 @@ export function createWriterDraft(dependencies: {
         story: transition.story,
         transitionReceipt: transition.receipt,
       });
-    })();
+      return persisted;
+    };
+
+    const completion = execute().then(
+      async (result): Promise<CreateWriterDraftResult> => {
+        if (!result.ok && result.error.code === "WRITER_DRAFT_CONFLICT")
+          await terminalizeAbandonedRun();
+        return result;
+      },
+      async (): Promise<CreateWriterDraftResult> => {
+        // Everything after the durable start belongs to the run, including local reads and the
+        // final transaction. A process-local exception must not strand it as apparently active.
+        // This does not replay the model call; it records only that this process stopped before
+        // it could establish a normal outcome.
+        return { ok: true, run: await terminalizeAbandonedRun() };
+      },
+    );
 
     return { ok: true, runId: started.run.id, completion };
   };

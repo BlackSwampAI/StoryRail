@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   agentProfileId,
   agentRunId,
+  agentToolCallId,
   operatorId,
   policyRunId,
   sourceEvidencePreparationId,
@@ -77,6 +78,7 @@ const runningAgentRun = (outcome: "running" | "succeeded" = "running"): AgentRun
 function harness(options: {
   readonly stale?: readonly PolicyRun[];
   readonly runs?: readonly AgentRun[];
+  readonly staleRuns?: readonly AgentRun[];
   readonly toolCalls?: readonly AgentToolCall[];
 }) {
   const completeToolCall = vi.fn(async (call: AgentToolCall) => ({ ok: true as const, call }));
@@ -97,13 +99,16 @@ function harness(options: {
         observe: vi.fn(),
         settle,
         findById: vi.fn(),
-        findByStoryId: vi.fn(),
+        findByStoryId: vi.fn(async () => []),
         listStaleRunning: vi.fn(async () => options.stale ?? []),
       },
       agentRuns: {
         append: vi.fn(),
         complete,
         listByStoryId,
+      },
+      staleAgentRuns: {
+        listStaleRunning: vi.fn(async () => options.staleRuns ?? []),
       },
       toolCalls: {
         append: vi.fn(),
@@ -230,6 +235,7 @@ describe("closing out work whose process disappeared", () => {
         complete: vi.fn(async (run: AgentRun) => ({ ok: true as const, run })),
         listByStoryId,
       },
+      staleAgentRuns: { listStaleRunning: vi.fn(async () => []) },
       toolCalls: { append: vi.fn(), complete: vi.fn(), listByRunId },
       now: () => NOW,
     });
@@ -237,5 +243,94 @@ describe("closing out work whose process disappeared", () => {
     await reconcile();
 
     expect(listByRunId.mock.calls.map(([id]) => id)).toEqual([first.id, second.id]);
+  });
+
+  it("closes a stale manual run and its tools without replaying either operation", async () => {
+    const run = runningAgentRun();
+    const call: AgentToolCall = {
+      id: agentToolCallId("tool-manual"),
+      runId: run.id,
+      storyId: run.storyId,
+      sequence: 1,
+      tool: "fetch_url",
+      requestedAt: "2026-08-23T11:00:00.000Z",
+      completedAt: null,
+      request: { url: "https://example.test" },
+      outcome: "running",
+    };
+    const test = harness({ staleRuns: [run], toolCalls: [call] });
+
+    const report = await test.reconcile();
+
+    expect(report.abandonedPolicyRuns).toEqual([]);
+    expect(report.abandonedAgentRuns).toHaveLength(1);
+    expect(report.abandonedToolCalls).toHaveLength(1);
+    expect(test.complete).toHaveBeenCalledWith(
+      expect.objectContaining({ failure: { code: "MODEL_RUN_ABANDONED", retryable: true } }),
+    );
+    expect(test.completeToolCall).toHaveBeenCalledWith(
+      expect.objectContaining({ failure: expect.objectContaining({ code: "TOOL_RUN_ABANDONED" }) }),
+    );
+  });
+
+  it("leaves a stale AgentRun alone while any running policy owns its Story", async () => {
+    const complete = vi.fn();
+    const reconcile = createReconcileAbandonedWork({
+      policyRuns: {
+        append: vi.fn(),
+        observe: vi.fn(),
+        settle: vi.fn(),
+        findById: vi.fn(),
+        findByStoryId: vi.fn(async () => [policyRun({ observedAt: NOW })]),
+        listStaleRunning: vi.fn(async () => []),
+      },
+      agentRuns: {
+        append: vi.fn(),
+        complete,
+        listByStoryId: vi.fn(),
+      },
+      staleAgentRuns: { listStaleRunning: vi.fn(async () => [runningAgentRun()]) },
+      toolCalls: { append: vi.fn(), complete: vi.fn(), listByRunId: vi.fn() },
+      now: () => NOW,
+    });
+
+    await reconcile();
+
+    expect(complete).not.toHaveBeenCalled();
+  });
+
+  it("omits a stale run when another completion wins the recovery race", async () => {
+    const run = runningAgentRun();
+    const reconcile = createReconcileAbandonedWork({
+      policyRuns: {
+        append: vi.fn(),
+        observe: vi.fn(),
+        settle: vi.fn(),
+        findById: vi.fn(),
+        findByStoryId: vi.fn(async () => []),
+        listStaleRunning: vi.fn(async () => []),
+      },
+      agentRuns: {
+        append: vi.fn(),
+        complete: vi.fn(async () => ({
+          ok: false as const,
+          error: {
+            code: "AGENT_RUN_NOT_RUNNING" as const,
+            message: "Already completed.",
+            runId: run.id,
+          },
+        })),
+        listByStoryId: vi.fn(),
+      },
+      staleAgentRuns: { listStaleRunning: vi.fn(async () => [run]) },
+      toolCalls: { append: vi.fn(), complete: vi.fn(), listByRunId: vi.fn() },
+      now: () => NOW,
+    });
+
+    await expect(reconcile()).resolves.toEqual({
+      abandonedPolicyRuns: [],
+      abandonedAgentRuns: [],
+      abandonedToolCalls: [],
+    });
   });
 });

@@ -17,7 +17,7 @@ const MODEL_FAILURE_EXPLANATIONS: Readonly<Record<ModelFailureCode, string>> = {
   MODEL_RESPONSE_REJECTED: "The model provider refused the request.",
   MODEL_OUTPUT_INVALID: "The model replied in a shape StoryRail could not accept.",
   MODEL_RUN_ABANDONED:
-    "The process running this stopped before the model answered. Nothing was recorded from it; run it again.",
+    "The local run stopped before StoryRail could record a normal result. No output was adopted; run it again.",
   MODEL_CORRECTION_OUT_OF_SCOPE:
     "The Writer was asked to fix specific citations and rewrote work nobody objected to. The draft was refused.",
   MODEL_OUTPUT_UNGROUNDED:
