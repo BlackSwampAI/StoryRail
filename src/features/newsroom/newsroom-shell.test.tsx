@@ -1,6 +1,7 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import type { StoryInspection } from "@/application/story-inspection";
 import {
   agentProfileId,
   agentRunId,
@@ -29,6 +30,20 @@ const STORY = {
   createdAt: "created",
   updatedAt: "updated",
 } satisfies Story;
+
+function inspection(story: Story): StoryInspection {
+  return {
+    story,
+    sources: [],
+    assignment: null,
+    transitions: [],
+    agentRuns: [],
+    reviewDecisions: [],
+    deliveries: [],
+    toolCalls: [],
+    article: null,
+  };
+}
 
 function storyRequests(): StoryClient {
   return {
@@ -122,6 +137,83 @@ function storyRequests(): StoryClient {
     })),
   };
 }
+
+describe("Story selection ordering", () => {
+  it("keeps the latest Story when inspections finish in reverse order", async () => {
+    const secondStory = { ...STORY, id: storyId("story-shell-second"), title: "Second Story" };
+    let resolveFirst!: (value: Awaited<ReturnType<StoryClient["inspectStory"]>>) => void;
+    let resolveSecond!: (value: Awaited<ReturnType<StoryClient["inspectStory"]>>) => void;
+    const firstRequest = new Promise<Awaited<ReturnType<StoryClient["inspectStory"]>>>(
+      (resolve) => {
+        resolveFirst = resolve;
+      },
+    );
+    const secondRequest = new Promise<Awaited<ReturnType<StoryClient["inspectStory"]>>>(
+      (resolve) => {
+        resolveSecond = resolve;
+      },
+    );
+    const requests: StoryClient = {
+      ...storyRequests(),
+      listStories: vi.fn(async () => ({
+        kind: "completed" as const,
+        value: [
+          { story: STORY, sourceCount: 0 },
+          { story: secondStory, sourceCount: 0 },
+        ],
+      })),
+      inspectStory: vi
+        .fn<StoryClient["inspectStory"]>()
+        .mockReturnValueOnce(firstRequest)
+        .mockReturnValueOnce(secondRequest),
+    };
+    render(<NewsroomShell storyRequests={requests} sourceInboxRequests={inboxRequests()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Persisted Story/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Second Story/ }));
+    await act(async () => resolveSecond({ kind: "completed", value: inspection(secondStory) }));
+    expect(await screen.findByRole("heading", { name: "Second Story" })).toBeVisible();
+
+    await act(async () => resolveFirst({ kind: "completed", value: inspection(STORY) }));
+    expect(screen.getByRole("heading", { name: "Second Story" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Persisted Story" })).not.toBeInTheDocument();
+  });
+
+  it("makes the latest request authoritative when the same Story is selected twice", async () => {
+    let rejectFirst!: (reason?: unknown) => void;
+    let resolveSecond!: (value: Awaited<ReturnType<StoryClient["inspectStory"]>>) => void;
+    const firstRequest = new Promise<Awaited<ReturnType<StoryClient["inspectStory"]>>>(
+      (_resolve, reject) => {
+        rejectFirst = reject;
+      },
+    );
+    const secondRequest = new Promise<Awaited<ReturnType<StoryClient["inspectStory"]>>>(
+      (resolve) => {
+        resolveSecond = resolve;
+      },
+    );
+    const requests: StoryClient = {
+      ...storyRequests(),
+      inspectStory: vi
+        .fn<StoryClient["inspectStory"]>()
+        .mockReturnValueOnce(firstRequest)
+        .mockReturnValueOnce(secondRequest),
+    };
+    render(<NewsroomShell storyRequests={requests} sourceInboxRequests={inboxRequests()} />);
+    const storyButton = await screen.findByRole("button", { name: /Persisted Story/ });
+
+    fireEvent.click(storyButton);
+    fireEvent.click(storyButton);
+    await act(async () => resolveSecond({ kind: "completed", value: inspection(STORY) }));
+    expect(await screen.findByRole("heading", { name: "Persisted Story" })).toBeVisible();
+
+    await act(async () => rejectFirst(new Error("stale request failed")));
+    expect(screen.getByRole("heading", { name: "Persisted Story" })).toBeVisible();
+    expect(
+      screen.queryByRole("heading", { name: "Story inspection unavailable" }),
+    ).not.toBeInTheDocument();
+  });
+});
 
 function inboxRequests(): SourceInboxClient {
   return {
