@@ -150,17 +150,19 @@ Rejection is terminal and does not contact a model. It preserves all existing wo
 
 ## Story delivery workflow
 
-`src/application/story-deliveries/deliver-story.ts` — `createDeliverStory` sends the latest Article Revision of an approved/published Story to a configured external publishing destination (e.g. StudioCMS).
+`src/application/story-deliveries/deliver-story.ts` — `createDeliverStory` sends the latest Article Revision of an approved/published Story to a configured external publishing destination (e.g. StudioCMS or WordPress).
 
 1. Inspects the Story (`STORY_NOT_FOUND`).
 2. Validates that `story.state === "published"` (`STORY_NOT_PUBLISHED`). Only published Stories are delivered.
 3. Finds the latest Article Revision (`STORY_HAS_NO_ARTICLE`).
-4. Resolves the destination directory (`DeliveryDestinationDirectory`) to construct the destination instance with site settings and credentials.
+4. Resolves the destination directory (`DeliveryDestinationDirectory`) to construct the destination instance with site settings and credentials (including its `instanceId`).
 5. Derives the slug via `storyDeliverySlug(revision.headline)`.
-6. Checks previous deliveries for that Story to decide whether this is a `create` (first delivery) or `update` (patching an existing remote page using its prior `remoteId`).
-7. **Durability first**: Records the delivery row as `outcome: "running"` with `StoryDeliveryRepository.record` before making the external HTTP call.
+6. Checks previous deliveries for that Story and destination instance (`findLatestSucceeded({ storyId, destinationInstanceId })`).
+   - If no prior delivery for the current instance is found, checks for unbound legacy deliveries (`findLatestLegacySucceeded({ storyId, destination })`). If a legacy mapping exists, it fails closed with `DESTINATION_MAPPING_REQUIRES_REVIEW` so operators can review before writing to a new instance.
+   - If a prior delivery for the instance exists, uses its `remoteId` to decide whether this is a `create` (first delivery, `remoteId: null`) or `update` (patching an existing remote page using its prior `remoteId`).
+7. **Durability first**: Records the delivery row as `outcome: "running"` with `StoryDeliveryRepository.append` before making the external HTTP call.
 8. Invokes `destination.deliver(...)`.
-9. Updates the delivery record to `succeeded` with `remoteId` (parsed from the provider response) or `failed` with failure details. Failed deliveries are never retried silently.
+9. Updates the delivery record with `StoryDeliveryRepository.complete` to `succeeded` with `remoteId` (parsed from the provider response) or `failed` with failure details. Failed deliveries are never retried silently.
 
 ## Model catalog workflow
 

@@ -325,7 +325,7 @@ Always returns 200 on success or 500 on internal failure.
 | ------ | --------- |
 | 200    | Delivery attempt finished (`succeeded` or `failed` outcome recorded) |
 | 404    | `STORY_NOT_FOUND` |
-| 409    | `STORY_NOT_PUBLISHED`, `STORY_HAS_NO_ARTICLE`, `STORY_DELIVERY_NOT_RECORDED` |
+| 409    | `STORY_NOT_PUBLISHED`, `STORY_HAS_NO_ARTICLE`, `DESTINATION_MAPPING_REQUIRES_REVIEW`, `STORY_DELIVERY_NOT_RECORDED` |
 | 422    | `DESTINATION_NOT_CONFIGURED`, `CREDENTIAL_UNAVAILABLE` |
 | 415/400| Media type / JSON / shape errors |
 | 500    | Internal error |

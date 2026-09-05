@@ -297,6 +297,18 @@ It alters the `storyrail.agent_tool_calls` table to:
 - Enforces that only Writer steps (`writer_draft`, `writer_revision`) can have `attempt > 1` (up to `MAX_AUTOPILOT_WRITER_ATTEMPTS = 3`).
 - Migrates existing settled and running policy records to `attempt = 1`.
 
+## Migration 0076 — story delivery destination instance identity
+
+`database/migrations/0076-story-delivery-instance-identity.sql` binds delivery mappings to specific destination installations rather than generic connector names:
+- Adds `destination_instance_id` (nullable `text` with trimmed non-empty check) to `storyrail.story_deliveries`.
+- Backfills existing delivery rows with `destinationInstanceId: null` in payload, leaving legacy delivery mappings deliberately unbound.
+- Updates `story_deliveries_payload_shape_check` to require `destinationInstanceId` in payload matching `destination_instance_id` column (or `null`).
+- Adds trigger `storyrail.story_delivery_requires_destination_instance()` to ensure all new deliveries require a non-null `destination_instance_id`.
+- Replaces index `story_deliveries_story_destination_idx` with:
+  - `story_deliveries_story_destination_instance_idx` on `(story_id, destination_instance_id, started_at DESC) WHERE destination_instance_id IS NOT NULL`
+  - `story_deliveries_legacy_story_destination_idx` on `(story_id, destination, started_at DESC) WHERE destination_instance_id IS NULL`
+- Updates trigger `storyrail.story_delivery_completes_once()` to ensure `destination_instance_id` cannot be changed during completion.
+
 ## Integration test lifecycle
 
-The PostgreSQL integration tests (`src/adapters/source-persistence/postgres-source-repositories.test.ts` and the Story/attachment/assignment/run/article/review/writer-revision/story-rejection suites) connect via `STORYRAIL_TEST_DATABASE_URL`, verify the database name is exactly `storyrail_test`, drop and recreate the `storyrail` schema, apply migrations `0012`, `0017`, `0018`, `0024`, `0025`, `0027`, `0028`, `0030`, `0031`, `0038`, `0041`, `0049`, `0053`, `0054`, `0055`, `0056`, `0057`, `0058`, `0059`, `0060`, `0061`, `0062`, `0063`, `0064`, `0065`, `0066`, `0067`, `0068`, `0069`, `0070`, `0071`, `0072`, `0073`, `0074`, and `0075` in order, and truncate the editorial tables (plus delete non-built-in Agent Profiles) between cases. The suite never creates or drops a database.
+The PostgreSQL integration tests (`src/adapters/source-persistence/postgres-source-repositories.test.ts` and the Story/attachment/assignment/run/article/review/writer-revision/story-rejection suites) connect via `STORYRAIL_TEST_DATABASE_URL`, verify the database name is exactly `storyrail_test`, drop and recreate the `storyrail` schema, apply migrations `0012`, `0017`, `0018`, `0024`, `0025`, `0027`, `0028`, `0030`, `0031`, `0038`, `0041`, `0049`, `0053`, `0054`, `0055`, `0056`, `0057`, `0058`, `0059`, `0060`, `0061`, `0062`, `0063`, `0064`, `0065`, `0066`, `0067`, `0068`, `0069`, `0070`, `0071`, `0072`, `0073`, `0074`, `0075`, and `0076` in order, and truncate the editorial tables (plus delete non-built-in Agent Profiles) between cases. The suite never creates or drops a database.
