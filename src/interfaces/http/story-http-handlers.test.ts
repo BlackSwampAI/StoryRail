@@ -101,6 +101,9 @@ function makeRuntime(overrides: Partial<StoryRuntime> = {}): StoryRuntime {
     recordStoryReviewDecision: vi.fn<StoryRuntime["recordStoryReviewDecision"]>(),
     close: vi.fn<StoryRuntime["close"]>(async () => undefined),
     ...overrides,
+    resolveLegacyDeliveryMapping:
+      overrides.resolveLegacyDeliveryMapping ??
+      vi.fn<StoryRuntime["resolveLegacyDeliveryMapping"]>(),
   };
 }
 

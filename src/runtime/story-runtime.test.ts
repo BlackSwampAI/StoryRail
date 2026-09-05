@@ -238,6 +238,7 @@ describe("createStoryRuntime", () => {
       "rejectStory",
       "publishStory",
       "deliverStory",
+      "resolveLegacyDeliveryMapping",
       "listStoryDeliveries",
       "submitStoryReview",
       "readSiteSettings",

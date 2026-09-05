@@ -57,3 +57,6 @@ export * from "./review-decision-schema";
 export * from "./agent-run-schema";
 export * from "./agent-tool-call-schema";
 export * from "./story-delivery-schema";
+export * from "./legacy-delivery-mapping-resolution-types";
+export * from "./legacy-delivery-mapping-resolution";
+export * from "./legacy-delivery-mapping-resolution-schema";

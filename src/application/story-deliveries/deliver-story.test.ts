@@ -16,6 +16,7 @@ import {
   type ArticleRevision,
   type CredentialSlot,
   type StoryDelivery,
+  type LegacyDeliveryMappingResolution,
 } from "@/domain/editorial";
 
 import { createDeliverStory } from "./deliver-story";
@@ -171,6 +172,10 @@ function deliveryStore() {
           .at(-1) ?? null
       );
     },
+    async findSucceededById(query) {
+      const row = rows.get(query.deliveryId);
+      return row?.storyId === query.storyId && row.outcome === "succeeded" ? row : null;
+    },
     async listByStoryId(identity) {
       return [...rows.values()].filter((row) => row.storyId === identity);
     },
@@ -194,11 +199,16 @@ function workflow(options: {
   readonly destination: DeliveryDestination;
   readonly inspection?: StoryInspection | null;
   readonly deliveryIds?: readonly string[];
+  readonly resolution?: LegacyDeliveryMappingResolution | null;
 }) {
   const deliveryIds = [...(options.deliveryIds ?? ["delivery-1", "delivery-2"])];
   return createDeliverStory({
     inspections: inspections(options.inspection === undefined ? inspection() : options.inspection),
     deliveries: options.store.repository,
+    resolutions: {
+      append: async (resolution) => ({ ok: true, resolution }),
+      findLatest: async () => options.resolution ?? null,
+    },
     destinations: { resolve: async () => ({ ok: true, destination: options.destination }) },
     createDeliveryId: () => storyDeliveryId(deliveryIds.shift() ?? "delivery-exhausted"),
     now: () => "2026-08-24T10:00:00.000Z",
@@ -303,6 +313,10 @@ describe("delivering a published Story to a destination", () => {
     const deliver = createDeliverStory({
       inspections: inspections(inspection()),
       deliveries: store.repository,
+      resolutions: {
+        append: async (resolution) => ({ ok: true, resolution }),
+        findLatest: async () => null,
+      },
       destinations: {
         resolve: async () => ({
           ok: false,
@@ -425,7 +439,13 @@ describe("delivering a published Story to a destination", () => {
       })({ storyId: STORY }),
     ).resolves.toMatchObject({
       ok: false,
-      error: { code: "DESTINATION_MAPPING_REQUIRES_REVIEW" },
+      error: {
+        code: "DESTINATION_MAPPING_REQUIRES_REVIEW",
+        legacyDeliveryId: "legacy",
+        destination: "studiocms",
+        destinationInstanceId: "studiocms:https://cms.test",
+        remoteId: "legacy-page",
+      },
     });
     expect(attempted).toBe(false);
     expect(store.rows.size).toBe(1);
@@ -459,6 +479,96 @@ describe("delivering a published Story to a destination", () => {
     })({ storyId: STORY });
 
     expect(request).toMatchObject({ operation: "update", remoteId: "current-page" });
+  });
+
+  it.each([
+    ["confirm", "update", "legacy-page"],
+    ["dismiss", "create", null],
+  ] as const)(
+    "uses a %s resolution to choose the next operation",
+    async (decision, operation, remoteId) => {
+      const store = deliveryStore();
+      store.rows.set("legacy", {
+        id: storyDeliveryId("legacy"),
+        storyId: STORY,
+        revisionId: articleRevisionId("revision-1"),
+        destination: "studiocms",
+        destinationInstanceId: null,
+        remoteId: "legacy-page",
+        request: { operation: "create", slug: "old", draft: true, bodyCharacters: 1 },
+        startedAt: "started",
+        outcome: "succeeded",
+        completedAt: "completed",
+        result: { status: 200, message: "Saved" },
+      });
+      let request: DeliveryRequest | undefined;
+      await workflow({
+        store,
+        destination: destination(async (sent) => {
+          request = sent;
+          return {
+            ok: true,
+            remoteId: sent.remoteId ?? "new-page",
+            result: { status: 200, message: "Saved" },
+          };
+        }),
+        resolution: {
+          id: "resolution-1" as never,
+          storyId: STORY,
+          legacyDeliveryId: storyDeliveryId("legacy"),
+          destination: "studiocms",
+          destinationInstanceId: destinationInstanceId("studiocms:https://cms.test"),
+          remoteId: "legacy-page",
+          decision,
+          decidedBy: { type: "operator", operatorId: "operator-1" as never },
+          decidedAt: "decided",
+        },
+      })({ storyId: STORY });
+      expect(request).toMatchObject({ operation, remoteId });
+    },
+  );
+
+  it("does not apply a resolution recorded for another destination instance", async () => {
+    const store = deliveryStore();
+    store.rows.set("legacy", {
+      id: storyDeliveryId("legacy"),
+      storyId: STORY,
+      revisionId: articleRevisionId("revision-1"),
+      destination: "studiocms",
+      destinationInstanceId: null,
+      remoteId: "legacy-page",
+      request: { operation: "create", slug: "old", draft: true, bodyCharacters: 1 },
+      startedAt: "started",
+      outcome: "succeeded",
+      completedAt: "completed",
+      result: { status: 200, message: "Saved" },
+    });
+    let attempted = false;
+
+    await expect(
+      workflow({
+        store,
+        destination: destination(async () => {
+          attempted = true;
+          throw new Error("must not deliver");
+        }),
+        resolution: {
+          id: "resolution-other-instance" as never,
+          storyId: STORY,
+          legacyDeliveryId: storyDeliveryId("legacy"),
+          destination: "studiocms",
+          destinationInstanceId: destinationInstanceId("studiocms:https://other.test"),
+          remoteId: "legacy-page",
+          decision: "confirm",
+          decidedBy: { type: "operator", operatorId: "operator-1" as never },
+          decidedAt: "decided",
+        },
+      })({ storyId: STORY }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "DESTINATION_MAPPING_REQUIRES_REVIEW" },
+    });
+    expect(attempted).toBe(false);
   });
 
   it("records how large the body was rather than a second copy of it", async () => {
@@ -497,6 +607,10 @@ describe("delivering a published Story to a destination", () => {
     const deliver = createDeliverStory({
       inspections: inspections(inspection()),
       deliveries: store.repository,
+      resolutions: {
+        append: async (resolution) => ({ ok: true, resolution }),
+        findLatest: async () => null,
+      },
       destinations: {
         resolve: async () => ({
           ok: false,
