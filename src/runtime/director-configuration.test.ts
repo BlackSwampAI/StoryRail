@@ -23,7 +23,11 @@ describe("Director runtime configuration", () => {
         STORYRAIL_CREDENTIAL_KEY: "  base64-key  ",
         OPENROUTER_API_KEY: "key",
       }),
-    ).toEqual({ databaseUrl: "postgres://db", credentialKey: "base64-key" });
+    ).toEqual({
+      databaseUrl: "postgres://db",
+      credentialKey: "base64-key",
+      openRouterBaseUrl: null,
+    });
   });
 
   it("requires the database URL only when constructed", () => {

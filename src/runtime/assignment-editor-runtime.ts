@@ -77,6 +77,9 @@ export function createAssignmentEditorRuntime(
         model: createOpenRouterStructuredModel({
           resolveApiKey: async () => key.apiKey,
           model: (await store.readModelIds()).assignmentEditor,
+          ...(options.configuration.openRouterBaseUrl
+            ? { baseUrl: options.configuration.openRouterBaseUrl }
+            : {}),
         }),
       };
     },

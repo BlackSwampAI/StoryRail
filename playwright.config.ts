@@ -40,12 +40,28 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
   ],
-  webServer: {
-    command: "pnpm migrate && pnpm exec next dev --port 3134",
-    url: "http://localhost:3134/api/sites",
-    reuseExistingServer: false,
-    env: {
-      STORYRAIL_DATABASE_URL: testDatabaseUrl,
+  webServer: [
+    {
+      command: "node e2e/support/external-services.mjs",
+      url: "http://127.0.0.1:3135/health",
+      reuseExistingServer: false,
     },
-  },
+    {
+      command:
+        "node e2e/support/reset-test-database.mjs && pnpm migrate && pnpm exec next dev --port 3134",
+      url: "http://localhost:3134/api/sites",
+      reuseExistingServer: false,
+      // PostgreSQL integration tests remove the application schema without necessarily removing
+      // the public migration ledger. Resetting both acceptance-owned structures avoids that stale
+      // inverse state, then deliberately reapplies the complete history before Next starts. Keep
+      // this bounded allowance above Playwright's 60-second default for the full replay.
+      timeout: 180_000,
+      env: {
+        STORYRAIL_DATABASE_URL: testDatabaseUrl,
+        STORYRAIL_CREDENTIAL_KEY: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+        STORYRAIL_OPENROUTER_BASE_URL: "http://127.0.0.1:3135/openrouter",
+        STORYRAIL_OPERATOR_ID: "acceptance-operator",
+      },
+    },
+  ],
 });

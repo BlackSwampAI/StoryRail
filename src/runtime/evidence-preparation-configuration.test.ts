@@ -6,7 +6,7 @@ import {
 } from "./evidence-preparation-configuration";
 
 describe("evidence preparation runtime configuration", () => {
-  it("loads only the database URL and the encryption key", () => {
+  it("loads runtime infrastructure without taking Site model or credential values", () => {
     expect(
       loadEvidencePreparationRuntimeConfiguration({
         NODE_ENV: "test",
@@ -16,7 +16,11 @@ describe("evidence preparation runtime configuration", () => {
         STORYRAIL_EVIDENCE_PREPARATION_MODEL: "operator/model",
         FIRECRAWL_API_KEY: "not-required-by-this-runtime",
       }),
-    ).toEqual({ databaseUrl: "postgres://storyrail", credentialKey: "base64-key" });
+    ).toEqual({
+      databaseUrl: "postgres://storyrail",
+      credentialKey: "base64-key",
+      openRouterBaseUrl: null,
+    });
   });
 
   it("requires the database URL without revealing any other value", () => {

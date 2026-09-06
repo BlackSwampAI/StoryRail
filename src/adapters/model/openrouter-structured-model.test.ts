@@ -46,6 +46,27 @@ describe("OpenRouter structured model adapter", () => {
     );
   });
 
+  it("forwards an explicitly configured provider base URL", async () => {
+    const createChatModel = vi.fn(() => ({
+      withStructuredOutput: () => ({ invoke: async () => ({ content: "Prepared", title: null }) }),
+    }));
+    const model = createOpenRouterStructuredModel({
+      resolveApiKey: async () => "secret-key",
+      model: "publisher/model-slug",
+      baseUrl: "http://127.0.0.1:3135/openrouter",
+      createChatModel,
+    });
+
+    await model.generateStructured({ systemPrompt: "safe", input: {}, schema });
+
+    expect(createChatModel).toHaveBeenCalledWith({
+      apiKey: "secret-key",
+      model: "publisher/model-slug",
+      maxRetries: 0,
+      baseURL: "http://127.0.0.1:3135/openrouter",
+    });
+  });
+
   it("rejects blank or extra-key output after the integration returns", async () => {
     const createChatModel = () => ({
       withStructuredOutput: () => ({

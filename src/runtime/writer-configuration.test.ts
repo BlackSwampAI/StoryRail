@@ -14,12 +14,13 @@ describe("Writer runtime configuration", () => {
         OPENROUTER_API_KEY: "key",
         STORYRAIL_WRITER_MODEL: "ignored/model",
       }),
-    ).toEqual({ databaseUrl: "postgres://db", credentialKey: null });
+    ).toEqual({ databaseUrl: "postgres://db", credentialKey: null, openRouterBaseUrl: null });
   });
   it("starts without an encryption key, so an installation with no credentials still runs", () => {
     expect(loadWriterRuntimeConfiguration({ STORYRAIL_DATABASE_URL: "postgres://db" })).toEqual({
       databaseUrl: "postgres://db",
       credentialKey: null,
+      openRouterBaseUrl: null,
     });
   });
   it("requires the database URL only when the lazy runtime is created", () => {

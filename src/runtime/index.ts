@@ -48,6 +48,7 @@ export * from "./researcher-configuration";
 export * from "./researcher-runtime";
 export * from "./site-configuration";
 export * from "./credential-configuration";
+export * from "./openrouter-configuration";
 export * from "./newsroom-identity";
 export * from "./site-store";
 export * from "./site-directory-runtime";
