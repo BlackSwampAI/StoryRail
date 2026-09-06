@@ -1,12 +1,14 @@
 import { resolveCredentialKey } from "./credential-configuration";
+import { resolveOpenRouterBaseUrl } from "./openrouter-configuration";
 
 /**
- * What this runtime needs before it can be built, which is now only how to reach the database and
- * how to read what the database is holding. The connector credentials and the model identifiers
- * it used to take are per-Site values resolved when a run needs them.
+ * What this runtime needs before it can be built: how to reach the database, how to read its
+ * encrypted values, and an optional installation-level provider endpoint. Connector credentials
+ * and model identifiers remain per-Site values resolved when a run needs them.
  */
 export interface WriterRuntimeConfiguration {
   readonly databaseUrl: string;
+  readonly openRouterBaseUrl: string | null;
   /** Null when no key is set. An installation with no credentials stored still starts. */
   readonly credentialKey: string | null;
 }
@@ -25,5 +27,9 @@ export function loadWriterRuntimeConfiguration(
 ): WriterRuntimeConfiguration {
   const databaseUrl = environment.STORYRAIL_DATABASE_URL?.trim();
   if (!databaseUrl) throw new WriterRuntimeConfigurationError();
-  return Object.freeze({ databaseUrl, credentialKey: resolveCredentialKey(environment) });
+  return Object.freeze({
+    databaseUrl,
+    credentialKey: resolveCredentialKey(environment),
+    openRouterBaseUrl: resolveOpenRouterBaseUrl(environment),
+  });
 }

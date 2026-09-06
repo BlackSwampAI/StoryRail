@@ -110,7 +110,13 @@ export function createWriterRuntime(options: {
     const key = await store.resolveApiKey(OPENROUTER_API_KEY_SLOT);
     if (!key.ok) return { ok: false as const, error: key.error };
     return resolveWriterModel(descriptor, (await store.readModelIds()).writer, (model) =>
-      createOpenRouterStructuredModel({ resolveApiKey: async () => key.apiKey, model }),
+      createOpenRouterStructuredModel({
+        resolveApiKey: async () => key.apiKey,
+        model,
+        ...(options.configuration.openRouterBaseUrl
+          ? { baseUrl: options.configuration.openRouterBaseUrl }
+          : {}),
+      }),
     );
   };
   const workflow = createWriterDraft({

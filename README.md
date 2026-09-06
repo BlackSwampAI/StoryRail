@@ -184,13 +184,14 @@ Open [http://localhost:3133](http://localhost:3133) to use the development newsr
 
 ## Environment variables
 
-| Variable                      | Required for                     | Purpose                                                                                     |
-| ----------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------- |
-| `STORYRAIL_DATABASE_URL`      | All persisted workflows          | PostgreSQL connection string for editorial state.                                           |
-| `STORYRAIL_CREDENTIAL_KEY`    | Any stored connector credential  | 32 random bytes in base64 that every stored credential is encrypted under. Not recoverable. |
-| `STORYRAIL_SITE_ID`           | Installations with a second Site | Selects the Site this process serves; unset means the Site the installation started with.   |
-| `STORYRAIL_OPERATOR_ID`       | Operator-attributed HTTP actions | Identifies the current fixed development operator; this is not authentication.              |
-| `STORYRAIL_TEST_DATABASE_URL` | PostgreSQL and browser tests     | Points to a disposable database named exactly `storyrail_test`.                             |
+| Variable                        | Required for                     | Purpose                                                                                     |
+| ------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------- |
+| `STORYRAIL_DATABASE_URL`        | All persisted workflows          | PostgreSQL connection string for editorial state.                                           |
+| `STORYRAIL_CREDENTIAL_KEY`      | Any stored connector credential  | 32 random bytes in base64 that every stored credential is encrypted under. Not recoverable. |
+| `STORYRAIL_SITE_ID`             | Installations with a second Site | Selects the Site this process serves; unset means the Site the installation started with.   |
+| `STORYRAIL_OPERATOR_ID`         | Operator-attributed HTTP actions | Identifies the current fixed development operator; this is not authentication.              |
+| `STORYRAIL_OPENROUTER_BASE_URL` | Optional provider override       | Absolute HTTP(S) base URL for an OpenRouter-compatible provider endpoint.                   |
+| `STORYRAIL_TEST_DATABASE_URL`   | PostgreSQL and browser tests     | Points to a disposable database named exactly `storyrail_test`.                             |
 
 Connector credentials and model selection are no longer environment variables. The OpenRouter and Firecrawl keys are per-Site secrets held encrypted in `storyrail.site_credentials`, and the model each agent role runs on is per-Site configuration in `storyrail.site_settings`. Both are resolved when a run needs them rather than when a process starts, so a change takes effect on the next request. Credentials are write-only over HTTP: `PUT` and `DELETE /api/site-credentials/[slot]` set and remove one, and `GET /api/site-settings` reports only which slots are configured and the last four characters of each. No endpoint returns a stored credential.
 

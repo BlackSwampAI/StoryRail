@@ -6,7 +6,7 @@ import {
 } from "./assignment-editor-configuration";
 
 describe("Assignment Editor runtime configuration", () => {
-  it("reads nothing but the database URL and the encryption key", () => {
+  it("reads runtime infrastructure without taking Site model or credential values", () => {
     expect(
       loadAssignmentEditorRuntimeConfiguration({
         NODE_ENV: "test",
@@ -15,7 +15,11 @@ describe("Assignment Editor runtime configuration", () => {
         OPENROUTER_API_KEY: "secret",
         STORYRAIL_ASSIGNMENT_EDITOR_MODEL: "provider/model",
       }),
-    ).toEqual({ databaseUrl: "postgresql://storyrail", credentialKey: "base64-key" });
+    ).toEqual({
+      databaseUrl: "postgresql://storyrail",
+      credentialKey: "base64-key",
+      openRouterBaseUrl: null,
+    });
   });
 
   it("builds without a model, because the model is a per-Site setting now", () => {
@@ -24,7 +28,11 @@ describe("Assignment Editor runtime configuration", () => {
         NODE_ENV: "test",
         STORYRAIL_DATABASE_URL: "postgresql://storyrail",
       }),
-    ).toEqual({ databaseUrl: "postgresql://storyrail", credentialKey: null });
+    ).toEqual({
+      databaseUrl: "postgresql://storyrail",
+      credentialKey: null,
+      openRouterBaseUrl: null,
+    });
   });
 
   it("requires a non-blank database URL", () => {

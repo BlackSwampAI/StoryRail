@@ -45,12 +45,14 @@ export interface CreateOpenRouterStructuredModelOptions {
    */
   readonly resolveApiKey: () => Promise<string>;
   readonly model: string;
+  readonly baseUrl?: string;
   readonly timeoutMilliseconds?: number;
   readonly maximumInputCharacters?: number;
   readonly createChatModel?: (configuration: {
     readonly apiKey: string;
     readonly model: string;
     readonly maxRetries: 0;
+    readonly baseURL?: string;
   }) => OpenRouterChatModel;
 }
 
@@ -139,7 +141,12 @@ export function createOpenRouterStructuredModel(
       }
 
       try {
-        const chatModel = createChatModel({ apiKey, model: modelSlug, maxRetries: 0 });
+        const chatModel = createChatModel({
+          apiKey,
+          model: modelSlug,
+          maxRetries: 0,
+          ...(options.baseUrl ? { baseURL: options.baseUrl } : {}),
+        });
         const structured = chatModel.withStructuredOutput(
           request.schema as ZodType<Record<string, unknown>>,
           { name: "storyrail_structured_response", strict: true },

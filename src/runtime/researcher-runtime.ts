@@ -93,10 +93,23 @@ export function createResearcherRuntime(options: {
     return {
       ok: true,
       model: withOpenRouterTools(
-        createOpenRouterStructuredModel({ resolveApiKey: async () => key.apiKey, model: slug }),
+        createOpenRouterStructuredModel({
+          resolveApiKey: async () => key.apiKey,
+          model: slug,
+          ...(options.configuration.openRouterBaseUrl
+            ? { baseUrl: options.configuration.openRouterBaseUrl }
+            : {}),
+        }),
         {
           resolveChatModel: async () =>
-            new ChatOpenRouter({ apiKey: key.apiKey, model: slug, maxRetries: 0 }) as never,
+            new ChatOpenRouter({
+              apiKey: key.apiKey,
+              model: slug,
+              maxRetries: 0,
+              ...(options.configuration.openRouterBaseUrl
+                ? { baseURL: options.configuration.openRouterBaseUrl }
+                : {}),
+            }) as never,
           mapFailure: () => ({
             ok: false,
             failure: { code: "MODEL_REQUEST_FAILED", retryable: true },
