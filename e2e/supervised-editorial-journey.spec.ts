@@ -157,9 +157,9 @@ test("runs a supervised Story from evidence through WordPress delivery", async (
 
   await page.getByRole("button", { name: "Send this draft to the Director" }).click();
   await page.getByRole("button", { name: "Ask the Director to read it" }).click();
-  await expect(
-    page.getByRole("heading", { name: "The Director recommends changes" }),
-  ).toBeVisible({ timeout: WORKFLOW_COMPLETION_TIMEOUT });
+  await expect(page.getByRole("heading", { name: "The Director recommends changes" })).toBeVisible({
+    timeout: WORKFLOW_COMPLETION_TIMEOUT,
+  });
   await page.getByLabel("Your reason").fill("The Director identified a clearer lead.");
   await page.getByRole("button", { name: "Send it back to the Writer" }).click();
   await page.getByRole("button", { name: "Write revision 2" }).click();
