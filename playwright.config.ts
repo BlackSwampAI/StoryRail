@@ -60,6 +60,7 @@ export default defineConfig({
         STORYRAIL_DATABASE_URL: testDatabaseUrl,
         STORYRAIL_CREDENTIAL_KEY: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
         STORYRAIL_OPENROUTER_BASE_URL: "http://127.0.0.1:3135/openrouter",
+        STORYRAIL_OPERATOR_ID: "acceptance-operator",
       },
     },
   ],
