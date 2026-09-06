@@ -28,7 +28,10 @@ Adapters implement the application-layer repository ports against external syste
 
 ### Structured model: OpenRouter
 
-The provider-neutral structured-model port is implemented with LangChain's `ChatOpenRouter`. The operator selects the model through `STORYRAIL_EVIDENCE_PREPARATION_MODEL`; final prepared documents are validated by StoryRail before an immutable attempt is persisted.
+The provider-neutral structured-model port is implemented with LangChain's `ChatOpenRouter` in `src/adapters/model/openrouter-structured-model.ts`:
+- Accepts `resolveApiKey`, `model`, optional custom `baseUrl` (configured globally via `STORYRAIL_OPENROUTER_BASE_URL` in `src/runtime/openrouter-configuration.ts`), and timeout parameters.
+- Normalizes system prompts, input data, and strict Zod output schemas (`name: "storyrail_structured_response", strict: true`).
+- Validates model output against strict schema and failure mappers before returning structured results.
 
 ### Credential storage
 
@@ -70,6 +73,8 @@ All PostgreSQL adapters share a defensive pattern: they serialize the domain obj
 | `postgres-site-settings-persistence.ts`                | `storyrail.site_settings`                                            | `SiteSettingsRepository`                              |
 | `postgres-policy-run-repository.ts`                  | `storyrail.policy_runs`                                              | `PolicyRunRepository`                                |
 | `postgres-story-delivery-repository.ts`                | `storyrail.story_deliveries`                                         | `StoryDeliveryRepository`                             |
+| `postgres-legacy-delivery-mapping-resolution-repository.ts` | `storyrail.legacy_delivery_mapping_resolutions`                 | `LegacyDeliveryMappingResolutionRepository`           |
+| `postgres-story-delivery-reconciliation-repository.ts` | `storyrail.story_delivery_reconciliations`                          | `StoryDeliveryReconciliationRepository`               |
 
 ### Model catalog: OpenRouter
 

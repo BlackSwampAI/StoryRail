@@ -57,15 +57,17 @@ It fetches Stories via `storyClient`, pending Sources via `sourceInboxRequests`,
 
 ## Publishing and delivery controls
 
-`story-workspace.tsx` and `delivery-outcome.ts` provide operator-facing delivery controls and status reporting:
-- **Delivery Trigger**: Operators can deliver a published Story's latest Article Revision to the configured destination (StudioCMS or WordPress).
-- **Delivery Inspection**: Inspects and renders delivery records (`StoryDeliveryInspection`).
-- **Clear Status Messaging**: Differentiates between:
-  - Deliveries that were never attempted ("Nothing was sent.") when credentials or destinations are unconfigured.
-  - Deliveries in progress ("Sending...").
-  - Succeeded deliveries (showing remote ID and any modified slug).
-  - Refused or failed deliveries (displaying specific failure codes and reasons).
-- **Re-delivery**: Allows re-delivering to update an existing remote post after a new revision is published.
+`story-workspace.tsx` and `delivery-outcome.ts` provide operator-facing delivery controls, reconciliation reviews, and status reporting:
+- **Delivery Trigger**: Operators can deliver a published Story's latest Article Revision to the configured destination (StudioCMS or WordPress). Every delivery requires explicit confirmation when the destination may publish immediately.
+- **Delivery Inspection & Standing**: Inspects and renders delivery records (`StoryDeliveryInspection`):
+  - `never-delivered`: Story has not been sent anywhere.
+  - `in-flight`: Delivery currently executing.
+  - `delivered`: Succeeded delivery showing remote ID and any modified slug.
+  - `unknown`: Outcome cannot be confirmed; flags the delivery for operator reconciliation rather than allowing blind retries.
+  - `failed`: Refused or failed deliveries displaying specific failure codes and reasons.
+- **Legacy Mapping Review**: When a Story was delivered under pre-migration schemas without instance identity, the UI presents an explicit review panel displaying the legacy remote post ID. Operators can confirm the post belongs to the current destination instance (enabling future update deliveries) or dismiss it (allowing a fresh create).
+- **Delivery Reconciliation**: When a delivery ends in an `unknown` outcome (e.g. timeout or unreadable response), the UI presents a reconciliation form requiring the operator to inspect the remote installation and declare whether the post was `delivered` (with the remote post ID) or `not_delivered`.
+- **Race-Safe Selection**: `NewsroomShell` manages `storySelectionGeneration` refs so slow inspection requests from previously selected Stories never overwrite the currently chosen Story.
 
 ## Workspaces and clients
 

@@ -309,6 +309,33 @@ It alters the `storyrail.agent_tool_calls` table to:
   - `story_deliveries_legacy_story_destination_idx` on `(story_id, destination, started_at DESC) WHERE destination_instance_id IS NULL`
 - Updates trigger `storyrail.story_delivery_completes_once()` to ensure `destination_instance_id` cannot be changed during completion.
 
+## Migration 0077 — legacy delivery mapping resolutions
+
+`database/migrations/0077-legacy-delivery-mapping-resolutions.sql` captures operator resolutions to ambiguous legacy deliveries as immutable audit facts:
+- Creates `storyrail.legacy_delivery_mapping_resolutions` table with columns `resolution_id`, `insertion_position` (identity), `story_id`, `legacy_delivery_id`, `destination`, `destination_instance_id`, `remote_id`, `decision` (`confirm` | `dismiss`), `decided_at`, and `payload` JSONB.
+- Enforces payload shape check validating exact key schema and operator actor attribution (`decidedBy.type = 'operator'`).
+- Adds partial index `legacy_delivery_mapping_resolutions_latest_idx` on `(story_id, legacy_delivery_id, destination_instance_id, insertion_position DESC)`.
+- Adds trigger function `storyrail.legacy_delivery_mapping_resolution_is_valid()` to verify foreign key and prove that the referenced legacy delivery is an immutable, succeeded delivery with `destination_instance_id IS NULL` and matching `remote_id`.
+- Adds trigger `storyrail.legacy_delivery_mapping_resolutions_are_immutable()` ensuring resolutions cannot be updated or deleted.
+
+## Migration 0078 — ambiguous delivery reconciliation
+
+`database/migrations/0078-ambiguous-delivery-reconciliation.sql` enables handling and operator reconciliation of uncertain delivery outcomes:
+- Alters `storyrail.story_deliveries` outcome check to allow `outcome IN ('running', 'succeeded', 'failed', 'unknown')`.
+- Updates `story_deliveries_payload_shape_check` to validate `unknown` outcomes containing an `uncertainty` object with failure codes `DESTINATION_REQUEST_OUTCOME_UNKNOWN` or `DESTINATION_ACCEPTED_RESPONSE_UNVERIFIABLE`.
+- Enforces `story_deliveries_unknown_remote_id_check`: `create` operations have `remote_id IS NULL`, while `update` operations retain their non-null `remote_id`.
+- Adds partial index `story_deliveries_unresolved_story_instance_idx` on `(story_id, destination_instance_id, started_at DESC, delivery_id DESC) WHERE outcome IN ('running', 'unknown') AND destination_instance_id IS NOT NULL`.
+- Creates `storyrail.story_delivery_reconciliations` table (`reconciliation_id`, `insertion_position`, `story_id`, `delivery_id`, `destination`, `destination_instance_id`, `operation`, `slug`, `decision`, `remote_id`, `decided_at`, `payload`).
+- Enforces trigger `storyrail.story_delivery_reconciliation_is_valid()` verifying that the snapshot matches the exact unresolved delivery and validates decision consistency (`delivered` requires `remoteId`, `not_delivered` requires `remoteId IS NULL`).
+- Adds trigger `storyrail.story_delivery_reconciliations_are_immutable()` ensuring reconciliations cannot be updated or deleted.
+
+## Migration 0079 — agent run recovery
+
+`database/migrations/0079-agent-run-recovery.sql` adds recovery infrastructure for manual agent runs that were interrupted by process termination:
+- Adds `recorded_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP` to `storyrail.agent_runs`. Existing running rows receive the migration instant, giving them a fresh recovery window.
+- Adds partial index `agent_runs_stale_running_idx` on `(recorded_at ASC, append_position ASC) WHERE outcome = 'running'`.
+- Updates trigger `storyrail.agent_run_completion_is_one_way()` ensuring that `recorded_at` cannot be changed during completion and that runs only complete to terminal outcomes.
+
 ## Integration test lifecycle
 
-The PostgreSQL integration tests (`src/adapters/source-persistence/postgres-source-repositories.test.ts` and the Story/attachment/assignment/run/article/review/writer-revision/story-rejection suites) connect via `STORYRAIL_TEST_DATABASE_URL`, verify the database name is exactly `storyrail_test`, drop and recreate the `storyrail` schema, apply migrations `0012`, `0017`, `0018`, `0024`, `0025`, `0027`, `0028`, `0030`, `0031`, `0038`, `0041`, `0049`, `0053`, `0054`, `0055`, `0056`, `0057`, `0058`, `0059`, `0060`, `0061`, `0062`, `0063`, `0064`, `0065`, `0066`, `0067`, `0068`, `0069`, `0070`, `0071`, `0072`, `0073`, `0074`, `0075`, and `0076` in order, and truncate the editorial tables (plus delete non-built-in Agent Profiles) between cases. The suite never creates or drops a database.
+The PostgreSQL integration tests (`src/adapters/source-persistence/postgres-source-repositories.test.ts` and the Story/attachment/assignment/run/article/review/writer-revision/story-rejection suites) connect via `STORYRAIL_TEST_DATABASE_URL`, verify the database name is exactly `storyrail_test`, drop and recreate the `storyrail` schema, apply migrations `0012`, `0017`, `0018`, `0024`, `0025`, `0027`, `0028`, `0030`, `0031`, `0038`, `0041`, `0049`, `0053`, `0054`, `0055`, `0056`, `0057`, `0058`, `0059`, `0060`, `0061`, `0062`, `0063`, `0064`, `0065`, `0066`, `0067`, `0068`, `0069`, `0070`, `0071`, `0072`, `0073`, `0074`, `0075`, `0076`, `0077`, `0078`, and `0079` in order, and truncate the editorial tables (plus delete non-built-in Agent Profiles) between cases. The suite never creates or drops a database.

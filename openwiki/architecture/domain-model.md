@@ -176,8 +176,9 @@ Migration `0063` creates the `storyrail.newsroom_standards` table and seeds an i
 
 - `verifyArticleGrounding` inspects cited article blocks against raw and prepared source evidence documents.
 <!-- openwiki: broken internal link [url] file "url" does not exist. Fix the href or restore the target, then delete this comment. -->
-- Evidence and quote comparison performs markdown-neutral text normalization (`normalizeEvidenceForComparison`): Markdown syntax (bold `**`, italics `*`, code backticks, markdown links `[text](url)` retaining link text, and images `![alt](url)` stripped completely) is normalized away on both sides before quotation matching. This prevents a Writer from being refused for quoting text from a markdown-rendered source.
+- Evidence and quote comparison performs markdown-neutral text normalization (`visibleInlineMarkdown` / `comparable`): Recognized balanced inline Markdown syntax (bold `**`, italics `*`, underscores `__`/`_`, markdown links `[text](url)` retaining link text, and images `![alt](url)` stripped completely) and presentation differences (smart quotes, line breaks, over-escaped characters) are normalized away before quotation matching. Intraword punctuation, unmatched markers, and code blocks (`...`) are preserved as literal text.
 - Model failure codes: When an ungrounded claim or quote is found, the run is rejected with `MODEL_OUTPUT_UNGROUNDED` or `MODEL_CORRECTION_OUT_OF_SCOPE` accompanied by specific grounding findings (`CITATION_QUOTE_UNSUPPORTED`, etc.). Both failure codes are permitted to carry grounding findings in domain validation and schema.
+- Grounding metrics (`measureArticleGrounding`): Computes `groundedShare` (share of cited prose characters over total prose characters) and `derivedShare` (share of 8-word sequences appearing verbatim in source evidence, identifying restatements vs. original synthesis).
 
 ## Assignments
 
@@ -246,15 +247,33 @@ Revision 1 is created by the [Writer draft workflow](application-workflows.md#wr
 
 `story-delivery-types.ts` and `story-delivery.ts` model the delivery of a published Story's Article Revision to an external destination (e.g., StudioCMS or WordPress). Delivery is an outbound write and is tracked as an explicit audit record:
 
-- A delivery record describes what was sent (`StoryDeliveryRequest`: `operation` ("create" | "update"), `slug`, `draft` boolean, `bodyCharacters`), the destination software name (`destination`), the destination installation identity (`destinationInstanceId`), and what came back (`outcome`: "running" | "succeeded" | "failed"), never storing the Article body itself.
+- A delivery record describes what was sent (`StoryDeliveryRequest`: `operation` ("create" | "update"), `slug`, `draft` boolean, `bodyCharacters`), the destination software name (`destination`), the destination installation identity (`destinationInstanceId`), and what came back (`outcome`: "running" | "succeeded" | "failed" | "unknown"), never storing the Article body itself.
 - Destination instance identity: `siteDestinationInstanceId(destinationSettings)` deterministically identifies the specific remote installation as `${kind}:${baseUrl.replace(/\/+$/, "")}` (typed as `DestinationInstanceId`). This ensures a remote page identifier (`remoteId`) recovered from one installation is never mistakenly used to overwrite content if the site's configured URL or connector changes.
 - Legacy mapping protection: Deliveries migrated from earlier schemas carry `destinationInstanceId: null`. If a delivery is attempted without an existing confirmed mapping for the current installation, the presence of an unbound legacy mapping triggers a fail-closed `DESTINATION_MAPPING_REQUIRES_REVIEW` error to prevent unintended remote mutations until reviewed.
+- Ambiguous outcomes & reconciliation: Network disconnects or unparseable 2xx responses leave an attempt in `outcome: "unknown"` with an `uncertainty` record (`DESTINATION_REQUEST_OUTCOME_UNKNOWN` or `DESTINATION_ACCEPTED_RESPONSE_UNVERIFIABLE`). Subsequent delivery attempts for that Story and destination instance fail closed with `DESTINATION_RECONCILIATION_REQUIRED` until an operator records a `StoryDeliveryReconciliation`.
 - Destinations support StudioCMS (`studiocms`) and WordPress (`wordpress`).
 - WordPress delivers block-by-block serialized Gutenberg markup (`<!-- wp:paragraph -->`, `<!-- wp:heading -->`), with requested vs. assigned slug tracking when WordPress uniquifies colliding slugs.
 - `DELIVERY_FAILURE_CODES`: `DESTINATION_UNREACHABLE`, `DESTINATION_REJECTED`, `DESTINATION_UNAUTHORIZED`, `DESTINATION_RESPONSE_INVALID`. Note: HTTP 500 status responses are classified as `DESTINATION_REJECTED` (since the server answered and rejected), whereas timeouts (408) and rate limits (429) remain `DESTINATION_UNREACHABLE`.
-- Durability pattern: Following `agent_tool_calls`, a delivery row is written as `running` before the HTTP request leaves the newsroom process, ensuring no write to the outside world occurs unrecorded. When the response arrives, the row is updated in place to `succeeded` or `failed`.
+- Durability pattern: Following `agent_tool_calls`, a delivery row is written as `running` before the HTTP request leaves the newsroom process, ensuring no write to the outside world occurs unrecorded. When the response arrives, the row is updated in place to `succeeded`, `failed`, or `unknown`.
 - Slug generation: `storyDeliverySlug(headline)` derives a URL-safe slug (max 96 chars) deterministically from the headline.
 - Remote ID tracking: For `create`, destinations return the created page or post ID, which StoryRail stores in `remoteId`. Subsequent deliveries of newer revisions to the same destination instance update the existing remote resource via `PATCH`/`POST` using this `remoteId`.
+
+## Legacy Delivery Mapping Resolutions
+
+`legacy-delivery-mapping-resolution-types.ts` and `legacy-delivery-mapping-resolution.ts` model the operator resolution of an ambiguous pre-instance legacy delivery mapping:
+- `LegacyDeliveryMappingResolution`: snapshots `id`, `storyId`, `legacyDeliveryId`, `destination`, `destinationInstanceId`, `remoteId`, `decision` (`"confirm"` | `"dismiss"`), `decidedBy` (`OperatorActor`), and `decidedAt`.
+- Confirmation (`confirm`): adopts the legacy `remoteId` for the current destination instance, allowing future deliveries to perform an `update` against that existing remote post.
+- Dismissal (`dismiss`): disassociates the legacy `remoteId`, allowing subsequent deliveries to perform a fresh `create` without conflict.
+- Validation (`recordLegacyDeliveryMappingResolution`): enforces non-empty identifiers, operator attribution, and valid decisions.
+
+## Story Delivery Reconciliations
+
+`story-delivery-reconciliation-types.ts` and `story-delivery-reconciliation.ts` model the operator resolution of an uncertain delivery attempt:
+- `StoryDeliveryReconciliation`: snapshots `id`, `storyId`, `deliveryId`, `destination`, `destinationInstanceId`, `operation` (`"create"` | `"update"`), `slug`, `decision` (`"delivered"` | `"not_delivered"`), `remoteId` (`string | null`), `decidedBy` (`OperatorActor`), and `decidedAt`.
+- Decision rules:
+  - `delivered`: requires a non-empty `remoteId` (for `update` operations, it must match the exact `remoteId` the update addressed). Subsequent deliveries will treat this remote post as established and update it.
+  - `not_delivered`: requires `remoteId: null`. If the uncertain attempt was a `create`, subsequent deliveries can execute a clean `create`. If the uncertain attempt was an `update`, the prior verified `remoteId` is retained.
+- Validation (`recordStoryDeliveryReconciliation`): verifies matching operations, decision consistency, non-empty fields, and operator attribution.
 
 ## Shared strict record schemas
 
@@ -275,4 +294,4 @@ To eliminate schema drift between PostgreSQL persistence decoders and browser cl
 
 ## Re-export barrel
 
-`src/domain/editorial/index.ts` re-exports every module in the domain — Source intake/extraction/triage/preparation, Story creation and attachment, the state machine, Agent Profiles, Assignments, Assignment Proposals, AgentRuns, Director review, ReviewDecisions, Articles, Story Deliveries, Policy Runs, and strict record schemas — and `src/application/index.ts` re-exports the application layer's domain-facing types so callers import from a single barrel, including the writer-revisions, story-deliveries, and model-catalog modules.
+`src/domain/editorial/index.ts` re-exports every module in the domain — Source intake/extraction/triage/preparation, Story creation and attachment, the state machine, Agent Profiles, Assignments, Assignment Proposals, AgentRuns, Director review, ReviewDecisions, Articles, Story Deliveries, Legacy Delivery Mapping Resolutions, Story Delivery Reconciliations, Policy Runs, and strict record schemas — and `src/application/index.ts` re-exports the application layer's domain-facing types so callers import from a single barrel, including the writer-revisions, story-deliveries, and model-catalog modules.

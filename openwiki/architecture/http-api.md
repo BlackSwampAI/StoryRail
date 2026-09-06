@@ -323,12 +323,48 @@ Always returns 200 on success or 500 on internal failure.
 
 | Status | Condition |
 | ------ | --------- |
-| 200    | Delivery attempt finished (`succeeded` or `failed` outcome recorded) |
+| 200    | Delivery attempt finished (`succeeded`, `failed`, or `unknown` outcome recorded) |
 | 404    | `STORY_NOT_FOUND` |
-| 409    | `STORY_NOT_PUBLISHED`, `STORY_HAS_NO_ARTICLE`, `DESTINATION_MAPPING_REQUIRES_REVIEW`, `STORY_DELIVERY_NOT_RECORDED` |
+| 409    | `STORY_NOT_PUBLISHED`, `STORY_HAS_NO_ARTICLE`, `DESTINATION_MAPPING_REQUIRES_REVIEW`, `DESTINATION_RECONCILIATION_REQUIRED`, `STORY_DELIVERY_NOT_RECORDED` |
 | 422    | `DESTINATION_NOT_CONFIGURED`, `CREDENTIAL_UNAVAILABLE` |
 | 415/400| Media type / JSON / shape errors |
 | 500    | Internal error |
+
+## POST /api/sites/[siteId]/stories/[storyId]/deliveries/legacy-mapping-resolution — resolve legacy destination mapping
+
+- Route: `src/app/api/sites/[siteId]/stories/[storyId]/deliveries/legacy-mapping-resolution/route.ts`
+- Handler: `src/interfaces/http/resolve-legacy-delivery-mapping-handler.ts`
+- Provider: `storyRuntimeProvider`
+- Body: `{ "legacyDeliveryId": string, "decision": "confirm" | "dismiss" }` (exactly two properties). `STORYRAIL_OPERATOR_ID` must be configured.
+- Workflow: `resolveLegacyDeliveryMapping`. Validates the legacy delivery mapping exists and is latest for the configured destination, then appends an immutable `LegacyDeliveryMappingResolution` row.
+
+| Status | Condition |
+| ------ | --------- |
+| 201    | Resolution recorded |
+| 400    | `LEGACY_DELIVERY_MAPPING_RESOLUTION_INVALID` / shape error |
+| 404    | `STORY_NOT_FOUND`, `LEGACY_DELIVERY_MAPPING_NOT_FOUND` |
+| 409    | `LEGACY_DELIVERY_MAPPING_STALE`, `LEGACY_DELIVERY_MAPPING_DESTINATION_MISMATCH`, `LEGACY_DELIVERY_MAPPING_RESOLUTION_ID_CONFLICT` |
+| 415    | Unsupported media type |
+| 500    | `LEGACY_DELIVERY_MAPPING_RESOLUTION_NOT_RECORDED` / internal error |
+| 503    | Missing `STORYRAIL_OPERATOR_ID` or `DESTINATION_NOT_CONFIGURED` / credential errors |
+
+## POST /api/sites/[siteId]/stories/[storyId]/deliveries/reconciliation — reconcile uncertain delivery outcome
+
+- Route: `src/app/api/sites/[siteId]/stories/[storyId]/deliveries/reconciliation/route.ts`
+- Handler: `src/interfaces/http/reconcile-story-delivery-handler.ts`
+- Provider: `storyRuntimeProvider`
+- Body: `{ "deliveryId": string, "decision": "delivered" | "not_delivered", "remoteId": string | null }` (exactly three properties; `delivered` requires non-empty `remoteId`, `not_delivered` requires `remoteId: null`). `STORYRAIL_OPERATOR_ID` must be configured.
+- Workflow: `reconcileStoryDelivery`. Validates the unresolved delivery (`outcome IN ('running', 'unknown')`) exists and is latest for the destination instance, verifies that for an update operation `remoteId` matches the original addressed page, and appends an immutable `StoryDeliveryReconciliation` row.
+
+| Status | Condition |
+| ------ | --------- |
+| 201    | Reconciliation recorded |
+| 400    | `STORY_DELIVERY_RECONCILIATION_INVALID` / shape error |
+| 404    | `STORY_NOT_FOUND`, `STORY_DELIVERY_RECONCILIATION_NOT_FOUND` |
+| 409    | `STORY_DELIVERY_ALREADY_RECONCILED` |
+| 415    | Unsupported media type |
+| 500    | `STORY_DELIVERY_RECONCILIATION_NOT_RECORDED` / internal error |
+| 503    | Missing `STORYRAIL_OPERATOR_ID` or `DESTINATION_NOT_CONFIGURED` / credential errors |
 
 ## GET /api/sites/[siteId]/newsroom-standards — read newsroom standards
 
