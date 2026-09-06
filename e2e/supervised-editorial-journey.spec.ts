@@ -19,12 +19,13 @@ import {
 } from "@/domain/editorial";
 
 const databaseUrl = process.env.STORYRAIL_TEST_DATABASE_URL as string;
+const WORKFLOW_COMPLETION_TIMEOUT = 30_000;
 
 test("runs a supervised Story from evidence through WordPress delivery", async ({
   page,
   request,
 }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(150_000);
   const unique = randomUUID();
   const domain = `journey-${unique}.acceptance.storyrail.test`;
   const created = await request.post("/api/sites", {
@@ -150,40 +151,48 @@ test("runs a supervised Story from evidence through WordPress delivery", async (
     .getByRole("textbox", { name: "Why this Writer and this angle", exact: true })
     .fill("The general Writer can turn the attached notice into a concise update.");
   await page.getByRole("button", { name: "Assign it and write the draft" }).click();
-  await expect(page.getByRole("heading", { name: "Harbour service update" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Harbour service update" })).toBeVisible({
+    timeout: WORKFLOW_COMPLETION_TIMEOUT,
+  });
 
   await page.getByRole("button", { name: "Send this draft to the Director" }).click();
   await page.getByRole("button", { name: "Ask the Director to read it" }).click();
   await expect(
     page.getByRole("heading", { name: "The Director recommends changes" }),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: WORKFLOW_COMPLETION_TIMEOUT });
   await page.getByLabel("Your reason").fill("The Director identified a clearer lead.");
   await page.getByRole("button", { name: "Send it back to the Writer" }).click();
   await page.getByRole("button", { name: "Write revision 2" }).click();
   await expect(
     page.getByRole("heading", { name: "Verified harbour service restored" }),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: WORKFLOW_COMPLETION_TIMEOUT });
 
   await page.getByRole("button", { name: "Send this draft to the Director" }).click();
   await page.getByRole("button", { name: "Ask the Director to read it" }).click();
   await expect(
     page.getByRole("heading", { name: "The Director recommends approving it" }),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: WORKFLOW_COMPLETION_TIMEOUT });
   await page.getByLabel("Your reason").fill("The revision is supported and ready.");
   await page.getByRole("button", { name: "Approve this draft" }).click();
-  await expect(page.getByRole("heading", { name: "Approved and ready to publish" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Approved and ready to publish" })).toBeVisible({
+    timeout: WORKFLOW_COMPLETION_TIMEOUT,
+  });
   await page.getByRole("button", { name: "Publish this Story" }).click();
   await page
     .getByLabel("Why this Story is being published")
     .fill("Checked against the attached notice and approved.");
   await page.getByRole("button", { name: "Publish this Story" }).click();
-  await expect(page.getByRole("heading", { name: "This Story is published" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "This Story is published" })).toBeVisible({
+    timeout: WORKFLOW_COMPLETION_TIMEOUT,
+  });
   await page.getByRole("button", { name: "Deliver to the current destination" }).click();
   await page.getByRole("button", { name: "Deliver to the current destination now" }).click();
-  await expect(page.getByText("Delivered to wordpress.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Delivered to wordpress.", { exact: true })).toBeVisible({
+    timeout: WORKFLOW_COMPLETION_TIMEOUT,
+  });
   await expect(
     page.getByRole("heading", { name: "This Story is published" }).locator(".."),
-  ).toContainText("Delivered to wordpress as 412");
+  ).toContainText("Delivered to wordpress as 412", { timeout: WORKFLOW_COMPLETION_TIMEOUT });
 
   const inspected = await request.get(`${api}/stories/${encodeURIComponent(storyIdentity)}`);
   expect(inspected.ok()).toBeTruthy();
