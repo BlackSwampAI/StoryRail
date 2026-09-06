@@ -157,12 +157,33 @@ Rejection is terminal and does not contact a model. It preserves all existing wo
 3. Finds the latest Article Revision (`STORY_HAS_NO_ARTICLE`).
 4. Resolves the destination directory (`DeliveryDestinationDirectory`) to construct the destination instance with site settings and credentials (including its `instanceId`).
 5. Derives the slug via `storyDeliverySlug(revision.headline)`.
-6. Checks previous deliveries for that Story and destination instance (`findLatestSucceeded({ storyId, destinationInstanceId })`).
-   - If no prior delivery for the current instance is found, checks for unbound legacy deliveries (`findLatestLegacySucceeded({ storyId, destination })`). If a legacy mapping exists, it fails closed with `DESTINATION_MAPPING_REQUIRES_REVIEW` so operators can review before writing to a new instance.
-   - If a prior delivery for the instance exists, uses its `remoteId` to decide whether this is a `create` (first delivery, `remoteId: null`) or `update` (patching an existing remote page using its prior `remoteId`).
-7. **Durability first**: Records the delivery row as `outcome: "running"` with `StoryDeliveryRepository.append` before making the external HTTP call.
-8. Invokes `destination.deliver(...)`.
-9. Updates the delivery record with `StoryDeliveryRepository.complete` to `succeeded` with `remoteId` (parsed from the provider response) or `failed` with failure details. Failed deliveries are never retried silently.
+6. **Reconciliation check**: Checks for unresolved deliveries for that Story and destination instance (`findLatestUnresolved({ storyId, destinationInstanceId })`). If an unresolved delivery (`running` or `unknown`) exists, it verifies whether a matching `StoryDeliveryReconciliation` exists. If unreconciled, the workflow fails closed with `DESTINATION_RECONCILIATION_REQUIRED` to avoid duplicate page creation or overwriting the wrong post.
+7. **Legacy mapping check**: Checks previous deliveries for that Story and destination instance (`findLatestSucceeded({ storyId, destinationInstanceId })`).
+   - If no prior delivery for the current instance is found, checks for unbound legacy deliveries (`findLatestLegacySucceeded({ storyId, destination })`). If a legacy mapping exists, it checks for an existing `LegacyDeliveryMappingResolution`. If unreviewed, it fails closed with `DESTINATION_MAPPING_REQUIRES_REVIEW` so operators can review before writing to a new instance.
+   - Determines the effective `remoteId`: prior successful delivery ID, confirmed legacy resolution ID, or reconciled ID. If present, the operation is `update`; otherwise `create` (`remoteId: null`).
+8. **Durability first**: Records the delivery row as `outcome: "running"` with `StoryDeliveryRepository.append` before making the external HTTP call.
+9. Invokes `destination.deliver(...)`.
+10. Updates the delivery record with `StoryDeliveryRepository.complete` to:
+    - `succeeded` with `remoteId` and result when the remote system confirms acceptance.
+    - `failed` with failure details when the remote system explicitly rejects the request.
+    - `unknown` with `uncertainty` details when the connection drops or the remote body is unparseable, immediately gating future deliveries until reconciled.
+
+## Legacy delivery mapping resolution workflow
+
+`src/application/story-deliveries/resolve-legacy-delivery-mapping.ts` — `createResolveLegacyDeliveryMapping` records an operator's decision (`confirm` or `dismiss`) on an ambiguous legacy delivery:
+1. Validates that the Story exists and resolves the current configured destination.
+2. Finds the succeeded legacy delivery row, ensuring it is unbound (`destinationInstanceId: null`) and has a valid `remoteId`.
+3. Verifies that the legacy mapping is the latest for that destination (`LEGACY_DELIVERY_MAPPING_STALE`).
+4. Constructs and persists a `LegacyDeliveryMappingResolution` record via `LegacyDeliveryMappingResolutionRepository.append`.
+
+## Story delivery reconciliation workflow
+
+`src/application/story-deliveries/reconcile-story-delivery.ts` — `createReconcileStoryDelivery` records an operator's decision (`delivered` or `not_delivered`) on an ambiguous or uncertain delivery outcome:
+1. Validates that the Story exists and resolves the current configured destination.
+2. Finds the unresolved delivery row (`findUnresolvedById` and `findLatestUnresolved`), ensuring it matches the current destination and instance ID (`STORY_DELIVERY_RECONCILIATION_NOT_FOUND`).
+3. Verifies that no reconciliation has already been recorded (`STORY_DELIVERY_ALREADY_RECONCILED`).
+4. Validates decision consistency: `delivered` on an `update` operation must retain the exact original `remoteId`.
+5. Constructs and persists a `StoryDeliveryReconciliation` record via `StoryDeliveryReconciliationRepository.append`.
 
 ## Model catalog workflow
 
@@ -210,6 +231,8 @@ Persistence contracts are expressed as interfaces in the application layer and i
 | `ReviewDecisionPersistence`                           | `src/application/review-decisions/review-decision-persistence.ts`                 | `src/adapters/review-persistence/postgres-review-decision-persistence.ts`              |
 | `StoryRejectionPersistence`                           | `src/application/story-rejections/story-rejection-persistence.ts`                  | `src/adapters/story-rejection-persistence/postgres-story-rejection-persistence.ts`      |
 | `StoryDeliveryRepository`                             | `src/application/story-deliveries/story-delivery-repository.ts`                   | `src/adapters/story-delivery-persistence/postgres-story-delivery-repository.ts`        |
+| `LegacyDeliveryMappingResolutionRepository`           | `src/application/story-deliveries/legacy-delivery-mapping-resolution-repository.ts` | `src/adapters/legacy-delivery-mapping-resolution-persistence/postgres-legacy-delivery-mapping-resolution-repository.ts` |
+| `StoryDeliveryReconciliationRepository`               | `src/application/story-deliveries/story-delivery-reconciliation-repository.ts`   | `src/adapters/story-delivery-reconciliation-persistence/postgres-story-delivery-reconciliation-repository.ts` |
 | `SiteSettingsRepository`                              | `src/application/site-settings/site-settings-repository.ts`                       | `src/adapters/site-settings-persistence/postgres-site-settings-repository.ts`          |
 
 The `*.contract.ts` files alongside several ports (`source-repositories.contract.ts`, `story-inspection-repository.contract.ts`, `agent-run-repository.contract.ts`, etc.) are shared harnesses that verify any repository implementation satisfies the same behavior contract. The PostgreSQL adapter tests run these contracts against real PostgreSQL in the integration suite.

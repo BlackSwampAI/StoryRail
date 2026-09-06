@@ -18,6 +18,7 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 | `tsconfig.json`                                        | strict TS, `ES2022`, `moduleResolution: Bundler`, path alias `@/*` → `./src/*`, JSX `react-jsx`                      |
 | `next.config.ts`                                       | empty `NextConfig`                                                                                                   |
 | `vitest.config.ts`                                     | jsdom environment, `@` alias, `src/**/*.test.{ts,tsx}`, setup `./src/test/setup.ts`                                  |
+| `playwright.config.ts`                                 | Playwright browser acceptance test suite configuration (Chromium, disposable test DB, mock services)                  |
 | `eslint.config.mjs`                                    | next core-web-vitals + TypeScript configs; ignores build/cache output                                                |
 | `.prettierrc.json`, `.prettierignore`, `.editorconfig` | formatting                                                                                                           |
 | `.nvmrc`                                               | Node 24.18.0                                                                                                         |
@@ -33,7 +34,9 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `site-types.ts`, `site-domain.ts` — `Site`, `SiteDomain`, `canonicalizeSiteDomain`
 - `built-in-agent-profiles.ts` — `builtInAgentProfilesForSite`, `findBuiltInAgentProfile`
 - `newsroom-standards-types.ts`, `newsroom-standards.ts` — `recordNewsroomStandards`, `withNewsroomStandards`
-- `article-grounding.ts` — markdown-agnostic quote normalization and fact-checking checks
+- `article-grounding.ts` — markdown-agnostic quote normalization, visible inline extraction, and fact-checking checks
+- `legacy-delivery-mapping-resolution-types.ts`, `legacy-delivery-mapping-resolution.ts` — `LegacyDeliveryMappingResolution` and validator
+- `story-delivery-reconciliation-types.ts`, `story-delivery-reconciliation.ts` — `StoryDeliveryReconciliation` and validator
 - `state-machine.ts` — `PERMITTED_STORY_TRANSITIONS`, `MAX_REVISION_CYCLES`, `transitionStory`
 - `source-types.ts` — `UrlSource`, `CanonicalSourceUrl`, intake/error types
 - `source-url.ts` — `canonicalizeSourceUrl`
@@ -82,7 +85,7 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `director-reviews/` — `run-director-review.ts`
 - `review-decisions/` — `record-story-review-decision.ts`, `review-decision-persistence.ts`
 - `story-rejections/` — `reject-story.ts`, `story-rejection-persistence.ts`
-- `story-deliveries/` — `deliver-story.ts`, `delivery-destination.ts`, `story-delivery-repository.ts`
+- `story-deliveries/` — `deliver-story.ts`, `delivery-destination.ts`, `story-delivery-repository.ts`, `resolve-legacy-delivery-mapping.ts`, `legacy-delivery-mapping-resolution-repository.ts`, `reconcile-story-delivery.ts`, `story-delivery-reconciliation-repository.ts`
 - `site-settings/` — `update-site-settings.ts`, `site-settings-repository.ts`
 - `index.ts` — barrel re-export
 
@@ -107,6 +110,8 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `story-listing/` — `postgres-story-listing-repository.ts`, `.test.ts`
 - `story-rejection-persistence/` — `postgres-story-rejection-persistence.ts`, `.test.ts`
 - `story-delivery-persistence/` — `postgres-story-delivery-repository.ts`, `postgres-story-delivery-decoder.ts`
+- `legacy-delivery-mapping-resolution-persistence/` — `postgres-legacy-delivery-mapping-resolution-repository.ts`, `postgres-legacy-delivery-mapping-resolution-decoder.ts`
+- `story-delivery-reconciliation-persistence/` — `postgres-story-delivery-reconciliation-repository.ts`, `postgres-story-delivery-reconciliation-decoder.ts`
 - `story-delivery/` — `studiocms-destination.ts`, `wordpress-destination.ts`, `gutenberg-blocks.ts`, `site-delivery-destination-directory.ts`
 - `site-settings-persistence/` — `postgres-site-settings-repository.ts`
 - `site-credential-persistence/` — `postgres-site-credential-repository.ts`
@@ -123,6 +128,7 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `assignment-editor-configuration.ts`, `assignment-editor-runtime.ts` — supervised Assignment Editor proposal runtime
 - `writer-configuration.ts`, `writer-runtime.ts` — supervised Writer draft and revision runtime and model resolution
 - `director-configuration.ts`, `director-runtime.ts` — supervised advisory Director review runtime and model resolution
+- `openrouter-configuration.ts` — `resolveOpenRouterBaseUrl` for custom provider base URL routing
 - `index.ts` — barrel re-export
 
 ### `src/server` — lazy runtime providers
@@ -157,7 +163,7 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `run-director-review-handler.ts`
 - `record-story-review-decision-handler.ts`
 - `reject-story-handler.ts`
-- `deliver-story-handler.ts`
+- `deliver-story-handler.ts`, `resolve-legacy-delivery-mapping-handler.ts`, `reconcile-story-delivery-handler.ts`
 - `model-catalog-handlers.ts`
 - `site-settings-handlers.ts`
 
@@ -182,6 +188,8 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `api/sites/[siteId]/stories/[storyId]/review-decisions/route.ts` (POST)
 - `api/sites/[siteId]/stories/[storyId]/rejections/route.ts` (POST)
 - `api/sites/[siteId]/stories/[storyId]/deliveries/route.ts` (POST)
+- `api/sites/[siteId]/stories/[storyId]/deliveries/legacy-mapping-resolution/route.ts` (POST)
+- `api/sites/[siteId]/stories/[storyId]/deliveries/reconciliation/route.ts` (POST)
 - `api/sites/[siteId]/agent-profiles/route.ts` (GET, POST)
 - `api/sites/[siteId]/model-catalog/route.ts` (GET)
 - `api/sites/[siteId]/site-settings/route.ts` (GET, PUT)
@@ -202,6 +210,13 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `editorial-task-pending.tsx` — shared accessible pending-status card for Writer, Assignment Editor, and Director tasks
 - `agent-profiles-workspace.tsx`, `agent-profile-client.ts`
 - `story-client.ts`
+
+### `e2e`
+
+- `newsroom-smoke.spec.ts` — browser acceptance test verifying newsroom desk, queues, staff, and inbox rendering
+- `supervised-editorial-journey.spec.ts` — complete supervised editorial journey from Source intake through Director review, approval, and WordPress delivery
+- `support/external-services.mjs` — lightweight mock HTTP server for OpenRouter completions and WordPress post publishing during acceptance tests
+- `support/reset-test-database.mjs` — database reset script verifying `storyrail_test` and dropping schema/ledger before test migrations
 
 ### `src/test`
 
@@ -244,6 +259,9 @@ StoryRail is a single-package Next.js application (`package.json`: `name: storyr
 - `0074-policy-run-source-roots.sql` — Source-rooted policy runs and reconcilable pre-Story workflows
 - `0075-policy-run-attempts.sql` — bounded Writer retry attempt tracking (up to 3 attempts) in policy payloads
 - `0076-story-delivery-instance-identity.sql` — destination installation instance identity and legacy mapping safety
+- `0077-legacy-delivery-mapping-resolutions.sql` — immutable legacy delivery mapping resolution audit facts
+- `0078-ambiguous-delivery-reconciliation.sql` — uncertain delivery outcome state (`unknown`) and reconciliation tracking
+- `0079-agent-run-recovery.sql` — database-owned recovery timestamps and stale running AgentRun recovery
 
 ## Documentation (`docs/`)
 
