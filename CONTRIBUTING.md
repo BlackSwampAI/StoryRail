@@ -37,8 +37,12 @@ The single application package uses pnpm scripts:
 - `pnpm dev` starts the local Next.js development server.
 - `pnpm build` creates the production build.
 - `pnpm start` serves an existing production build.
+- `pnpm migrate` applies pending PostgreSQL schema migrations.
+- `pnpm migrate:status` reports migration status without applying migrations.
+- `pnpm migrate:adopt` records existing migrations as applied without executing them.
 - `pnpm test` runs the focused Vitest suite once.
-- `pnpm test:postgres` runs only the PostgreSQL persistence integration suite for Source evidence, Stories, and Story-Source attachments and requires `STORYRAIL_TEST_DATABASE_URL`.
+- `pnpm test:postgres` runs the PostgreSQL persistence and schema migration integration suites and requires `STORYRAIL_TEST_DATABASE_URL`.
+- `pnpm test:e2e` runs Playwright browser acceptance tests and requires `STORYRAIL_TEST_DATABASE_URL` for a disposable `storyrail_test` database.
 - `pnpm test:watch` runs Vitest in watch mode.
 - `pnpm typecheck` generates Next.js route and framework types, then checks strict TypeScript types without emitting files.
 - `pnpm lint` runs ESLint.
@@ -49,20 +53,23 @@ Agents may write or update the code, tests, and configuration behind these comma
 
 ## Server runtime configuration
 
-The server-only Source-evidence runtime requires these production variable names:
+The server runtime reads its configuration from the variable names documented in `.env.example`:
 
 - `STORYRAIL_DATABASE_URL`
-- `FIRECRAWL_API_KEY`
+- `STORYRAIL_OPENROUTER_BASE_URL` (optional)
+- `STORYRAIL_CREDENTIAL_KEY` (for encrypted site credentials)
+- `STORYRAIL_SITE_ID` (optional; selects a Site when an installation has more than one)
+- `STORYRAIL_OPERATOR_ID` (required for actions attributed to an operator)
 
-The separate server-only Story runtime requires only `STORYRAIL_DATABASE_URL`; Story creation, Source attachment, and Story inspection do not require Firecrawl.
+Provider credentials such as Firecrawl and OpenRouter keys are managed as site credentials in the application, rather than through `FIRECRAWL_API_KEY` environment configuration. `.env.example` documents names only. Never commit credentials, connection strings, or working example values. Unit tests inject external services and require no production database or provider access. PostgreSQL migrations must be applied before a composed runtime can persist editorial state; application runtime does not run them automatically.
 
-`.env.example` documents names only. Never commit credentials, connection strings, or working example values. Runtime unit tests inject Pool, fetch, UUID, and clock substitutes, so they require no real PostgreSQL or Firecrawl access. PostgreSQL migrations must be applied externally before a composed runtime can persist Source evidence or Story state; application runtime does not execute them. Ordinary validation must never make Firecrawl, other provider, or production database requests.
+Ordinary validation must not make requests to production databases or external providers.
 
 ## PostgreSQL integration tests
 
-Source-evidence, Story, and Story-Source attachment persistence integration tests run against PostgreSQL 18.4 itself. They do not use mocks, testcontainers, an embedded database, or a simulated PostgreSQL implementation.
+PostgreSQL integration tests run against PostgreSQL 18.4 itself. They do not use mocks, testcontainers, an embedded database, or a simulated PostgreSQL implementation.
 
-Provide the test-only connection through `STORYRAIL_TEST_DATABASE_URL`. Never use a production `DATABASE_URL`. The configured database name must be exactly `storyrail_test`; the suite connects and verifies that name before any destructive setup. It never creates or drops a database, but it does drop and recreate the `storyrail` schema, applies migrations 0012, 0017, and 0018 in order, and truncates the two evidence tables, Stories table, and Story-Source attachment table between cases. Use a disposable local test database with no data outside this test workflow that depends on the `storyrail` schema.
+Provide the test-only connection through `STORYRAIL_TEST_DATABASE_URL`. Never use a production database URL. The configured database name must be exactly `storyrail_test`. These tests are destructive: persistence tests drop and recreate the `storyrail` schema, while migration-runner tests create and drop a separate `storyrail_migration_runner_test` database. Use a disposable PostgreSQL instance and a test role with the permissions those operations require; do not point either suite at data you need to keep.
 
 When `STORYRAIL_TEST_DATABASE_URL` is absent, `pnpm test` skips the PostgreSQL suite while continuing to run every non-PostgreSQL test. The dedicated command fails before Vitest when the variable is absent. Run the integration suite explicitly with a test URL whose database component is `storyrail_test`:
 
@@ -71,7 +78,9 @@ STORYRAIL_TEST_DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/story
   pnpm test:postgres
 ```
 
-Credentials, host, and port may differ locally. Do not commit connection strings or credentials. The integration suite owns and closes only the Pool it creates; the server-only application runtime separately owns only the Pool created for its own composed instance.
+Credentials, host, and port may differ locally. Do not commit connection strings or credentials.
+
+Browser acceptance tests use the same `STORYRAIL_TEST_DATABASE_URL` and require Chromium. They reset the test database's `storyrail` schema and migration ledger, then apply the complete migration history before starting the application. Install the browser once with `pnpm exec playwright install chromium`, then run `pnpm test:e2e`. Use only a disposable `storyrail_test` database.
 
 ## Continuous integration
 
@@ -84,13 +93,15 @@ pnpm lint
 pnpm typecheck
 pnpm test
 STORYRAIL_TEST_DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/storyrail_test' pnpm test:postgres
+pnpm exec playwright install --with-deps chromium
+STORYRAIL_TEST_DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/storyrail_test' pnpm test:e2e
 pnpm build
 git diff --check
 ```
 
-GitHub Actions runs these commands independently for pull requests targeting `main`. CI also runs for
-pushes to `main` and can be started manually. A green CI run confirms the automated checks passed for
-that revision; it does not replace Chris's explicit approval to merge.
+GitHub Actions runs these checks for pull requests targeting `main`, pushes to `main`, and manual
+workflow dispatch. OpenWiki is not part of CI and is run manually when a maintainer wants to refresh
+the generated documentation index.
 
 pnpm dependency lifecycle scripts fail closed until reviewed. Record each approval in the committed `pnpm-workspace.yaml` `allowBuilds` map with an exact package version; never approve an unversioned package or all dependency builds. A version change requires a new script review before installation can proceed.
 
