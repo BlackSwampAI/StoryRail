@@ -1,159 +1,64 @@
 # StoryRail
 
 [![CI](https://github.com/BlackSwampAI/StoryRail/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/BlackSwampAI/StoryRail/actions/workflows/ci.yml)
+[![License: AGPL-3.0-only](https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg)](LICENSE)
+[![Node.js 24](https://img.shields.io/badge/Node.js-24-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![pnpm 11.20.0](https://img.shields.io/badge/pnpm-11.20.0-F69220?logo=pnpm&logoColor=white)](https://pnpm.io/)
+[![Pre-alpha](https://img.shields.io/badge/status-pre--alpha-orange.svg)](#project-status)
 
-> An agentic editorial system where evidence, claims, model actions, review decisions, and publication provenance are inspectable and mechanically constrained instead of merely prompted.
+StoryRail is an agent-first editorial control plane for solo publishers and small editorial teams. It turns source material into researched, reviewed stories, with editorial state and evidence preserved in PostgreSQL. It is a newsroom workflow, not a page-building CMS.
 
-StoryRail helps solo publishers and small editorial teams preserve source evidence, decide what deserves coverage, organize Stories, and run bounded editorial agents whose work can be checked rather than trusted. It is a headless editorial system, not a page-building CMS.
+**StoryRail is pre-alpha software. It has no authentication and is not ready for public or production deployment.**
 
-Plenty of tools can chain a researcher, a writer, and an editor together. What is unusual here is that the chain is held to its evidence: a reader can open any claim and see the passage that supports it, a Writer that cites something the evidence does not contain is refused before anything is written, a Director cannot approve work without quoting the passage it judged, and every external tool call becomes part of the durable record.
+## Editorial objects
 
-**Status: pre-alpha and under active development. StoryRail is not production-ready.**
+StoryRail keeps three objects distinct:
 
-## What is StoryRail?
+- **Source** is incoming material and its extraction history. Sources retain provenance and can be attached to coverage without losing their original records.
+- **Story** is the central editorial object: a decision to pursue and organize coverage. A Story can group many Sources and track work through review and publication.
+- **Article** is a versioned work product belonging to a Story. Its ordered blocks distinguish factual claims from context and headings. Claims carry citations to a Source, a specific evidence record, and the supporting passage.
 
-StoryRail separates evidence acquisition, editorial decisions, writing, review, and publication into explicit stages with durable state and human supervision.
+An Article citation is checked against preserved evidence before it can be recorded. The newsroom can open a claim to inspect its supporting passage and follow the Source. PostgreSQL is authoritative for persisted editorial state; agent memory is not.
 
-The constraints are mechanical rather than prompted. An Article is an ordered list of blocks, and a block that asserts a fact must carry the Source, the evidence record, and the passage it relied on. That passage is checked against the evidence before anything is persisted, in the domain and again in a database constraint, so an unsupported claim is as impossible to record as an invalid state transition.
-
-Its central distinction is **Source ≠ Story**:
-
-- A **Source** is incoming evidence, such as a submitted URL and its extraction history.
-- A **Story** is an editorial decision to pursue and organize coverage.
-- An **Article** is a durable, versioned editorial work product separate from its Story. Supervised Writer execution creates the first Article and immutable Revision 1.
-
-One Story may draw on many Sources. A Source may be skipped or attached to an existing Story; submitting a URL never creates a Story automatically.
-
-## Why StoryRail?
-
-Traditional CMS products begin with an article editor. StoryRail begins earlier:
+## Workflow
 
 ```text
-source evidence → editorial decision → Story → assignment → writing → review → publication
+Submit URL → preserve and extract evidence → triage into a Story
+           → research and assign → draft cited Article → review
+           → approve → publish → optionally deliver to a destination
 ```
 
-Small teams need to preserve provenance, make automation inspectable, and keep editorial and publishing decisions under operator control. Every stage can be driven by hand; automation is an operator-authorised policy over the same durable workflows, never a separate path around them.
+Operators can work each step directly or authorize Autopilot to run the existing workflows in sequence. Policy runs and tool calls are durable records, with reconciliation workflows for work interrupted by a process failure. Agents have bounded tool access, and external tool results are treated as untrusted input.
 
-## Current workflow
+StoryRail keeps **editorial publication** separate from **delivery**. Approval and publication record the Story's editorial state. A separate delivery workflow can send an Article from a published Story to a configured destination, including WordPress as Gutenberg blocks, while preserving delivery outcomes and reconciliation decisions. Destinations are replaceable adapters.
 
-```mermaid
-flowchart LR
-    URL[Submitted URL] --> FC[Firecrawl extraction]
-    FC --> RAW[Immutable raw evidence]
-    RAW -->|successful extraction| PREP[Automatic Prepared Evidence]
-    RAW -->|failed extraction| INBOX[Source Inbox]
-    PREP --> EVIDENCE_REVIEW[Evidence review]
-    EVIDENCE_REVIEW --> INBOX
-    INBOX --> DECIDE{Editorial decision}
-    DECIDE -->|New Story| NEW[Persisted Story + Source]
-    DECIDE -->|Existing Story| EXISTING[Attach Source to Story]
-    DECIDE -->|Skip| SKIP[Durable skip decision]
-    NEW --> RESEARCH[Optional Researcher: retrieve and attach more Sources]
-    EXISTING --> RESEARCH
-    RESEARCH --> PROPOSE[Optional supervised Assignment Editor suggestion]
-    PROPOSE --> ASSIGNMENT_REVIEW[Operator review and editing]
-    ASSIGNMENT_REVIEW --> ASSIGN[Durable Assignment + intake-to-assigned transition]
-    ASSIGN --> WRITE[Supervised Writer + Article Revision 1]
-    WRITE --> GROUND{Every claim supported by its cited evidence?}
-    GROUND -->|No| CORRECT[One citation correction, then refusal]
-    GROUND -->|Yes| SUBMIT[Article sent to review]
-    SUBMIT --> DIRECTOR[Director review, quoting what it judged]
-    DIRECTOR --> OPERATOR{Review decision}
-    OPERATOR -->|Approve| APPROVED[Approved]
-    OPERATOR -->|Request changes| CHANGES[Changes requested]
-    CHANGES --> REVISE[Supervised Writer + next immutable revision]
-    REVISE --> GROUND
-    APPROVED --> PUBLISH[Operator publication + terminal transition]
-```
+## Screenshots
 
-Every step above can be taken by hand. **Autopilot** runs the same sequence unattended from an Intake Story, optionally researching first, writing each durable record through the same workflows with the operator as the actor.
+These screenshots show the actual newsroom and claim reader with fictional demo data. See the [capture notes](docs/screenshots/README.md).
 
-Prepared Evidence is model-derived, cleaned evidence. It never replaces the immutable raw extraction; both histories remain available for audit and survive triage and reload.
+![StoryRail newsroom](docs/screenshots/newsroom.png)
 
-Durable Profiles configure the Assignment Editor, Writer, and Director/editor-in-chief roles. After the supervised Writer creates an immutable revision, the operator explicitly submits it to review, runs the Director, and records an approval or request-changes decision. A request-changes decision lets the Writer create the next immutable revision from the exact historical evidence, Director review, and authoritative operator reason. The Director is advisory, and the existing two-cycle Story limit bounds Articles at Revision 3.
+![Article claim provenance](docs/screenshots/article-provenance.png)
 
-## What works today
+## Highlights
 
-- URL Source preservation with conservative canonicalization and exact-duplicate detection.
-- Firecrawl v2 Markdown extraction using its automatic proxy strategy.
-- Rejection of obvious challenge/interstitial responses as failed extraction attempts.
-- Immutable, append-ordered raw extraction history, including durable failures and retries.
-- A PostgreSQL-backed Source Inbox with durable **New Story**, **Existing Story**, and **Skip** triage.
-- Persistent Story queues, Story creation, Source-to-Story attachments, and Story inspection.
-- Automatic Prepared Evidence generation after successful new extraction, plus explicit append-only preparation retries through a provider-neutral model boundary, LangChain, and OpenRouter.
-- Immutable successful and failed preparation history alongside the original raw evidence.
-- Reconstruction of raw and prepared evidence from PostgreSQL after triage or browser reload.
-- Immutable, PostgreSQL-backed Agent Profiles with built-in Assignment Editor, General Writer, and Director configurations plus custom Writer creation and optional provider-neutral model selection.
-- Durable manual Assignments with Writer selection from immutable Agent Profiles and a server-derived snapshot of every attached Source identity.
-- The first persisted Story transition, `intake` to `assigned`, committed atomically with its Assignment and durable transition receipt/activity.
-- Supervised Assignment Editor proposal generation through the provider-neutral structured-model boundary, with no browsing or tools.
-- Durable, append-ordered AgentRun history that records the exact Story, evidence references, Writer candidates, model, prompt version, requester, outcome, and proposal or safe failure.
-- Supervised Writer execution with Assignment-selected identity, Profile model override or the newsroom's configured Writer model, durable Article Revision 1, and an `assigned` to `in_progress` transition.
-- Supervised review submission, a durable Director AgentRun against the exact evidence IDs recorded by the Writer run, and an operator-owned ReviewDecision that atomically moves the Story to Approved or Changes Requested.
-- Explicit operator rejection from Intake, Assigned, In Progress, In Review, or Changes Requested, with a required reason and an atomic terminal Story transition receipt.
-- Supervised Writer revisions after Request Changes, with immutable Revision 2/3 history, exact evidence reuse, operator-owned revision direction, and an atomic return to In Progress.
-- Operator review and editing of suggestions in the existing Assignment form; the manual Assignment remains the authoritative state-mutation boundary and remains attributed to the operator.
-- Operator publication of an Approved Story as a durable terminal transition with a required reason.
-- **Cited Articles.** A Revision is an ordered list of blocks. A `claim` block must carry at least one citation naming the Source, the evidence record, and the passage relied on; `context` blocks are the Writer's own prose and carry none. Both rules hold in the domain and in database constraints.
-- **Mechanical grounding.** Every quote is checked against the evidence the Assignment actually carries before anything is persisted. Typography, re-wrapping, and over-escaping are forgiven; paraphrase, invention, and quoting across a paragraph break are not. A refused draft records which citations failed and what they claimed to quote.
-- **One citation correction.** A Writer whose citations do not hold is handed the specific findings against it and may correct them once, checked again by the same rule. A corrected draft is recorded as corrected, never as clean.
-- **Grounding measurement.** Every Revision reports how much of its prose is attributed to evidence and how much occurs verbatim in that evidence, derived on demand so it applies to Revisions written before citations existed.
-- **A provenance reader.** Any claim in the Article opens to show the passage it rests on, the Source as a followable link, and whether the record read was prepared or raw. Uncited prose is labelled as the Writer's own framing.
-- **A Director that must point at what it read.** Six checks including claim support, each required to quote the passage of the Article it judges, verified against that Article before the review is recorded.
-- **A working record.** Runs, transitions, and review decisions interleaved in the order they happened, with the model, duration, and — for a refusal — the exact passages that could not be supported.
-- **Bounded tool access.** Tools declare themselves through an open registry with JSON Schema, so an operator's own tools can be added. Two ceilings bound an exchange, calls are recorded durably, and tool output is handed to models as untrusted data.
-- **A Researcher.** Reads the evidence already attached, follows what it points at, retrieves those pages, and attaches what is worth citing. Only a page it actually retrieved can be attached, and retrieved material becomes a Source with its own immutable extraction.
-- **A newsroom that remembers.** The Researcher can search what StoryRail has already published, by subject, and is shown the earlier reporting with the Sources behind it. Prior reporting is deliberately not evidence: it carries no evidence record, so a citation naming it is refused by the same grounding check as any other unsupported citation.
-- **Autopilot.** An operator-authorised policy that runs an Intake Story to publication unattended, optionally researching first. Every durable record is still written by the same workflows with the operator as the actor, and every reason says the decision was made under autopilot.
+- Durable Source intake, immutable extraction attempts, evidence preparation, and triage into a new Story, an existing Story, or a skipped item.
+- Research, operator-reviewed assignments, bounded agent profiles, and durable run records.
+- Cited Article revisions with evidence-grounding checks and inspectable claim provenance.
+- Operator-controlled review decisions, publication, and separate destination delivery.
+- Durable Autopilot policy runs, recorded tool calls, and reconciliation for interrupted work.
+- Per-Site settings and encrypted connector credentials, allowing multiple newsroom Sites to be configured independently.
+- PostgreSQL migrations and persistence adapters that keep editorial state explicit and auditable.
 
-## Where StoryRail is going
+## Get started
 
-The editorial path from Source to publication is implemented end to end and can run unattended. The work ahead is durability, curation, and delivery rather than new stages:
+### Requirements
 
-- **Durable automation and reconciliation.** Autopilot sequencing is still in-memory. Nothing durable records that a Story is under a policy run, so a process that dies between steps leaves a run marked `running` forever. Tool calls are recorded after the external call rather than before it. Both need the treatment AgentRuns already got.
-- **A correction-scope invariant.** The citation correction turn is told not to rewrite unrelated blocks; nothing yet enforces it.
-- **Richer automation provenance.** An autopilot decision is attributed to the operator who authorised the run, with a reason that says so. A distinct execution mode would let an audit separate "Chris authorised this" from "the system executed this particular decision."
-- **A knowledge corpus.** House style as instructions, and reference knowledge as citable evidence, kept deliberately distinct so a Writer can never cite the style guide as support for a news claim.
-- **Publishing destinations.** Publication is a durable editorial transition today; where a published Story is delivered remains a separate, replaceable concern.
+- Node.js `24.18.0` (the `.nvmrc` version; supported range is `>=24.15.0 <25`)
+- pnpm `11.20.0` through Corepack
+- PostgreSQL
 
-## Core concepts
-
-- **Source** — preserved incoming evidence. A URL Source retains the exact submitted URL and a conservative canonical URL.
-- **Raw Extraction** — an immutable Firecrawl success or failure record. Retries append new records rather than overwrite history.
-- **Prepared Evidence** — an immutable model-derived attempt to clean a successful raw extraction. It is optional and never authoritative over raw evidence.
-- **Source Inbox** — the queue of preserved Sources awaiting a final editorial decision.
-- **Triage Decision** — an attributable, durable choice to create a Story, attach to an existing Story, or skip coverage.
-- **Story** — the central editorial object that groups evidence and will carry work through the editorial lifecycle.
-- **Agent Profile** — an immutable configuration snapshot for a bounded editorial persona and optional provider-neutral model selection; profiles do not execute agents.
-- **Assignment** — an immutable operator-created brief that selects a Writer Profile, records angle/brief/optional constraints and provenance, and snapshots attached Source identities.
-- **Assignment Proposal** — a supervised Assignment Editor suggestion that prefills the manual Assignment form but cannot create an Assignment or transition a Story.
-- **AgentRun** — one immutable execution record containing bounded input references, configuration, timing, and a structured success or failure outcome.
-- **Writer and Article** — supervised Writer execution creates immutable Article revisions from the Assignment and exact durable evidence; it cannot browse, use tools, or send work to review.
-- **Director** — an independently supervised advisory review role whose recommendation cannot mutate Article or Story state, and which must quote the passage each of its checks judged.
-- **Article Block** — one ordered piece of a Revision, labelled `claim`, `context`, or `heading`. The label decides whether attribution is required or forbidden.
-- **Citation** — the Source, the evidence record, and the verbatim passage a claim rests on, stored so support can be checked rather than trusted.
-- **Grounding** — the mechanical check that every cited passage appears in the evidence it names, owned by the Source it names. It runs before anything durable is written.
-- **Researcher** — a bounded role that retrieves further evidence for a Story and attaches what is worth citing, recording every tool call it makes.
-- **Tool Call** — a durable record of what an agent reached for and what came back. It is an audit fact, not a copy of the material, which becomes evidence with its own record.
-- **Autopilot** — an operator-authorised policy that runs the existing workflows in sequence without further clicks. It decides only when each step runs; it writes nothing itself.
-
-## Architecture
-
-StoryRail is a Next.js 16 / React 19 application backed by PostgreSQL. Its domain and application layers define provider-neutral editorial rules and ports; external systems are attached through replaceable adapters. Firecrawl is the current extraction adapter, while LangChain and OpenRouter provide the current structured-model path for Prepared Evidence.
-
-PostgreSQL is authoritative for editorial state. Source extractions, evidence preparations, attachments, triage decisions, Assignments, and Story transition receipts preserve auditable facts rather than relying on agent memory or overwriting history.
-
-See the [OpenWiki architecture overview](openwiki/architecture/overview.md) for deeper code-grounded documentation, or browse the [technical documentation index](openwiki/index.md).
-
-## Getting started
-
-### Prerequisites
-
-- Node.js 24 (`package.json` requires `>=24.15.0 <25`; `.nvmrc` pins 24.18.0)
-- pnpm 11.20.0 through Corepack
-- PostgreSQL with an application database you control
-- A Firecrawl API key for URL extraction
-- An OpenRouter API key and model name only if you want to prepare evidence
+Some workflows need provider credentials: Firecrawl for URL extraction, and credentials for the model or delivery provider being used. Local workflows such as browsing persisted newsroom state do not need all providers configured.
 
 ### Install and run
 
@@ -161,48 +66,36 @@ See the [OpenWiki architecture overview](openwiki/architecture/overview.md) for 
 corepack enable
 pnpm install --frozen-lockfile
 cp .env.example .env
+```
+
+Set `STORYRAIL_DATABASE_URL`, `STORYRAIL_OPERATOR_ID`, and `STORYRAIL_CREDENTIAL_KEY` in `.env`. The operator ID identifies local editorial actions; the credential key is needed to save encrypted provider credentials in Settings. Apply migrations to your development database with Node's env-file option:
+
+```bash
+node --env-file=.env scripts/migrate.ts up
 pnpm dev
 ```
 
-Before starting the app, configure `.env` and bring the database up to date:
+Open [http://localhost:3133](http://localhost:3133). The `pnpm migrate` shortcut reads `STORYRAIL_DATABASE_URL` from the process environment, so export that variable before using the shortcut. Migrations are run explicitly; the app does not apply them at startup.
 
-```bash
-STORYRAIL_DATABASE_URL=postgresql://user:password@127.0.0.1:5432/storyrail pnpm migrate
-```
+### Configuration
 
-`pnpm migrate:status` reports what a database has, what it still needs, and anything contradictory — a migration edited after it was applied, two files that took the same number, or one that started and never finished. Migrations are still plain SQL in `database/migrations/`, applied in numeric order, and can still be run with any tool you prefer; what the runner adds is that the database records which ones it has, in `public.storyrail_schema_migrations`.
+`.env.example` lists the supported server environment variables:
 
-A database created before that ledger existed has the schema and no record of it. Tell the runner what is already there, naming the last migration you know was applied:
+- `STORYRAIL_DATABASE_URL` — PostgreSQL connection for persisted editorial state.
+- `STORYRAIL_CREDENTIAL_KEY` — Base64-encoded 32-byte key used to encrypt stored provider credentials. Generate with `openssl rand -base64 32`; keep it outside the database.
+- `STORYRAIL_SITE_ID` — Selects the Site served by this process when multiple Sites exist.
+- `STORYRAIL_OPERATOR_ID` — Fixed operator identity for development HTTP actions; this is not authentication.
+- `STORYRAIL_OPENROUTER_BASE_URL` — Optional base URL override for an OpenRouter-compatible provider.
 
-```bash
-STORYRAIL_DATABASE_URL=... pnpm migrate:adopt --through 0061-durable-policy-runs.sql
-```
+Provider credentials and model choices are configured per Site in the newsroom settings. Do not commit `.env` or real credentials. Because the app has no authentication, keep the development server private to your machine or a trusted network.
 
-Adopted migrations are recorded as adopted rather than applied, because the runner did not run them and cannot vouch for them. Anything after the one you name is then applied normally by `pnpm migrate`.
+## Development
 
-Open [http://localhost:3133](http://localhost:3133) to use the development newsroom. StoryRail runs on port 3133 so it does not collide with other local services on the usual Next.js default.
-
-## Environment variables
-
-| Variable                        | Required for                     | Purpose                                                                                     |
-| ------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------- |
-| `STORYRAIL_DATABASE_URL`        | All persisted workflows          | PostgreSQL connection string for editorial state.                                           |
-| `STORYRAIL_CREDENTIAL_KEY`      | Any stored connector credential  | 32 random bytes in base64 that every stored credential is encrypted under. Not recoverable. |
-| `STORYRAIL_SITE_ID`             | Installations with a second Site | Selects the Site this process serves; unset means the Site the installation started with.   |
-| `STORYRAIL_OPERATOR_ID`         | Operator-attributed HTTP actions | Identifies the current fixed development operator; this is not authentication.              |
-| `STORYRAIL_OPENROUTER_BASE_URL` | Optional provider override       | Absolute HTTP(S) base URL for an OpenRouter-compatible provider endpoint.                   |
-| `STORYRAIL_TEST_DATABASE_URL`   | PostgreSQL and browser tests     | Points to a disposable database named exactly `storyrail_test`.                             |
-
-Connector credentials and model selection are no longer environment variables. The OpenRouter and Firecrawl keys are per-Site secrets held encrypted in `storyrail.site_credentials`, and the model each agent role runs on is per-Site configuration in `storyrail.site_settings`. Both are resolved when a run needs them rather than when a process starts, so a change takes effect on the next request. Credentials are write-only over HTTP: `PUT` and `DELETE /api/site-credentials/[slot]` set and remove one, and `GET /api/site-settings` reports only which slots are configured and the last four characters of each. No endpoint returns a stored credential.
-
-Normal Story, Inbox, triage, inspection, Agent Profile, and manual Assignment workflows need no credential at all, and an installation with none configured stays usable: only the runs that reach outside fail, and they fail as recorded Agent Run and extraction failures rather than as errors out of a route.
-
-## Development and validation
-
-Available project scripts:
+Useful commands from `package.json`:
 
 ```bash
 pnpm dev
+pnpm migrate:status
 pnpm format:check
 pnpm lint
 pnpm typecheck
@@ -212,23 +105,20 @@ pnpm test:e2e
 pnpm build
 ```
 
-`pnpm test:postgres` requires `STORYRAIL_TEST_DATABASE_URL`. See [OpenWiki's engineering workflow](openwiki/engineering-workflow.md) and [CONTRIBUTING.md](CONTRIBUTING.md) for the full maintainer-owned verification sequence.
+PostgreSQL integration and browser tests require a disposable database named `storyrail_test` through `STORYRAIL_TEST_DATABASE_URL`. The browser suite also needs Chromium (`pnpm exec playwright install chromium`). Follow [CONTRIBUTING.md](CONTRIBUTING.md) for the maintainer-owned verification sequence and database precautions.
 
-The browser acceptance suite uses a disposable database and a dedicated Next.js server. Install
-its browser once with `pnpm exec playwright install chromium`, then run it with
-`STORYRAIL_TEST_DATABASE_URL=postgresql://.../storyrail_test pnpm test:e2e`. The suite applies
-migrations to that database and refuses to reuse another running development server.
+## Documentation
 
-## Project status and limitations
+- [Product vision](docs/product/vision.md)
+- [MVP scope and current limitations](docs/product/mvp.md)
+- [Terminology](docs/product/terminology.md)
+- [Architecture decisions](docs/architecture/README.md)
+- [Generated OpenWiki technical documentation](openwiki/index.md) (optional; refresh locally when needed)
 
-StoryRail is a development-oriented pre-alpha. It has no authentication, migrations are applied deliberately rather than on startup, and some anti-bot publishers remain inaccessible through Firecrawl.
+## Project status
 
-The editorial path is implemented from Source intake through research, assignment, cited drafting, review, and publication, and can run unattended. Autopilot is now a durable record with a reconciliation pass that closes out work whose process disappeared, and a tool call is recorded before it reaches outside rather than after. What remains is delivery: StoryRail has no publishing destination and no way to read an archive other than its own. Free and low-cost models also fail a meaningful share of the time; StoryRail records those failures rather than retrying silently, so an unattended run may stop partway with a durable reason.
-
-## Technical documentation
-
-The generated [OpenWiki documentation](openwiki/index.md) provides deeper, code-grounded coverage of the architecture, domain model, workflows, persistence schema, HTTP API, newsroom UI, and engineering workflow. Human-authored product direction lives under [`docs/product/`](docs/product/), and architectural decisions are indexed under [`docs/architecture/`](docs/architecture/README.md).
+StoryRail is under active development. Features and interfaces can change, and the project has not been reviewed or hardened for production use. Authentication is not implemented. Provider availability and output quality vary; failed external work is preserved as a failure record for operator review. See the [MVP scope](docs/product/mvp.md) for current boundaries and deferred work.
 
 ## License
 
-StoryRail is licensed under the [GNU Affero General Public License version 3](LICENSE).
+StoryRail is licensed under the [GNU Affero General Public License, version 3 only](LICENSE).

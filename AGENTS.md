@@ -4,7 +4,7 @@
 
 StoryRail is an open-source, agent-first editorial control plane for solo publishers and small editorial teams. It turns raw sources into researched, reviewed, publishable stories through a visible, operator-supervised agentic newsroom workflow. StoryRail manages editorial state and will publish through APIs and replaceable adapters; it is not a page-building CMS.
 
-Keep `Source`, `Story`, and `Article` distinct. `Story` is the central editorial object. PostgreSQL is authoritative for persisted editorial state; agent memory must never become the database. Obscura is a planned optional extraction adapter, not a foundational dependency. OpenWiki is automatically refreshed by GitHub Actions after qualifying `main`-branch changes; implementation agents must not run it as part of ordinary change work.
+Keep `Source`, `Story`, and `Article` distinct. `Story` is the central editorial object. PostgreSQL is authoritative for persisted editorial state; agent memory must never become the database. Obscura is a planned optional extraction adapter, not a foundational dependency. OpenWiki is optional documentation tooling that maintainers run manually when useful; implementation agents must not run it as part of ordinary change work.
 
 ## Change workflow
 
@@ -47,6 +47,16 @@ This repository has a generated `openwiki/` evidence index. It is optional just-
 - Treat source code and tests as authoritative. A brief's unknowns and review items are verification gaps, not automatic requirements.
 - Prefer the narrowest quiet validation that proves the changed behavior. Preserve complete failure output.
 
-The scheduled OpenWiki GitHub Actions workflow refreshes the repository wiki. Do not hand-edit generated OpenWiki pages unless explicitly asked; prefer updating source code/docs and letting OpenWiki regenerate.
+OpenWiki is not run by CI. A maintainer can refresh the generated index locally with `openwiki code --update --print` when the OpenWiki CLI is installed and configured. The repository has no package script or setup command for OpenWiki. Do not hand-edit generated OpenWiki pages unless explicitly asked; update source code and ordinary documentation instead.
 
 <!-- OPENWIKI:END -->
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->
