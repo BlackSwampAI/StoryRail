@@ -35,6 +35,14 @@ export function createReconcileAbandonedWorkHttpHandler(dependencies: {
             runId: call.runId,
             tool: call.tool,
           })),
+          // Settled to unknown rather than failed: each awaits operator reconciliation.
+          abandonedDeliveries: report.abandonedDeliveries.map((delivery) => ({
+            id: delivery.id,
+            storyId: delivery.storyId,
+            destination: delivery.destination,
+            operation: delivery.request.operation,
+            slug: delivery.request.slug,
+          })),
         },
         200,
       );

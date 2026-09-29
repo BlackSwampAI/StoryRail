@@ -70,7 +70,11 @@ import { createPostgresAgentProfileRepository } from "../agent-profile-persisten
 import { createPostgresAssignmentPersistence } from "../assignment-persistence/postgres-assignment-persistence";
 import { createPostgresAgentToolCallRepository } from "@/adapters/agent-tool-call-persistence";
 import { createPostgresArchiveRepository } from "@/adapters/archive";
-import { createPostgresStoryDeliveryRepository } from "@/adapters/story-delivery-persistence";
+import {
+  createPostgresStaleStoryDeliveryRepository,
+  createPostgresStoryDeliveryRepository,
+} from "@/adapters/story-delivery-persistence";
+import { createReconcileAbandonedWork } from "@/application/policy-runs";
 import { createPostgresLegacyDeliveryMappingResolutionRepository } from "@/adapters/legacy-delivery-mapping-resolution-persistence";
 import { createPostgresStoryDeliveryReconciliationRepository } from "@/adapters/story-delivery-reconciliation-persistence";
 import { createPostgresSiteRepository } from "@/adapters/site-persistence";
@@ -244,6 +248,10 @@ const ambiguousDeliveryReconciliationMigrationPath = resolve(
 const agentRunRecoveryMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0079-agent-run-recovery.sql",
+);
+const storyDeliveryRecoveryMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0080-story-delivery-recovery.sql",
 );
 
 const DEFAULT_SITE = siteId("site-default");
@@ -487,6 +495,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let legacyDeliveryResolutionMigrationSql: string;
   let ambiguousDeliveryReconciliationMigrationSql: string;
   let agentRunRecoveryMigrationSql: string;
+  let storyDeliveryRecoveryMigrationSql: string;
 
   /** Every migration, in order. One list so a rebuild can never drift from the first build. */
   const orderedMigrations = (): readonly string[] => [
@@ -529,6 +538,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     legacyDeliveryResolutionMigrationSql,
     ambiguousDeliveryReconciliationMigrationSql,
     agentRunRecoveryMigrationSql,
+    storyDeliveryRecoveryMigrationSql,
   ];
   let destructiveSetupAllowed = false;
 
@@ -621,6 +631,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       "utf8",
     );
     agentRunRecoveryMigrationSql = await readFile(agentRunRecoveryMigrationPath, "utf8");
+    storyDeliveryRecoveryMigrationSql = await readFile(storyDeliveryRecoveryMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -2329,7 +2340,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         }),
       ],
     );
-    return { storyId: intake.id, source };
+    return { storyId: intake.id, revisionId: revision.id, source };
   }
 
   describe("the newsroom's own archive", () => {
@@ -3461,6 +3472,321 @@ describePostgres("PostgreSQL persistence repositories", () => {
         await expect(
           createPostgresStoryDeliveryRepository({ pool }).listByStoryId(published.storyId),
         ).resolves.toEqual(original);
+      } finally {
+        await pool.query("DROP SCHEMA storyrail CASCADE");
+        for (const migration of orderedMigrations()) await pool.query(migration);
+        await addSecondSite(pool);
+        await addSecondSiteWriter(pool);
+      }
+    });
+  });
+
+  describe("recovering deliveries whose process disappeared", () => {
+    const INSTANCE = destinationInstanceId("studiocms:https://cms.example");
+
+    function stuck(
+      published: { readonly storyId: string; readonly revisionId: string },
+      suffix: string,
+      operation: "create" | "update" = "create",
+    ): StoryDelivery {
+      return {
+        id: storyDeliveryId(`delivery-${suffix}`),
+        storyId: storyId(published.storyId),
+        revisionId: articleRevisionId(published.revisionId),
+        destination: "studiocms",
+        destinationInstanceId: INSTANCE,
+        remoteId: operation === "update" ? "page-existing" : null,
+        request: { operation, slug: "a-stuck-delivery", draft: true, bodyCharacters: 64 },
+        // A caller-supplied clock that says the delivery is brand new, to prove it is not trusted.
+        startedAt: "2999-01-01T00:00:00.000Z",
+        completedAt: null,
+        outcome: "running",
+      };
+    }
+
+    async function recordAt(delivery: StoryDelivery, ageMinutes: number) {
+      // Inserted with an explicit recorded_at because the completion guard refuses any later
+      // update of a running row, which is exactly what makes the column trustworthy.
+      await pool.query(
+        `INSERT INTO storyrail.story_deliveries
+           (delivery_id, story_id, revision_id, destination, destination_instance_id, remote_id,
+            outcome, started_at, completed_at, payload, recorded_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb,
+                 CURRENT_TIMESTAMP - make_interval(mins => $11::int))`,
+        [
+          delivery.id,
+          delivery.storyId,
+          delivery.revisionId,
+          delivery.destination,
+          delivery.destinationInstanceId,
+          delivery.remoteId,
+          delivery.outcome,
+          delivery.startedAt,
+          delivery.completedAt,
+          JSON.stringify(delivery),
+          ageMinutes,
+        ],
+      );
+    }
+
+    function reconcileFor(site: SiteId) {
+      return createReconcileAbandonedWork({
+        policyRuns: createPostgresPolicyRunRepository({ pool, siteId: site }),
+        agentRuns: createPostgresAgentRunRepository({ pool }),
+        staleAgentRuns: createPostgresStaleAgentRunRepository({ pool, siteId: site }),
+        toolCalls: createPostgresAgentToolCallRepository({ pool }),
+        deliveries: createPostgresStoryDeliveryRepository({ pool }),
+        staleDeliveries: createPostgresStaleStoryDeliveryRepository({ pool, siteId: site }),
+        now: () => new Date().toISOString(),
+      });
+    }
+
+    it("lists only this Site's stale running deliveries by the database clock, oldest first", async () => {
+      const ours = await publishReport("stale-delivery-ours", {
+        headline: "A stuck headline",
+        body: "The body of a stuck report.",
+        publishedAt: "2026-08-24T09:00:00.000Z",
+      });
+      const theirs = await publishReport(
+        "stale-delivery-theirs",
+        {
+          headline: "A foreign headline",
+          body: "The body of a foreign report.",
+          publishedAt: "2026-08-24T09:00:00.000Z",
+        },
+        OTHER_SITE,
+      );
+      const older = stuck(ours, "stale-delivery-ours-older");
+      const newer = {
+        ...stuck(ours, "stale-delivery-ours-newer"),
+        startedAt: "2000-01-01T00:00:00.000Z",
+      };
+      const recent = stuck(ours, "stale-delivery-ours-recent");
+      const foreign = stuck(theirs, "stale-delivery-theirs-old");
+      const settled = {
+        ...stuck(ours, "stale-delivery-ours-settled"),
+        outcome: "failed" as const,
+        completedAt: "2026-08-24T10:00:01.000Z",
+        failure: { code: "DESTINATION_REJECTED" as const, message: null },
+      };
+      await recordAt(older, 120);
+      await recordAt(newer, 60);
+      await recordAt(recent, 1);
+      await recordAt(foreign, 300);
+      await recordAt(settled, 300);
+      const threshold = (
+        await pool.query<{ threshold: Date }>(
+          "SELECT CURRENT_TIMESTAMP - interval '15 minutes' AS threshold",
+        )
+      ).rows[0]?.threshold.toISOString();
+
+      await expect(
+        createPostgresStaleStoryDeliveryRepository({ pool, siteId: DEFAULT_SITE }).listStaleRunning(
+          threshold ?? "missing threshold",
+        ),
+      ).resolves.toEqual([older, newer]);
+    });
+
+    it("settles a stuck create and update to unknown, satisfying the unknown constraints, and reports them", async () => {
+      const published = await publishReport("stale-delivery-settle", {
+        headline: "A stuck headline",
+        body: "The body of a stuck report.",
+        publishedAt: "2026-08-24T09:00:00.000Z",
+      });
+      const create = stuck(published, "stale-delivery-settle-create", "create");
+      const update = {
+        ...stuck(published, "stale-delivery-settle-update", "update"),
+        request: {
+          operation: "update" as const,
+          slug: "a-stuck-update",
+          draft: true,
+          bodyCharacters: 64,
+        },
+      };
+      const fresh = stuck(published, "stale-delivery-settle-fresh");
+      await recordAt(create, 90);
+      await recordAt(update, 80);
+      await recordAt(fresh, 2);
+      const before = await pool.query<{ delivery_id: string; recorded_at: Date }>(
+        "SELECT delivery_id, recorded_at FROM storyrail.story_deliveries WHERE delivery_id = ANY($1) ORDER BY delivery_id",
+        [[create.id, update.id]],
+      );
+
+      const report = await reconcileFor(DEFAULT_SITE)();
+
+      expect(report.abandonedDeliveries.map((delivery) => [delivery.id, delivery.outcome])).toEqual(
+        [
+          [create.id, "unknown"],
+          [update.id, "unknown"],
+        ],
+      );
+      const rows = await pool.query(
+        `SELECT delivery_id, outcome, remote_id, completed_at IS NOT NULL AS completed,
+                payload -> 'uncertainty' ->> 'code' AS code, recorded_at
+         FROM storyrail.story_deliveries WHERE story_id = $1 ORDER BY delivery_id`,
+        [published.storyId],
+      );
+      expect(rows.rows).toEqual([
+        {
+          delivery_id: create.id,
+          outcome: "unknown",
+          remote_id: null,
+          completed: true,
+          code: "DESTINATION_REQUEST_OUTCOME_UNKNOWN",
+          recorded_at: before.rows[0]?.recorded_at,
+        },
+        {
+          delivery_id: fresh.id,
+          outcome: "running",
+          remote_id: null,
+          completed: false,
+          code: null,
+          recorded_at: expect.any(Date),
+        },
+        {
+          delivery_id: update.id,
+          outcome: "unknown",
+          remote_id: "page-existing",
+          completed: true,
+          code: "DESTINATION_REQUEST_OUTCOME_UNKNOWN",
+          recorded_at: before.rows[1]?.recorded_at,
+        },
+      ]);
+      // A second pass has nothing left to close, and the fresh delivery is never touched.
+      await expect(reconcileFor(DEFAULT_SITE)()).resolves.toMatchObject({
+        abandonedDeliveries: [],
+      });
+    });
+
+    it("routes a settled delivery into the ambiguous delivery gate instead of allowing a retry", async () => {
+      const published = await publishReport("stale-delivery-gate", {
+        headline: "A stuck headline",
+        body: "The body of a stuck report.",
+        publishedAt: "2026-08-24T09:00:00.000Z",
+      });
+      const delivery = stuck(published, "stale-delivery-gate");
+      await recordAt(delivery, 45);
+
+      await reconcileFor(DEFAULT_SITE)();
+
+      await expect(
+        createPostgresStoryDeliveryRepository({ pool }).findLatestUnresolved({
+          storyId: storyId(published.storyId),
+          destinationInstanceId: INSTANCE,
+        }),
+      ).resolves.toMatchObject({ id: delivery.id, outcome: "unknown" });
+      await expect(
+        createPostgresStoryDeliveryReconciliationRepository({
+          pool,
+          siteId: DEFAULT_SITE,
+        }).append({
+          id: storyDeliveryReconciliationId("reconciliation-stale-delivery-gate"),
+          storyId: storyId(published.storyId),
+          deliveryId: delivery.id,
+          destination: delivery.destination,
+          destinationInstanceId: INSTANCE,
+          operation: "create",
+          slug: "a-stuck-delivery",
+          decision: "not_delivered",
+          remoteId: null,
+          decidedBy: OPERATOR,
+          decidedAt: "opaque-decision-time",
+        }),
+      ).resolves.toMatchObject({ ok: true });
+    });
+
+    it("never overwrites a delivery a normal completion already settled", async () => {
+      const published = await publishReport("stale-delivery-race", {
+        headline: "A stuck headline",
+        body: "The body of a stuck report.",
+        publishedAt: "2026-08-24T09:00:00.000Z",
+      });
+      const delivery = stuck(published, "stale-delivery-race");
+      await recordAt(delivery, 45);
+      const repository = createPostgresStoryDeliveryRepository({ pool });
+      // The recovery pass has already listed this delivery as stale when the real process, alive
+      // after all, completes it. The listing is what a concurrent pass would be holding.
+      const listed = await createPostgresStaleStoryDeliveryRepository({
+        pool,
+        siteId: DEFAULT_SITE,
+      }).listStaleRunning(new Date().toISOString());
+      expect(listed.map((row) => row.id)).toEqual([delivery.id]);
+      await repository.complete({
+        ...delivery,
+        remoteId: "page-real",
+        outcome: "succeeded",
+        completedAt: "2026-08-24T10:00:02.000Z",
+        result: { status: 201, message: null },
+      });
+
+      const report = await createReconcileAbandonedWork({
+        policyRuns: createPostgresPolicyRunRepository({ pool, siteId: DEFAULT_SITE }),
+        agentRuns: createPostgresAgentRunRepository({ pool }),
+        staleAgentRuns: { listStaleRunning: async () => [] },
+        toolCalls: createPostgresAgentToolCallRepository({ pool }),
+        deliveries: repository,
+        staleDeliveries: { listStaleRunning: async () => listed },
+        now: () => new Date().toISOString(),
+      })();
+
+      expect(report.abandonedDeliveries).toEqual([]);
+      await expect(
+        pool.query(
+          "SELECT outcome, remote_id FROM storyrail.story_deliveries WHERE delivery_id = $1",
+          [delivery.id],
+        ),
+      ).resolves.toMatchObject({ rows: [{ outcome: "succeeded", remote_id: "page-real" }] });
+    });
+
+    it("refuses to move the recovery instant when a delivery completes", async () => {
+      const published = await publishReport("stale-delivery-immutable", {
+        headline: "A stuck headline",
+        body: "The body of a stuck report.",
+        publishedAt: "2026-08-24T09:00:00.000Z",
+      });
+      const delivery = stuck(published, "stale-delivery-immutable");
+      await recordAt(delivery, 45);
+
+      await expect(
+        pool.query(
+          `UPDATE storyrail.story_deliveries
+           SET recorded_at = CURRENT_TIMESTAMP, outcome = 'failed', completed_at = CURRENT_TIMESTAMP,
+               payload = payload || '{"outcome":"failed","completedAt":"now","failure":{"code":"DESTINATION_REJECTED","message":null}}'::jsonb
+           WHERE delivery_id = $1`,
+          [delivery.id],
+        ),
+      ).rejects.toMatchObject({
+        message: expect.stringContaining("cannot change what it sent"),
+      });
+    });
+
+    it("gives legacy running deliveries a fresh recovery window when 0080 is applied", async () => {
+      const before = orderedMigrations().slice(
+        0,
+        orderedMigrations().indexOf(storyDeliveryRecoveryMigrationSql),
+      );
+      try {
+        await pool.query("DROP SCHEMA storyrail CASCADE");
+        for (const migration of before) await pool.query(migration);
+        const published = await publishReport("migration-0080-running", {
+          headline: "A stuck headline",
+          body: "The body of a stuck report.",
+          publishedAt: "2026-08-24T09:00:00.000Z",
+        });
+        const delivery = stuck(published, "migration-0080-running");
+        await createPostgresStoryDeliveryRepository({ pool }).append(delivery);
+
+        await pool.query(storyDeliveryRecoveryMigrationSql);
+        const cutoff = await pool.query<{ threshold: Date }>(
+          "SELECT CURRENT_TIMESTAMP - interval '15 minutes' AS threshold",
+        );
+
+        await expect(
+          createPostgresStaleStoryDeliveryRepository({
+            pool,
+            siteId: DEFAULT_SITE,
+          }).listStaleRunning(cutoff.rows[0]?.threshold.toISOString() ?? "missing threshold"),
+        ).resolves.toEqual([]);
       } finally {
         await pool.query("DROP SCHEMA storyrail CASCADE");
         for (const migration of orderedMigrations()) await pool.query(migration);
@@ -4731,6 +5057,13 @@ describePostgres("PostgreSQL persistence repositories", () => {
             is_identity: "NO",
           },
           {
+            table_name: "story_deliveries",
+            column_name: "recorded_at",
+            data_type: "timestamp with time zone",
+            is_nullable: "NO",
+            is_identity: "NO",
+          },
+          {
             table_name: "url_sources",
             column_name: "source_id",
             data_type: "text",
@@ -4753,7 +5086,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
           },
         ]),
       );
-      expect(columns.rows).toHaveLength(155);
+      expect(columns.rows).toHaveLength(156);
     });
 
     it("creates the required primary, unique, foreign-key, and check constraints", async () => {
@@ -5315,6 +5648,27 @@ describePostgres("PostgreSQL persistence repositories", () => {
 
       expect(indexes.rows).toEqual([
         { columns: "recorded_at,append_position", predicate: "(outcome = 'running'::text)" },
+      ]);
+    });
+
+    it("creates the ordered partial index used to recover stale deliveries", async () => {
+      const indexes = await pool.query<{ columns: string; predicate: string }>(
+        `SELECT string_agg(attribute.attname::text, ',' ORDER BY key.ordinality) AS columns,
+                pg_get_expr(idx.indpred, idx.indrelid) AS predicate
+         FROM pg_index AS idx
+         JOIN pg_class AS table_class ON table_class.oid = idx.indrelid
+         JOIN pg_namespace AS namespace ON namespace.oid = table_class.relnamespace
+         JOIN pg_class AS index_class ON index_class.oid = idx.indexrelid
+         JOIN unnest(idx.indkey) WITH ORDINALITY AS key(attribute_number, ordinality) ON true
+         JOIN pg_attribute AS attribute
+           ON attribute.attrelid = table_class.oid AND attribute.attnum = key.attribute_number
+         WHERE namespace.nspname = 'storyrail'
+           AND index_class.relname = 'story_deliveries_stale_running_idx'
+         GROUP BY idx.indpred, idx.indrelid`,
+      );
+
+      expect(indexes.rows).toEqual([
+        { columns: "recorded_at,delivery_id", predicate: "(outcome = 'running'::text)" },
       ]);
     });
 

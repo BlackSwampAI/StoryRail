@@ -1,11 +1,17 @@
 import type { AgentRunRepository, StaleAgentRunRepository } from "@/application/agent-runs";
 import type { AgentToolCallRepository } from "@/application/agent-tools";
+import type {
+  StaleStoryDeliveryRepository,
+  StoryDeliveryRepository,
+} from "@/application/story-deliveries";
 import {
   recordAgentRun,
   recordAgentToolCall,
+  recordStoryDelivery,
   type AgentRun,
   type AgentToolCall,
   type PolicyRun,
+  type StoryDelivery,
 } from "@/domain/editorial";
 
 import type { PolicyRunRepository } from "./policy-run-repository";
@@ -23,6 +29,11 @@ export interface ReconciliationReport {
   readonly abandonedPolicyRuns: readonly PolicyRun[];
   readonly abandonedAgentRuns: readonly AgentRun[];
   readonly abandonedToolCalls: readonly AgentToolCall[];
+  /**
+   * Deliveries settled to `unknown`, never `failed`: the request may have left before the process
+   * died, so the destination may hold the page. Each now awaits operator reconciliation.
+   */
+  readonly abandonedDeliveries: readonly StoryDelivery[];
 }
 
 /**
@@ -35,12 +46,18 @@ export interface ReconciliationReport {
  * This closes rather than resumes. Resuming would risk repeating a model call that had already
  * completed and charging for it twice, and the operator cannot tell from the record which it
  * was. Closing out states plainly what happened and leaves the next move to a person.
+ *
+ * A destination delivery is the one case where "failed" would be a lie. Its request may have
+ * reached the destination before the process died, so it is settled to `unknown`, which routes
+ * it into the operator reconciliation of ambiguous deliveries. Nothing is ever re-sent.
  */
 export function createReconcileAbandonedWork(dependencies: {
   readonly policyRuns: PolicyRunRepository;
   readonly agentRuns: AgentRunRepository;
   readonly staleAgentRuns: StaleAgentRunRepository;
   readonly toolCalls: AgentToolCallRepository;
+  readonly deliveries: StoryDeliveryRepository;
+  readonly staleDeliveries: StaleStoryDeliveryRepository;
   readonly now: () => string;
   readonly abandonedAfterMs?: number;
 }) {
@@ -120,6 +137,28 @@ export function createReconcileAbandonedWork(dependencies: {
       await closeAgentRun(agentRun);
     }
 
-    return { abandonedPolicyRuns, abandonedAgentRuns, abandonedToolCalls };
+    // A delivery belongs to no policy run and no AgentRun: it is a discrete external request. Its
+    // outcome is unknowable after the process dies, so it is recorded as exactly that. The
+    // completion is one-way in the repository, so a normal completion that lands first wins and
+    // this pass reports only what it actually closed.
+    const abandonedDeliveries: StoryDelivery[] = [];
+    for (const delivery of await dependencies.staleDeliveries.listStaleRunning(threshold)) {
+      if (delivery.outcome !== "running") continue;
+      const recorded = recordStoryDelivery({
+        ...delivery,
+        completedAt: now,
+        outcome: "unknown",
+        uncertainty: {
+          code: "DESTINATION_REQUEST_OUTCOME_UNKNOWN",
+          message:
+            "The process making this delivery stopped before recording an outcome. The destination may or may not have received the request.",
+        },
+      });
+      if (!recorded.ok) continue;
+      const completed = await dependencies.deliveries.complete(recorded.delivery);
+      if (completed.ok) abandonedDeliveries.push(completed.delivery);
+    }
+
+    return { abandonedPolicyRuns, abandonedAgentRuns, abandonedToolCalls, abandonedDeliveries };
   };
 }

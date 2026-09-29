@@ -79,6 +79,32 @@ async function openRouterRow(): Promise<HTMLElement> {
 }
 
 describe("settings workspace", () => {
+  it("offers to recover interrupted work through the recovery client and shows what it closed", async () => {
+    const recover = vi.fn(() =>
+      Promise.resolve({
+        kind: "completed" as const,
+        recovery: { policyRuns: 0, agentRuns: 1, toolCalls: 0, deliveries: [] },
+      }),
+    );
+    render(
+      <SettingsWorkspace
+        theme="newsroom"
+        onThemeChange={vi.fn()}
+        requests={client()}
+        catalog={CATALOG}
+        recovery={{ recover }}
+      />,
+    );
+
+    const section = within(screen.getByRole("region", { name: "Recovery" }));
+    fireEvent.click(section.getByRole("button", { name: "Recover interrupted work" }));
+
+    expect(await section.findByRole("status")).toHaveTextContent(
+      "Closed 0 automations, 1 agent run",
+    );
+    expect(recover).toHaveBeenCalledTimes(1);
+  });
+
   it("reads a connector with no stored credential as not connected", async () => {
     renderSettings(client());
 

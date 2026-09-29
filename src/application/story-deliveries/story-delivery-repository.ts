@@ -58,3 +58,13 @@ export interface StoryDeliveryRepository {
   }): Promise<StoryDelivery | null>;
   listByStoryId(storyId: StoryId): Promise<readonly StoryDelivery[]>;
 }
+
+/** Narrow recovery view; ordinary delivery never needs to scan unrelated deliveries. */
+export interface StaleStoryDeliveryRepository {
+  /**
+   * Deliveries still running that PostgreSQL durably recorded before this instant, oldest first.
+   * The age is the database's own clock, never the caller-supplied started_at, so a process that
+   * wrote a wrong or far-future timestamp cannot make its own delivery look fresh.
+   */
+  listStaleRunning(before: string): Promise<readonly StoryDelivery[]>;
+}

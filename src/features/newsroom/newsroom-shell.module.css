@@ -4376,3 +4376,25 @@
   border-radius: 0.7rem;
   background: #0b1311;
 }
+
+.recoveryPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.recoveryPanel p,
+.recoveryPanel ul {
+  margin: 0;
+  color: var(--tone-104);
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.recoveryPanel ul {
+  padding-left: 1.2rem;
+}
+
+.recoveryPanel[aria-busy="true"] button:disabled {
+  cursor: wait;
+}

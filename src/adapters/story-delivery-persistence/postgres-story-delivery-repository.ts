@@ -3,9 +3,10 @@ import type { Pool } from "pg";
 import type {
   AppendStoryDeliveryResult,
   CompleteStoryDeliveryResult,
+  StaleStoryDeliveryRepository,
   StoryDeliveryRepository,
 } from "@/application/story-deliveries";
-import type { StoryDelivery, StoryId } from "@/domain/editorial";
+import type { SiteId, StoryDelivery, StoryId } from "@/domain/editorial";
 
 import { decodePostgresStoryDelivery } from "./postgres-story-delivery-decoder";
 
@@ -135,6 +136,28 @@ export function createPostgresStoryDeliveryRepository(dependencies: {
         `SELECT payload FROM storyrail.story_deliveries
          WHERE story_id = $1 ORDER BY started_at`,
         [storyId],
+      );
+      return rows.map((row) => decodePostgresStoryDelivery(row.payload));
+    },
+  };
+}
+
+export function createPostgresStaleStoryDeliveryRepository(dependencies: {
+  readonly pool: Pool;
+  readonly siteId: SiteId;
+}): StaleStoryDeliveryRepository {
+  return {
+    async listStaleRunning(before) {
+      // A delivery has no site_id of its own; it inherits its Story's, so recovery is scoped by
+      // joining through the Story rather than by a second copy able to disagree.
+      const { rows } = await dependencies.pool.query<{ payload: unknown }>(
+        `SELECT delivery.payload
+         FROM storyrail.story_deliveries AS delivery
+         JOIN storyrail.stories AS story ON story.story_id = delivery.story_id
+         WHERE story.site_id = $1 AND delivery.outcome = 'running'
+           AND delivery.recorded_at < $2::timestamptz
+         ORDER BY delivery.recorded_at ASC, delivery.delivery_id ASC`,
+        [dependencies.siteId, before],
       );
       return rows.map((row) => decodePostgresStoryDelivery(row.payload));
     },
