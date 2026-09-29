@@ -25,3 +25,9 @@ Files use `adr-NNNN-short-title.md`, with a zero-padded sequence number. An ADR 
 - [ADR 0017: Durable Story creation](adr-0017-durable-story-creation.md) — Accepted
 - [ADR 0018: Durable Source-to-Story attachment](adr-0018-durable-story-source-attachment.md) — Accepted
 - [ADR 0019: Durable Story inspection read model](adr-0019-durable-story-inspection-read-model.md) — Accepted
+- [ADR 0020: Durable Autopilot policy runs](adr-0020-durable-autopilot-policy-runs.md) — Accepted
+- [ADR 0021: Tool calls recorded before external calls](adr-0021-tool-calls-recorded-before-external-calls.md) — Accepted
+- [ADR 0022: Reconciliation of abandoned work](adr-0022-reconciliation-of-abandoned-work.md) — Accepted
+- [ADR 0023: Site tenancy and encrypted per-Site credentials](adr-0023-site-tenancy-and-encrypted-credentials.md) — Accepted
+- [ADR 0024: Destination delivery separate from publication](adr-0024-destination-delivery-separate-from-publication.md) — Accepted
+- [ADR 0025: Browser acceptance tests with stubbed external services](adr-0025-browser-acceptance-tests.md) — Accepted

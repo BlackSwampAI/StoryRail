@@ -22,7 +22,10 @@ These terms form StoryRail's shared editorial language.
 - **Director review:** A strict advisory evaluation of one exact Article revision against its Assignment and the exact evidence references recorded by its Writer AgentRun. It records a recommendation, summary, five checks, and optional revision instructions without mutating editorial state.
 - **ReviewDecision:** One durable operator-owned approval or request-changes decision for an Article revision. It references the exact successful Director AgentRun and is committed atomically with the Story transition and receipt; the operator may override the recommendation.
 - **Rejection:** A separate, explicit operator-owned terminal Story transition from `intake`, `assigned`, `in_progress`, `in_review`, or `changes_requested`. It requires an editorial reason, stores that reason on the existing transition receipt, and preserves all existing work and audit records; it is not a ReviewDecision or separate domain entity.
-- **Publication:** A separate, explicit act that sends an approved article to an export or publication destination.
+- **Publication:** A separate, explicit operator act that transitions an approved Story to `published`. It records the editorial decision and does not itself send anything to a destination.
+- **Delivery:** A separate, durable record of sending the Article of a published Story to the Site's configured destination. It is written as a running intention before the request leaves StoryRail and completes once as succeeded, failed, or unknown; it can fail without undoing publication.
+- **Site:** The tenant boundary of a newsroom. Stories, Sources, newsroom standards, and Agent Profiles belong to exactly one Site, and settings, encrypted connector credentials, and the delivery destination are configured per Site.
+- **Policy run:** The durable coordination record of an operator-authorised Autopilot run, recording its current step, attempt, and whether it is running or settled. It is not an actor and does not replace the records the workflows it invokes write.
 - **Desk/queue:** An operator-facing view of stories awaiting attention, action, or resolution.
 - **Assignment editor:** The role that assesses a story and prepares or refines its assignment.
 - **Writer:** The supervised role that drafts and revises within an Assignment's exact Source snapshot. It uses only supplied evidence, with no browsing, tools, or external research, and each successful run appends an immutable revision before moving the Story to In Progress.
@@ -30,7 +33,7 @@ These terms form StoryRail's shared editorial language.
 - **Editor-in-chief:** The independent review role responsible for an overall editorial decision.
 - **SEO packaging:** Preparation of accurate discovery metadata and presentation options without making rankings the sole editorial purpose.
 - **Source extractor:** A replaceable adapter that retrieves and normalizes source material while retaining provenance.
-- **Publication adapter:** A replaceable integration that exports or publishes approved article data to a destination.
+- **Delivery destination:** A replaceable adapter, currently WordPress or StudioCMS, that delivers a published Article to a Site's website.
 
 ## Invariants
 
@@ -47,3 +50,4 @@ These terms form StoryRail's shared editorial language.
 - A Story has at most one Assignment in the current Alpha workflow.
 - Assignment evidence is a server-derived snapshot of Source identities, not copied evidence content or a browser-selected subset.
 - Publication is a separate, explicit action.
+- Delivery is separate from publication, and a request that may have left StoryRail is recorded before it is sent.
