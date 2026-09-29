@@ -14,6 +14,8 @@ import {
   type ConnectionStatus,
   type ScaffoldSection,
 } from "./account-scaffold";
+import type { InterruptedWorkClient } from "./interrupted-work-client";
+import { InterruptedWorkRecovery } from "./interrupted-work-recovery";
 import type { ModelCatalogClient } from "./model-catalog-client";
 import { useNewsroomClients } from "./newsroom-clients";
 import type { SiteSettingsClient } from "./site-settings-client";
@@ -147,6 +149,7 @@ export interface SettingsWorkspaceProps {
   readonly onThemeChange: (theme: NewsroomThemeId) => void;
   readonly requests?: SiteSettingsClient;
   readonly catalog?: ModelCatalogClient;
+  readonly recovery?: InterruptedWorkClient;
 }
 
 type StoredSettingsState =
@@ -164,10 +167,12 @@ export function SettingsWorkspace({
   onThemeChange,
   requests: suppliedRequests,
   catalog: suppliedCatalog,
+  recovery: suppliedRecovery,
 }: SettingsWorkspaceProps) {
   const clients = useNewsroomClients();
   const requests = suppliedRequests ?? clients.siteSettings;
   const catalog = suppliedCatalog ?? clients.modelCatalog;
+  const recovery = suppliedRecovery ?? clients.interruptedWork;
   const [stored, setStored] = useState<StoredSettingsState>({ kind: "loading" });
 
   useEffect(() => {
@@ -240,6 +245,7 @@ export function SettingsWorkspace({
 
       <nav className={styles.settingsIndex} aria-label="Settings sections">
         <a href="#settings-appearance">Appearance</a>
+        <a href="#settings-recovery">Recovery</a>
         {SCAFFOLD_SETTINGS.map((section) => (
           <a key={section.id} href={`#settings-${section.id}`}>
             {section.title}
@@ -277,6 +283,19 @@ export function SettingsWorkspace({
             </button>
           ))}
         </div>
+      </section>
+
+      {/* Real, like Appearance: it asks the server to close out work a stopped process left. */}
+      <section className={styles.settingsSection} aria-labelledby="settings-recovery">
+        <header>
+          <h3 id="settings-recovery">Recovery</h3>
+          <p>
+            After a crash or restart, work can be left looking busy that nothing is running. This
+            closes what has reported nothing for fifteen minutes. It never resumes work or sends a
+            delivery again.
+          </p>
+        </header>
+        <InterruptedWorkRecovery requests={recovery} />
       </section>
 
       {SCAFFOLD_SETTINGS.map((section) => (

@@ -5,6 +5,7 @@ import { createContext, useContext, useMemo, type ReactNode } from "react";
 import { siteId, type Site, type SiteId } from "@/domain/editorial";
 
 import { createAgentProfileClient, type AgentProfileClient } from "./agent-profile-client";
+import { createInterruptedWorkClient, type InterruptedWorkClient } from "./interrupted-work-client";
 import { createModelCatalogClient, type ModelCatalogClient } from "./model-catalog-client";
 import {
   createNewsroomStandardsClient,
@@ -25,6 +26,7 @@ export interface NewsroomClients {
   readonly agentProfiles: AgentProfileClient;
   readonly siteSettings: SiteSettingsClient;
   readonly modelCatalog: ModelCatalogClient;
+  readonly interruptedWork: InterruptedWorkClient;
   readonly newsroomStandards: NewsroomStandardsClient;
   readonly requestSourceEvidenceUrl: RequestSourceEvidenceUrl;
   readonly urlAutopilot: UrlAutopilotClient;
@@ -46,6 +48,7 @@ export function createNewsroomClients(
     agentProfiles: createAgentProfileClient({ siteId: site, fetch: fetchImplementation }),
     siteSettings: createSiteSettingsClient({ siteId: site, fetch: fetchImplementation }),
     modelCatalog: createModelCatalogClient({ siteId: site, fetch: fetchImplementation }),
+    interruptedWork: createInterruptedWorkClient({ siteId: site, fetch: fetchImplementation }),
     newsroomStandards: createNewsroomStandardsClient({ siteId: site, fetch: fetchImplementation }),
     requestSourceEvidenceUrl: createSourceEvidenceUrlClient({
       siteId: site,

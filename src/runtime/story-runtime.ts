@@ -21,7 +21,10 @@ import {
 import { createPostgresStoryListingRepository } from "@/adapters/story-listing";
 import { createPostgresStoryRepository } from "@/adapters/story-persistence";
 import { createPostgresStoryPublicationPersistence } from "@/adapters/story-publication-persistence";
-import { createPostgresStoryDeliveryRepository } from "@/adapters/story-delivery-persistence";
+import {
+  createPostgresStaleStoryDeliveryRepository,
+  createPostgresStoryDeliveryRepository,
+} from "@/adapters/story-delivery-persistence";
 import { createPostgresStoryDeliveryReconciliationRepository } from "@/adapters/story-delivery-reconciliation-persistence";
 import { createPostgresLegacyDeliveryMappingResolutionRepository } from "@/adapters/legacy-delivery-mapping-resolution-persistence";
 import { createSiteDeliveryDestinationDirectory } from "@/adapters/story-delivery";
@@ -212,8 +215,11 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
     now,
   });
   const policyRuns = createPostgresPolicyRunRepository({ pool, siteId: site });
+  const storyDeliveries = createPostgresStoryDeliveryRepository({ pool });
   const reconcileAbandonedWork = createReconcileAbandonedWork({
     policyRuns,
+    deliveries: storyDeliveries,
+    staleDeliveries: createPostgresStaleStoryDeliveryRepository({ pool, siteId: site }),
     agentRuns: createPostgresAgentRunRepository({ pool }),
     staleAgentRuns: createPostgresStaleAgentRunRepository({ pool, siteId: site }),
     toolCalls: createPostgresAgentToolCallRepository({ pool }),
@@ -280,7 +286,6 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
     siteId: site,
     credentialKey: options.credentialKey ?? null,
   });
-  const storyDeliveries = createPostgresStoryDeliveryRepository({ pool });
   const legacyDeliveryMappingResolutions = createPostgresLegacyDeliveryMappingResolutionRepository({
     pool,
     siteId: site,

@@ -4,6 +4,9 @@ import {
   agentProfileId,
   agentRunId,
   agentToolCallId,
+  articleRevisionId,
+  destinationInstanceId,
+  storyDeliveryId,
   operatorId,
   policyRunId,
   sourceEvidencePreparationId,
@@ -13,7 +16,9 @@ import {
   type AgentRunId,
   type AgentToolCall,
   type PolicyRun,
+  type StoryDelivery,
 } from "@/domain/editorial";
+import type { CompleteStoryDeliveryResult } from "@/application/story-deliveries";
 
 import { createReconcileAbandonedWork } from "./reconcile-abandoned-work";
 
@@ -75,12 +80,45 @@ const runningAgentRun = (outcome: "running" | "succeeded" = "running"): AgentRun
       : { outcome: "succeeded", articleId: "a" as never, revisionId: "r" as never }),
   }) as AgentRun;
 
+const deliveryRepository = {
+  append: vi.fn(),
+  complete: vi.fn(),
+  findLatestSucceeded: vi.fn(),
+  findLatestLegacySucceeded: vi.fn(),
+  findSucceededById: vi.fn(),
+  findLatestUnresolved: vi.fn(),
+  findUnresolvedById: vi.fn(),
+  listByStoryId: vi.fn(),
+};
+
+const runningDelivery = (
+  operation: "create" | "update" = "create",
+  id = "delivery-stuck",
+): StoryDelivery => ({
+  id: storyDeliveryId(id),
+  storyId: STORY,
+  revisionId: articleRevisionId("revision-stuck"),
+  destination: "wordpress",
+  destinationInstanceId: destinationInstanceId("wordpress:https://cms.example"),
+  remoteId: operation === "update" ? "412" : null,
+  request: { operation, slug: "a-stuck-delivery", draft: true, bodyCharacters: 64 },
+  startedAt: "2026-08-23T11:00:00.000Z",
+  completedAt: null,
+  outcome: "running",
+});
+
 function harness(options: {
   readonly stale?: readonly PolicyRun[];
   readonly runs?: readonly AgentRun[];
   readonly staleRuns?: readonly AgentRun[];
   readonly toolCalls?: readonly AgentToolCall[];
+  readonly staleDeliveries?: readonly StoryDelivery[];
+  readonly completeDelivery?: (delivery: StoryDelivery) => Promise<CompleteStoryDeliveryResult>;
 }) {
+  const completeDelivery = vi.fn(
+    options.completeDelivery ??
+      (async (delivery: StoryDelivery) => ({ ok: true as const, delivery })),
+  );
   const completeToolCall = vi.fn(async (call: AgentToolCall) => ({ ok: true as const, call }));
   const listByStoryId = vi.fn(async () => options.runs ?? []);
   const settle = vi.fn(async (command: { id: unknown }) => ({
@@ -92,6 +130,7 @@ function harness(options: {
     settle,
     complete,
     completeToolCall,
+    completeDelivery,
     listByStoryId,
     reconcile: createReconcileAbandonedWork({
       policyRuns: {
@@ -115,6 +154,8 @@ function harness(options: {
         complete: completeToolCall,
         listByRunId: vi.fn(async () => options.toolCalls ?? []),
       },
+      deliveries: { ...deliveryRepository, complete: completeDelivery },
+      staleDeliveries: { listStaleRunning: vi.fn(async () => options.staleDeliveries ?? []) },
       now: () => NOW,
     }),
   };
@@ -203,6 +244,7 @@ describe("closing out work whose process disappeared", () => {
       abandonedPolicyRuns: [],
       abandonedAgentRuns: [],
       abandonedToolCalls: [],
+      abandonedDeliveries: [],
     });
     expect(test.settle).not.toHaveBeenCalled();
   });
@@ -237,6 +279,8 @@ describe("closing out work whose process disappeared", () => {
       },
       staleAgentRuns: { listStaleRunning: vi.fn(async () => []) },
       toolCalls: { append: vi.fn(), complete: vi.fn(), listByRunId },
+      deliveries: deliveryRepository,
+      staleDeliveries: { listStaleRunning: vi.fn(async () => []) },
       now: () => NOW,
     });
 
@@ -291,6 +335,8 @@ describe("closing out work whose process disappeared", () => {
       },
       staleAgentRuns: { listStaleRunning: vi.fn(async () => [runningAgentRun()]) },
       toolCalls: { append: vi.fn(), complete: vi.fn(), listByRunId: vi.fn() },
+      deliveries: deliveryRepository,
+      staleDeliveries: { listStaleRunning: vi.fn(async () => []) },
       now: () => NOW,
     });
 
@@ -324,6 +370,8 @@ describe("closing out work whose process disappeared", () => {
       },
       staleAgentRuns: { listStaleRunning: vi.fn(async () => [run]) },
       toolCalls: { append: vi.fn(), complete: vi.fn(), listByRunId: vi.fn() },
+      deliveries: deliveryRepository,
+      staleDeliveries: { listStaleRunning: vi.fn(async () => []) },
       now: () => NOW,
     });
 
@@ -331,6 +379,80 @@ describe("closing out work whose process disappeared", () => {
       abandonedPolicyRuns: [],
       abandonedAgentRuns: [],
       abandonedToolCalls: [],
+      abandonedDeliveries: [],
     });
+  });
+
+  it("settles a stuck create delivery to unknown, never failed, without a remote identity", async () => {
+    // The request may have reached the destination before the process died. Calling that a
+    // failure would invite a retry that duplicates a page the destination already has.
+    const test = harness({ staleDeliveries: [runningDelivery("create")] });
+
+    const report = await test.reconcile();
+
+    expect(report.abandonedDeliveries).toEqual([
+      expect.objectContaining({ id: "delivery-stuck", outcome: "unknown", remoteId: null }),
+    ]);
+    expect(test.completeDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "unknown",
+        completedAt: NOW,
+        uncertainty: expect.objectContaining({ code: "DESTINATION_REQUEST_OUTCOME_UNKNOWN" }),
+      }),
+    );
+    expect(test.completeDelivery.mock.calls[0]?.[0]).not.toHaveProperty("failure");
+  });
+
+  it("keeps the page an update was already addressing when it settles to unknown", async () => {
+    const test = harness({ staleDeliveries: [runningDelivery("update")] });
+
+    const report = await test.reconcile();
+
+    expect(report.abandonedDeliveries).toEqual([
+      expect.objectContaining({ outcome: "unknown", remoteId: "412" }),
+    ]);
+  });
+
+  it("omits a stuck delivery when a normal completion wins the race", async () => {
+    const test = harness({
+      staleDeliveries: [runningDelivery()],
+      completeDelivery: async () => ({
+        ok: false,
+        error: { code: "STORY_DELIVERY_NOT_RUNNING", message: "The delivery is not in flight." },
+      }),
+    });
+
+    const report = await test.reconcile();
+
+    expect(report.abandonedDeliveries).toEqual([]);
+  });
+
+  it("does not touch a delivery that is no longer running", async () => {
+    const finished = {
+      ...runningDelivery(),
+      outcome: "failed",
+      completedAt: "2026-08-23T11:01:00.000Z",
+      failure: { code: "DESTINATION_REJECTED", message: null },
+    } as StoryDelivery;
+    const test = harness({ staleDeliveries: [finished] });
+
+    await expect(test.reconcile()).resolves.toMatchObject({ abandonedDeliveries: [] });
+    expect(test.completeDelivery).not.toHaveBeenCalled();
+  });
+
+  it("closes every stuck delivery and reports each", async () => {
+    const test = harness({
+      staleDeliveries: [
+        runningDelivery("create", "delivery-a"),
+        runningDelivery("update", "delivery-b"),
+      ],
+    });
+
+    const report = await test.reconcile();
+
+    expect(report.abandonedDeliveries.map((delivery) => delivery.id)).toEqual([
+      "delivery-a",
+      "delivery-b",
+    ]);
   });
 });

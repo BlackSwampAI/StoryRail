@@ -21,7 +21,7 @@ A request can leave StoryRail without a trustworthy response. That is recorded a
 
 Publication stays a pure editorial decision, and a delivery failure is preserved without changing the Story. Duplicate and misdirected pages are prevented by requiring operator judgment wherever the outcome or the target is uncertain, at the cost of a manual step. Autopilot delivers after publishing when a destination is configured.
 
-A Site has one destination. The abandoned-work pass (ADR 0022) does not close a delivery left running by a dead process.
+A Site has one destination. A delivery left running by a dead process is settled to `unknown` by the abandoned-work pass (ADR 0022) once PostgreSQL's own record time (`0080-story-delivery-recovery.sql`) is older than the threshold, never to `failed`, and then follows the same operator reconciliation as any other ambiguous delivery. The pass never sends the request again.
 
 ## Rejected or deferred
 
