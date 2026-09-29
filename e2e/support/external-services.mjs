@@ -2,6 +2,10 @@ import { createServer } from "node:http";
 
 const PORT = 3135;
 const OPENROUTER_AUTHORIZATION = "Bearer acceptance-openrouter-key";
+const FIRECRAWL_AUTHORIZATION = "Bearer acceptance-firecrawl-key";
+// Long enough for a browser to observe a run before it hands over to its Story, and short
+// enough to stay well inside the acceptance timeouts.
+const PREPARATION_DELAY_MILLISECONDS = 1_500;
 const WORDPRESS_AUTHORIZATION = `Basic ${Buffer.from(
   "acceptance:acceptance-wordpress-password",
 ).toString("base64")}`;
@@ -25,9 +29,32 @@ function check(status, quoted) {
   };
 }
 
-function modelOutput(requestBody) {
+function modelInput(requestBody) {
   const user = [...(requestBody.messages ?? [])].reverse().find(({ role }) => role === "user");
-  const input = JSON.parse(typeof user?.content === "string" ? user.content : "{}");
+  return JSON.parse(typeof user?.content === "string" ? user.content : "{}");
+}
+
+function modelOutput(input) {
+  // Evidence preparation is the only role handed raw Markdown.
+  if (typeof input.rawMarkdown === "string") {
+    return {
+      title: input.rawMetadata?.title ?? null,
+      byline: null,
+      publishedAt: null,
+      language: "en",
+      content: input.rawMarkdown,
+    };
+  }
+  // The Assignment Editor is the only role shown the newsroom's Writer Profiles.
+  if (Array.isArray(input.writers)) {
+    return {
+      writerProfileId: input.writers[0].id,
+      angle: "Report the verified restoration of harbour service.",
+      brief: "State what the notice verifies and do not speculate.",
+      constraints: null,
+      reason: "The attached notice is a single verified service update.",
+    };
+  }
   if (Array.isArray(input.claims) && input.grounding) {
     const quoted = input.revision.headline;
     const approve = input.revision.revisionNumber === 2;
@@ -78,6 +105,10 @@ createServer(async (request, response) => {
         return json(response, 401, { error: "unauthorized" });
       }
       const body = await readJson(request);
+      const input = modelInput(body);
+      if (typeof input.rawMarkdown === "string") {
+        await new Promise((resolve) => setTimeout(resolve, PREPARATION_DELAY_MILLISECONDS));
+      }
       return json(response, 200, {
         id: "acceptance-completion",
         object: "chat.completion",
@@ -87,10 +118,24 @@ createServer(async (request, response) => {
           {
             index: 0,
             finish_reason: "stop",
-            message: { role: "assistant", content: JSON.stringify(modelOutput(body)) },
+            message: { role: "assistant", content: JSON.stringify(modelOutput(input)) },
           },
         ],
         usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      });
+    }
+    if (request.method === "POST" && request.url === "/firecrawl/v2/scrape") {
+      if (request.headers.authorization !== FIRECRAWL_AUTHORIZATION) {
+        return json(response, 401, { error: "unauthorized" });
+      }
+      await readJson(request);
+      return json(response, 200, {
+        success: true,
+        data: {
+          markdown:
+            "# Harbour service notice\n\nHarbour service was restored Monday. The harbour authority confirmed that ferries and freight boats are sailing to the normal timetable again.",
+          metadata: { title: "Harbour service notice", language: "en", statusCode: 200 },
+        },
       });
     }
     if (request.method === "POST" && request.url === "/wp-json/wp/v2/posts") {

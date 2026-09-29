@@ -86,6 +86,7 @@ Open [http://localhost:3133](http://localhost:3133). The `pnpm migrate` shortcut
 - `STORYRAIL_SITE_ID` — Selects the Site served by this process when multiple Sites exist.
 - `STORYRAIL_OPERATOR_ID` — Fixed operator identity for development HTTP actions; this is not authentication.
 - `STORYRAIL_OPENROUTER_BASE_URL` — Optional base URL override for an OpenRouter-compatible provider.
+- `STORYRAIL_FIRECRAWL_BASE_URL` — Optional base URL override for a Firecrawl-compatible extraction endpoint.
 
 Provider credentials and model choices are configured per Site in the newsroom settings. Do not commit `.env` or real credentials. Because the app has no authentication, keep the development server private to your machine or a trusted network.
 

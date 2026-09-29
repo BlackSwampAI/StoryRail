@@ -185,6 +185,24 @@ describe("createFirecrawlSourceExtractor", () => {
   });
 });
 
+describe("Firecrawl endpoint override", () => {
+  it("scrapes through a configured Firecrawl-compatible base URL instead of the hosted API", async () => {
+    const fetchImplementation = mockFetch(jsonResponse(successfulBody()));
+    const extractor = createFirecrawlSourceExtractor({
+      resolveApiKey: async () => ({ ok: true as const, apiKey: makeApiKey() }),
+      fetch: fetchImplementation,
+      baseUrl: "http://127.0.0.1:3135/firecrawl",
+    });
+
+    await extractor.extract(makeSource());
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+    expect(fetchImplementation.mock.calls[0]?.[0]).toBe(
+      "http://127.0.0.1:3135/firecrawl/v2/scrape",
+    );
+  });
+});
+
 describe("Firecrawl request contract", () => {
   it("makes exactly the authorized canonical-URL scrape request with the fixed policy", async () => {
     const apiKey = makeApiKey();

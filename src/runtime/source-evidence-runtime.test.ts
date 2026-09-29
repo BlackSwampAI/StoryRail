@@ -608,7 +608,11 @@ describe("createSourceEvidenceRuntimeFromEnvironment", () => {
     // process-wide environment once one installation runs more than one newsroom.
     // Neither Firecrawl nor the Site comes from the environment any more: an API key is
     // per-Site, and the Site itself now arrives from the request path.
-    expect(reads).toEqual(["STORYRAIL_DATABASE_URL", "STORYRAIL_CREDENTIAL_KEY"]);
+    expect(reads).toEqual([
+      "STORYRAIL_DATABASE_URL",
+      "STORYRAIL_CREDENTIAL_KEY",
+      "STORYRAIL_FIRECRAWL_BASE_URL",
+    ]);
     expect(createPool).toHaveBeenCalledWith({ connectionString: DATABASE_URL });
     expect(createFirecrawlSourceExtractor).toHaveBeenCalledWith({
       resolveApiKey: expect.any(Function),
