@@ -8,20 +8,20 @@ The complete flow is implemented today, from Source intake through to publicatio
 
 Two properties matter more than the sequence. Every factual claim in an Article carries the Source, evidence record, and verbatim passage it rests on, and that passage is checked against the evidence before anything is written — so an unsupported claim cannot be persisted. And the whole sequence can be run unattended by autopilot, an operator-authorised policy that invokes the same workflows in order with the operator as the actor, rather than a separate automated path around them.
 
-Durable Agent Profiles configure the Assignment Editor, Writer, and Director roles. PostgreSQL seeds three immutable built-in profiles, and operators may create additional immutable Writer profiles with an optional provider-neutral model descriptor. The built-in Assignment Editor can execute in supervised proposal mode. It reads one authoritative unassigned Intake Story, selects durable successful evidence and available Writer Profiles, and records a structured suggestion or model failure as an append-only AgentRun. The operator remains responsible for reviewing, editing, and submitting the existing durable Assignment form.
+Durable Agent Profiles configure the Assignment Editor, Researcher, Writer, and Director roles. PostgreSQL seeds four immutable built-in profiles, and operators may create additional immutable Writer profiles with an optional provider-neutral model descriptor. The built-in Assignment Editor can execute in supervised proposal mode. It reads one authoritative unassigned Intake Story, selects durable successful evidence and available Writer Profiles, and records a structured suggestion or model failure as an append-only AgentRun. The operator remains responsible for reviewing, editing, and submitting the existing durable Assignment form.
 
 1. Paste a URL.
 2. Preserve and extract the Source, then automatically prepare evidence when extraction succeeds.
 3. Review Prepared Evidence and continue to Source Inbox for triage; raw extraction remains available for audit.
 4. Create a new Story, attach the Source to an existing Story, or durably skip coverage.
 5. Produce an assignment brief.
-6. Run one general MCU writer.
+6. Run the assigned Writer: the built-in general Writer or an operator-created custom Writer profile.
 7. Produce research notes and a claim/source ledger.
 8. Generate an article draft.
 9. Run an independent editor-in-chief review.
 10. Approve, reject, or request changes.
 11. Permit no more than two revision cycles.
-12. Publish an approved Story through a separate, explicit operator transition, exporting its Article as Markdown and structured JSON.
+12. Publish an approved Story through a separate, explicit operator transition, then optionally deliver its Article to the Site's configured destination (WordPress or StudioCMS) as a separate, recorded delivery.
 
 ## In scope
 
@@ -29,9 +29,9 @@ The slice preserves source provenance, keeps the source, story, and article sepa
 
 StoryRail now also has one combined application workflow that preserves a submitted URL and records one extraction attempt. It reports explicit preservation-versus-extraction failure stages, retains the preserved Source when extraction cannot complete, and returns both the exact Source and durable extraction fact when the sequence completes. Expected provider failures remain completed extraction facts rather than orchestration failures. Duplicate Sources are surfaced as preservation failures rather than automatically re-extracted.
 
-The server-only Source-evidence runtime exposes the combined workflow alongside both primitive workflows. Guarded environment configuration supplies PostgreSQL and Firecrawl values, the runtime creates and owns one PostgreSQL Pool with explicit idempotent closure, and concrete UUID identities and an ISO timestamp clock are supplied to the existing PostgreSQL, Firecrawl, and Source-evidence workflows. Runtime construction does not execute migrations, connect or query PostgreSQL, or perform provider work.
+The server-only Source-evidence runtime exposes the combined workflow alongside both primitive workflows. Guarded environment configuration supplies the PostgreSQL connection and the credential key, provider keys and models are per-Site settings stored in the database with keys encrypted, the runtime creates and owns one PostgreSQL Pool with explicit idempotent closure, and concrete UUID identities and an ISO timestamp clock are supplied to the existing PostgreSQL, Firecrawl, and Source-evidence workflows. Runtime construction does not execute migrations, connect or query PostgreSQL, or perform provider work.
 
-StoryRail now has one Node.js Route Handler at `POST /api/source-evidence/url`. It accepts an exact JSON request containing only `submittedUrl`, derives fixed single-operator provenance from `STORYRAIL_OPERATOR_ID`, and lazily reuses one Source-evidence runtime within each provider instance. Stable status mapping distinguishes transport, URL-validation, preservation-conflict, extraction-stage, and unexpected failures. A completed response contains both the preserved Source and durable extraction fact; a durable expected provider failure is also completed and returns `201`. If extraction orchestration fails after preservation, the `500` response retains the preserved Source as durable partial progress.
+StoryRail now has one Node.js Route Handler at `POST /api/sites/{siteId}/source-evidence/url`. It accepts an exact JSON request containing only `submittedUrl`, derives fixed single-operator provenance from `STORYRAIL_OPERATOR_ID`, and lazily reuses one Source-evidence runtime per Site within each provider instance. Stable status mapping distinguishes transport, URL-validation, preservation-conflict, extraction-stage, and unexpected failures. A completed response contains both the preserved Source and durable extraction fact; a durable expected provider failure is also completed and returns `201`. If extraction orchestration fails after preservation, the `500` response retains the preserved Source as durable partial progress.
 
 The newsroom now separates Source intake from Source Inbox. Intake submits the exact operator-entered URL, preserves the Source and one raw extraction, and automatically invokes the existing evidence-preparation operation only when that extraction succeeds. Prepared Evidence becomes the primary intake review result, while exact raw Markdown and all technical records remain inspectable. Preparation failure never rolls back or disguises the durable Source or extraction, and duplicates do not trigger a new extraction or preparation. Source Inbox reads pending evidence from PostgreSQL without calling Firecrawl and lets the operator make one durable final decision: create a new Story and attach the Source, attach it to an existing Story, or skip coverage without deleting evidence. Every decision requires a trimmed editorial reason and records server-derived operator provenance; the provider-neutral model also supports the future `assignment_editor` agent. Attached historical Sources are treated as resolved even when they predate triage decisions. Story queues begin only after a Story actually exists.
 
@@ -39,7 +39,7 @@ The manual triage workflows keep Story creation, Source attachment, and final tr
 
 Firecrawl retains the existing deterministic raw-extraction settings and now uses its automatic proxy strategy so the provider may escalate retrieval for sites with stronger anti-bot behavior. Raw extraction remains authoritative and immutable: no extraction row, raw Markdown, or Source metadata is rewritten. After a successful new intake extraction, the browser composes the existing preparation request as a second explicit operation. The operator may also prepare again against the current intake extraction, or recover a legacy/unprepared Inbox Source against its latest successful extraction. Each operation passes untrusted raw metadata and Markdown to a versioned StoryRail evidence-cleaning prompt, stores every successful or failed preparation attempt as a new immutable derived record, and never resolves Source triage.
 
-The provider-neutral structured-model boundary is backed by LangChain's dedicated `ChatOpenRouter` adapter and strict structured output, with StoryRail performing final Zod validation. OpenRouter is the first implemented provider. Evidence preparation, Assignment Editor, Writer, and Director execution use separate lazy server-only runtimes. Explicit Profile models override the role-specific environment fallback; unsupported providers fail safely and are never silently converted.
+The provider-neutral structured-model boundary is backed by LangChain's dedicated `ChatOpenRouter` adapter and strict structured output, with StoryRail performing final Zod validation. OpenRouter is the first implemented provider. Evidence preparation, Assignment Editor, Writer, and Director execution use separate lazy server-only runtimes. Explicit Profile models override the per-Site model setting for the role; unsupported providers fail safely and are never silently converted.
 
 The Assignment Editor uses a deterministic, versioned prompt that combines StoryRail's task and prompt-injection boundary with the immutable built-in Profile instructions. Source text is supplied solely as untrusted data; the agent cannot browse, invoke tools, mutate evidence, create an Assignment, transition a Story, or invoke a Writer. Successful output is a strict Assignment Proposal selecting only a supplied Writer ID. The durable AgentRun stores exact references to the prepared or raw evidence records used rather than copying their Markdown.
 
@@ -55,9 +55,9 @@ A provider-neutral durable Story inspection read model now returns one authorita
 
 A separate server-only Story runtime handles normal editorial operations without requiring model configuration. Focused editorial endpoints accept exact request bodies: rejection `{ reason }`, review submission `{}`, Director review `{}`, and operator decision `{ directorRunId, decision, reason }`. The Director resolves `ArticleRevision.agentRunId` to the successful Writer run, then resolves every recorded `EvidenceReference` by its exact preparation or extraction ID. Missing historical evidence fails safely; newer evidence is never substituted.
 
-Fixed operator provenance is not authentication, and the routes still must not be exposed publicly. Source intake may invoke only the existing evidence-preparation model after a successful extraction; it never creates or attaches a Story, resolves triage, or invokes later editorial agents. Story listing has no searching, filtering, pagination, polling, or browser persistence. Migrations remain external. Profile editing and version management, reassignment, authentication, graceful shutdown, and development hot-reload lifecycle policy remain deferred.
+Fixed operator provenance is not authentication, and the routes still must not be exposed publicly. Source intake may invoke only the existing evidence-preparation model after a successful extraction; it never creates or attaches a Story, resolves triage, or invokes later editorial agents. Story listing is a per-Site read with no searching, filtering, or pagination. The Story workspace polls only while a run it started is in flight, and the browser persists only display preferences such as theme and desk layout, never editorial state. Migrations remain external. Profile editing and version management, reassignment, authentication, graceful shutdown, and development hot-reload lifecycle policy remain deferred.
 
-The automation is not yet durable, which is the main reason StoryRail is not production-ready. Autopilot holds its sequence in memory: nothing records that a Story is under a policy run, so a process that dies between steps leaves an AgentRun marked `running` with nothing to resume or abandon it. Tool calls are written after the external call rather than before. Both need the durability treatment AgentRuns already received, together with a reconciliation pass.
+Automation is durable and recoverable, but recovery closes work rather than resuming it. An Autopilot policy run is a durable coordination record, not an in-memory sequence: it records the step it is attempting before it attempts it, allows at most one running policy per Story and per Source, and once settled as completed, stopped, or abandoned can never reopen. A run started from a URL is rooted at the preserved Source until it creates the Story and then swaps its root to that Story exactly once, within the same Site, so a run interrupted during intake or preparation is still visible and can be read at `GET /api/sites/{siteId}/policy-runs/{policyRunId}`. Writer steps carry a bounded attempt count of at most three. Tool calls, like AgentRuns and destination deliveries, are written as `running` intent before anything external happens and completed exactly once afterwards, and a tool exchange stops if either write fails. Reconciliation is an explicit `POST /api/sites/{siteId}/reconciliation`: it settles policy runs that have reported nothing for fifteen minutes as abandoned, fails their still-running AgentRuns as `MODEL_RUN_ABANDONED` and their still-running tool calls as `TOOL_RUN_ABANDONED`, and does the same for manual AgentRuns that no live policy owns, using PostgreSQL's own record time rather than a caller-supplied timestamp. It never replays a model or tool call, because the outcome of interrupted external work is unknowable. The remaining gaps are real: Autopilot still continues in the process that received the request, so an interrupted run is closed and an operator must start it again; nothing in the repository schedules reconciliation or offers it in the newsroom, so a deployment or a person must call it; the abandoned-work pass does not close a destination delivery left `running`; and a delivery whose outcome is unknown stays unresolved until an operator reconciles it.
 
 ## Full-slice acceptance criteria
 
@@ -71,22 +71,21 @@ These criteria describe the complete target slice and are only partially impleme
 - Drafts and subsequent revisions remain separately inspectable.
 - An independent editor-in-chief review records its evidence, outcome, and requested changes.
 - The workflow allows approval, rejection, or a change request and blocks a third revision cycle.
-- Only an approved Story can be explicitly transitioned to published by an operator, with its approved article exported as Markdown and structured JSON.
+- Only an approved Story can be explicitly transitioned to published by an operator, and only a published Story can be delivered to a configured destination.
 - Agent activity and editorial decisions leave durable receipts.
 
 ## Deferred
 
-- durable automation records and reconciliation for interrupted policy runs
+- resumption of interrupted policy runs, automatic scheduling of reconciliation, and recovery of destination deliveries left running
 - a knowledge corpus separating house style from citable reference knowledge
-- publishing destinations beyond the durable publication transition
+- publishing destinations beyond WordPress and StudioCMS, and delivery to more than one destination per Site
 - RSS automation
 - automatic clustering
 - semantic duplicate detection across Sources or Stories
 - profile editing and version management
-- direct publishing integrations
 - image generation
 - full rich-text editing
-- authentication and teams
+- authentication and teams (a Site is a tenant boundary, not a user or role model)
 - plugin marketplace
 - arbitrary workflow builder
 - analytics
