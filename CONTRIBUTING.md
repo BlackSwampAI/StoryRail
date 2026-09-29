@@ -12,7 +12,7 @@ Use one numbered batch and one concern per branch. Begin from a current, clean `
 
 Do not mix unrelated cleanup into a batch.
 
-Agents are responsible for verifying that each batch branch originates from current `main`. They may inspect Git state, fetch remotes, perform fast-forward-only pulls, switch or create branches, stage scoped changes, create commits, push feature branches, and open pull requests when the verification gate below permits it. Never stage or include unrelated user changes.
+Agents are responsible for verifying that each batch branch originates from current `main`. They may inspect Git state, fetch remotes, perform fast-forward-only pulls, switch or create branches, stage scoped changes, create commits, push feature branches, and open pull requests. Never stage or include unrelated user changes.
 
 Force pushes, resets, rebases, amends, branch deletion, discarding user changes, and other destructive or history-rewriting operations require explicit approval.
 
@@ -21,14 +21,12 @@ Force pushes, resets, rebases, amends, branch deletion, discarding user changes,
 The workflow is:
 
 1. An agent implements the scoped change and adds or updates appropriate tests when behavior changes.
-2. The agent provides exact verification commands but does not run tests, lint, typecheck, builds, coverage, audits, end-to-end tests, formatting checks, link checks, or any other validation.
-3. Chris runs the commands and reports the results.
-4. Before Chris reports success, the agent does not create the final implementation commit, push the feature branch, or open a pull request.
-5. On failure, the agent stays on the same branch, fixes only the relevant failure, updates tests when appropriate, and provides revised manual verification instructions.
-6. After all requested verification passes, the agent inspects the branch and working tree, stages only the approved batch files, creates an intentional Conventional Commit, pushes the feature branch, and opens a pull request targeting `main`.
-7. The agent reports the commit SHA and pull request URL. Merging still requires Chris's explicit approval.
+2. The agent runs the narrowest validation that proves the change, then as much of the CI contract below as its environment supports. Tests that need PostgreSQL or Chromium run only against a disposable `storyrail_test` database.
+3. The agent inspects the branch and working tree, stages only the batch files, creates an intentional Conventional Commit, pushes the feature branch, and opens a pull request targeting `main`. A pull request whose local validation was incomplete is opened as a draft and says which checks were not run locally.
+4. CI is the authoritative verification. The agent drives its own pull request to green: on failure it stays on the same branch, finds the root cause, fixes only the relevant failure, and pushes again. It never skips, disables, or weakens a test to get green.
+5. The agent reports the pull request URL and its CI state. Merging still requires Chris's explicit approval.
 
-When application code begins, behavior changes are expected to include focused tests. Regression fixes should include a test that demonstrates the corrected behavior. Chris remains responsible for running all tests and validation.
+Behavior changes are expected to include focused tests. Regression fixes should include a test that demonstrates the corrected behavior.
 
 ## Application commands
 
@@ -49,7 +47,7 @@ The single application package uses pnpm scripts:
 - `pnpm format` writes Prettier formatting changes.
 - `pnpm format:check` checks formatting without writing changes.
 
-Agents may write or update the code, tests, and configuration behind these commands, but only Chris executes installation and validation. Handoffs must give Chris an ordered command sequence beginning with `pnpm install --frozen-lockfile` before project checks.
+Agents may write or update the code, tests, and configuration behind these commands and may run them, following the database precautions below.
 
 ## Server runtime configuration
 
