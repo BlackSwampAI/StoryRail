@@ -55,6 +55,7 @@ The server runtime reads its configuration from the variable names documented in
 
 - `STORYRAIL_DATABASE_URL`
 - `STORYRAIL_OPENROUTER_BASE_URL` (optional)
+- `STORYRAIL_FIRECRAWL_BASE_URL` (optional)
 - `STORYRAIL_CREDENTIAL_KEY` (for encrypted site credentials)
 - `STORYRAIL_SITE_ID` (optional; selects a Site when an installation has more than one)
 - `STORYRAIL_OPERATOR_ID` (required for actions attributed to an operator)

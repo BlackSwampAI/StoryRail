@@ -8,6 +8,7 @@ import type {
 import type { SourceExtractor, SourceExtractorResult } from "./source-extractor";
 
 const FIRECRAWL_SCRAPE_ENDPOINT = "https://api.firecrawl.dev/v2/scrape";
+const FIRECRAWL_SCRAPE_PATH = "/v2/scrape";
 
 const FIRECRAWL_DESCRIPTOR: SourceExtractorDescriptor = Object.freeze({
   key: "firecrawl",
@@ -22,6 +23,11 @@ export interface FirecrawlSourceExtractorOptions {
    */
   readonly resolveApiKey: () => Promise<ApiKeyResolution>;
   readonly fetch?: typeof globalThis.fetch;
+  /**
+   * Optional absolute base URL for a Firecrawl-compatible endpoint, without a trailing slash.
+   * Absent means Firecrawl's hosted API.
+   */
+  readonly baseUrl?: string;
 }
 
 function failure(code: SourceExtractionFailure["code"], retryable: boolean): SourceExtractorResult {
@@ -127,6 +133,9 @@ export function createFirecrawlSourceExtractor(
   options: FirecrawlSourceExtractorOptions,
 ): SourceExtractor {
   const fetchImplementation = options.fetch ?? globalThis.fetch;
+  const scrapeEndpoint = options.baseUrl
+    ? `${options.baseUrl}${FIRECRAWL_SCRAPE_PATH}`
+    : FIRECRAWL_SCRAPE_ENDPOINT;
 
   return {
     descriptor: FIRECRAWL_DESCRIPTOR,
@@ -140,7 +149,7 @@ export function createFirecrawlSourceExtractor(
       let response: Response;
 
       try {
-        response = await fetchImplementation(FIRECRAWL_SCRAPE_ENDPOINT, {
+        response = await fetchImplementation(scrapeEndpoint, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${apiKey}`,
