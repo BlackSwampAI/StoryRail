@@ -23,6 +23,7 @@ import {
 import { createSiteStore } from "./site-store";
 import {
   loadSourceEvidenceRuntimeConfiguration,
+  resolveFirecrawlBaseUrl,
   type SourceEvidenceRuntimeConfiguration,
 } from "./source-evidence-configuration";
 
@@ -37,6 +38,8 @@ export interface CreateSourceEvidenceRuntimeOptions {
   readonly configuration: SourceEvidenceRuntimeConfiguration;
   readonly siteId: SiteId;
   readonly fetch?: typeof globalThis.fetch;
+  /** Absolute base URL of a Firecrawl-compatible endpoint. Absent means Firecrawl's hosted API. */
+  readonly firecrawlBaseUrl?: string | null;
   readonly now?: () => string;
   readonly createUuid?: () => string;
   readonly createPool?: (configuration: PoolConfig) => Pool;
@@ -67,6 +70,7 @@ export function createSourceEvidenceRuntime(
   const extractor = createFirecrawlSourceExtractor({
     resolveApiKey: () => store.resolveApiKey(FIRECRAWL_API_KEY_SLOT),
     fetch: options.fetch ?? globalThis.fetch,
+    ...(options.firecrawlBaseUrl ? { baseUrl: options.firecrawlBaseUrl } : {}),
   });
   const runSourceExtraction = createRunSourceExtraction({
     extractor,
@@ -109,6 +113,7 @@ export function createSourceEvidenceRuntimeFromEnvironment(
     configuration,
     siteId: options.siteId,
     fetch: options.fetch,
+    firecrawlBaseUrl: resolveFirecrawlBaseUrl(options.environment),
     now: options.now,
     createUuid: options.createUuid,
     createPool: options.createPool,

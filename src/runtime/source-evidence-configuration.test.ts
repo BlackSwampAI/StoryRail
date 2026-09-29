@@ -3,8 +3,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  FirecrawlBaseUrlConfigurationError,
   SourceEvidenceRuntimeConfigurationError,
   loadSourceEvidenceRuntimeConfiguration,
+  resolveFirecrawlBaseUrl,
 } from "./source-evidence-configuration";
 
 const DATABASE_URL = "  opaque-database-configuration  ";
@@ -104,5 +106,40 @@ describe("loadSourceEvidenceRuntimeConfiguration", () => {
     const error = captureConfigurationError(makeEnvironment());
 
     expect(error.code).toBe("STORYRAIL_DATABASE_URL_REQUIRED");
+  });
+});
+
+describe("resolveFirecrawlBaseUrl", () => {
+  it("leaves Firecrawl's hosted API in place when nothing is configured", () => {
+    expect(resolveFirecrawlBaseUrl(makeEnvironment())).toBeNull();
+    expect(
+      resolveFirecrawlBaseUrl(makeEnvironment({ STORYRAIL_FIRECRAWL_BASE_URL: "  " })),
+    ).toBeNull();
+  });
+
+  it("normalizes a valid HTTP or HTTPS override without a trailing slash", () => {
+    expect(
+      resolveFirecrawlBaseUrl(
+        makeEnvironment({ STORYRAIL_FIRECRAWL_BASE_URL: " http://127.0.0.1:3135/firecrawl/ " }),
+      ),
+    ).toBe("http://127.0.0.1:3135/firecrawl");
+  });
+
+  it.each([
+    "not a url",
+    "ftp://firecrawl.example/",
+    "https://user:secret@firecrawl.example/",
+    "https://firecrawl.example/?key=secret",
+    "https://firecrawl.example/#fragment",
+  ])("rejects %s without echoing it", (configured) => {
+    let thrown: unknown;
+    try {
+      resolveFirecrawlBaseUrl(makeEnvironment({ STORYRAIL_FIRECRAWL_BASE_URL: configured }));
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(FirecrawlBaseUrlConfigurationError);
+    expect((thrown as Error).message).not.toContain("secret");
   });
 });
