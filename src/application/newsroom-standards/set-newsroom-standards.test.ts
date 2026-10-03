@@ -5,6 +5,13 @@ import { newsroomStandardsId, operatorId, type NewsroomStandards } from "@/domai
 import { createSetNewsroomStandards } from "./set-newsroom-standards";
 
 const OPERATOR = { type: "operator" as const, operatorId: operatorId("chris-local") };
+const BRIEF = {
+  audience: "Local residents",
+  readerBenefit: "Know what changed.",
+  coverageCriteria: "Explain when it takes effect.",
+  voice: "Plain and calm.",
+  avoid: "Speculation.",
+};
 
 function harness(history: readonly NewsroomStandards[] = []) {
   const append = vi.fn(async (standards: NewsroomStandards) => ({ ok: true as const, standards }));
@@ -42,6 +49,25 @@ describe("writing the newsroom's standards", () => {
       test.set({ text: "Newer standards.", updatedBy: OPERATOR }),
     ).resolves.toMatchObject({ ok: true, standards: { revisionNumber: 4 } });
     expect(test.append).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the prior guided brief when an operator edits only the legacy standards text", async () => {
+    const existing = {
+      id: newsroomStandardsId("standards-1"),
+      revisionNumber: 3,
+      text: "Older standards.",
+      brief: BRIEF,
+      updatedBy: OPERATOR,
+      updatedAt: "2026-08-01T00:00:00.000Z",
+    } as NewsroomStandards;
+    const test = harness([existing]);
+
+    await expect(
+      test.set({ text: "Updated style note.", updatedBy: OPERATOR }),
+    ).resolves.toMatchObject({
+      ok: true,
+      standards: { revisionNumber: 4, text: "Updated style note.", brief: BRIEF },
+    });
   });
 
   it("refuses empty standards without touching the history", async () => {

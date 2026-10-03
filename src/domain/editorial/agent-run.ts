@@ -1,6 +1,7 @@
 import { GROUNDING_REFUSAL_CODES, MODEL_FAILURE_CODES } from "./source-evidence-preparation-types";
 import { AGENT_ROLES, STORY_STATES, type EditorialActor } from "./types";
 import { createAssignmentProposal } from "./assignment-proposal";
+import { recordNewsroomStandards } from "./newsroom-standards";
 import { createDirectorReview } from "./director-review";
 import type {
   AgentRun,
@@ -57,6 +58,8 @@ export function recordAgentRun(candidate: AgentRun): RecordAgentRunResult {
     return invalid("AGENT_RUN_PROMPT_INVALID", "AgentRun prompt descriptors must be non-empty.");
   }
   const input = candidate.input;
+  const storyPurpose = input.story.purpose;
+  const context = input.editorialContext;
   if (
     input.story.id !== candidate.storyId ||
     !nonEmpty(input.story.title) ||
@@ -64,6 +67,18 @@ export function recordAgentRun(candidate: AgentRun): RecordAgentRunResult {
     !Number.isInteger(input.story.revisionCycle) ||
     input.story.revisionCycle < 0 ||
     input.story.revisionCycle > 2 ||
+    (storyPurpose !== undefined &&
+      (!nonEmpty(storyPurpose.readerValue) ||
+        storyPurpose.readerValue.length > 2_000 ||
+        typeof storyPurpose.focus !== "string" ||
+        storyPurpose.focus.length > 2_000)) ||
+    (context !== undefined &&
+      ((context.identity !== null &&
+        (typeof context.identity.name !== "string" ||
+          context.identity.name.length > 2_000 ||
+          typeof context.identity.description !== "string" ||
+          context.identity.description.length > 8_000)) ||
+        (context.standards !== null && !recordNewsroomStandards(context.standards).ok))) ||
     input.evidence.length === 0 ||
     !input.evidence.every(validReference) ||
     !input.unavailableSourceIds.every(nonEmpty) ||

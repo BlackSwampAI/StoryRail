@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { actorSchema, nonEmptyText } from "./schema-primitives";
+import { actorSchema, nonEmptyText, operatorActorSchema } from "./schema-primitives";
 import { STORY_STATES } from "./types";
 
 export const storySchema = z
@@ -11,8 +11,29 @@ export const storySchema = z
     revisionCycle: z.number().int().min(0).max(2),
     createdAt: nonEmptyText,
     updatedAt: nonEmptyText,
+    purpose: z
+      .object({
+        readerValue: nonEmptyText.refine((value) => value.length <= 2_000),
+        focus: z.string().refine((value) => value.length <= 2_000),
+      })
+      .strict()
+      .optional(),
+    purposeUpdatedAt: nonEmptyText.optional(),
+    purposeUpdatedBy: operatorActorSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((story, context) => {
+    if ((story.purposeUpdatedAt === undefined) !== (story.purposeUpdatedBy === undefined))
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Purpose update provenance must be complete.",
+      });
+    if (story.purposeUpdatedAt !== undefined && story.purpose === undefined)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Purpose provenance requires a saved purpose.",
+      });
+  });
 
 export const storyTransitionReceiptSchema = z
   .object({

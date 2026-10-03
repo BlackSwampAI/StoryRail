@@ -34,10 +34,18 @@ import { FULL_RAIL_ELEMENT_ID, useFullRailOutOfView } from "./story-rail-visibil
 import { SourceInboxWorkspace } from "./source-inbox-workspace";
 import type { SourceInboxClient } from "./source-inbox-client";
 import { StoryWorkspace } from "./story-workspace";
+import { NewsroomStandardsEditor } from "./newsroom-standards-editor";
 import type { StoryClient } from "./story-client";
 
 type WorkspaceMode =
-  "story" | "source-inbox" | "source-intake" | "agents" | "sites" | "profile" | "settings";
+  | "story"
+  | "source-inbox"
+  | "source-intake"
+  | "agents"
+  | "newsroom-brief"
+  | "sites"
+  | "profile"
+  | "settings";
 
 export interface NewsroomShellProps {
   readonly requestSourceEvidence?: RequestSourceEvidenceUrl;
@@ -112,6 +120,7 @@ export function NewsroomShell({
     rail.scrollIntoView?.({ block: "start" });
   }, [storySelection, workspaceMode]);
   const [sourceInboxRefreshVersion, setSourceInboxRefreshVersion] = useState(0);
+  const [newsroomBriefConfigured, setNewsroomBriefConfigured] = useState<boolean | null>(null);
   const [sourceInboxCount, setSourceInboxCount] = useState<number | null>(null);
   const [focusedSourceId, setFocusedSourceId] = useState<string | null>(null);
   const [staff, setStaff] = useState<StaffState>({ kind: "loading" });
@@ -119,6 +128,23 @@ export function NewsroomShell({
   // The stored choice is only readable in the browser; on the server this resolves to the
   // default, which is also what the first paint uses.
   const [theme, setTheme] = useState<NewsroomThemeId>(readStoredTheme);
+
+  useEffect(() => {
+    let active = true;
+    void clients.newsroomStandards
+      .listRevisions()
+      .then((result) => {
+        if (!active || result.kind !== "loaded") return;
+        const brief = result.revisions.at(-1)?.brief;
+        setNewsroomBriefConfigured(Boolean(brief?.audience.trim() && brief.readerBenefit.trim()));
+      })
+      .catch(() => {
+        if (active) setNewsroomBriefConfigured(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [clients.newsroomStandards]);
 
   useEffect(() => {
     applyTheme(theme);
@@ -540,6 +566,21 @@ export function NewsroomShell({
                 </button>
               </section>
 
+              <section aria-labelledby="editorial-navigation-label">
+                <p className={styles.navigationLabel} id="editorial-navigation-label">
+                  Editorial setup
+                </p>
+                <button
+                  type="button"
+                  className={styles.navButton}
+                  aria-current={workspaceMode === "newsroom-brief" ? "page" : undefined}
+                  onClick={() => openWorkspace("newsroom-brief")}
+                >
+                  <span>Newsroom brief</span>
+                  <span aria-hidden="true">→</span>
+                </button>
+              </section>
+
               <NewsroomStaff
                 state={staff}
                 onRetry={() => void loadStaff()}
@@ -551,6 +592,19 @@ export function NewsroomShell({
 
         workspace={
           <main className={styles.workspace}>
+            {newsroomBriefConfigured === false &&
+            workspaceMode !== "story" &&
+            workspaceMode !== "newsroom-brief" ? (
+              <aside className={styles.newsroomBriefCallout}>
+                <div>
+                  <strong>Set your newsroom brief</strong>
+                  <p>Answer a few short questions about your readers and what they need.</p>
+                </div>
+                <button type="button" onClick={() => openWorkspace("newsroom-brief")}>
+                  Set up newsroom brief
+                </button>
+              </aside>
+            ) : null}
             <div className={styles.workspaceNavigation}>
               <div className={styles.workspaceNavigationLead}>
                 <p className={styles.workspaceBreadcrumb}>
@@ -750,6 +804,11 @@ export function NewsroomShell({
                   requests={agentProfileRequests}
                   onProfileCreated={upsertStaffProfile}
                 />
+              ) : null}
+            </div>
+            <div hidden={workspaceMode !== "newsroom-brief"}>
+              {workspaceMode === "newsroom-brief" ? (
+                <NewsroomStandardsEditor onBriefSaved={() => setNewsroomBriefConfigured(true)} />
               ) : null}
             </div>
           </main>

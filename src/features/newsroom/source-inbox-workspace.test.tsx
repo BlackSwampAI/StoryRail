@@ -88,6 +88,7 @@ const story = {
   revisionCycle: 0,
   createdAt: "created",
   updatedAt: "updated",
+  purpose: { readerValue: "Help residents understand a change.", focus: "Confirmed effects" },
 } satisfies Story;
 const attachment = {
   storyId: story.id,
@@ -131,6 +132,10 @@ function clients() {
       value: [],
     })),
     createStory: vi.fn<StoryClient["createStory"]>(async () => ({
+      kind: "completed",
+      value: story,
+    })),
+    updateStoryPurpose: vi.fn<StoryClient["updateStoryPurpose"]>(async () => ({
       kind: "completed",
       value: story,
     })),
@@ -246,8 +251,8 @@ describe("SourceInboxWorkspace", () => {
     expect(screen.getByText("Raw extraction history").closest("details")).not.toHaveAttribute(
       "open",
     );
-    expect(screen.getByRole("button", { name: "Create new Story" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Attach to existing Story" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Cover this" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Add to an existing Story" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Skip" })).toBeVisible();
 
     fireEvent.click(screen.getByText("Raw extraction history"));
@@ -263,7 +268,7 @@ describe("SourceInboxWorkspace", () => {
     expect(screen.getByRole("heading", { name: "Prepared evidence" })).toBeVisible();
     expect(screen.getByText("# Persisted evidence")).not.toBeVisible();
     expect(screen.getByRole("button", { name: "Prepare again" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Create new Story" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Cover this" })).toBeVisible();
 
     fireEvent.click(screen.getByText("Raw extraction history"));
     expect(screen.getByText("# Persisted evidence")).toBeVisible();
@@ -358,17 +363,23 @@ describe("SourceInboxWorkspace", () => {
     const { inbox, stories } = clients();
     renderInbox(inbox, stories);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Create new Story" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cover this" }));
     fireEvent.change(screen.getByRole("textbox", { name: /Story title/ }), {
       target: { value: "An operator's own headline" },
     });
-    fireEvent.change(screen.getByRole("textbox", { name: /What this Source gives the Story/ }), {
-      target: { value: "Relevant evidence." },
-    });
-    fireEvent.change(screen.getByRole("textbox", { name: /Why you are making this call/ }), {
-      target: { value: "Worth pursuing." },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Create, attach, and record decision" }));
+    fireEvent.change(
+      screen.getByRole("textbox", { name: /Why does this matter to your readers/ }),
+      {
+        target: { value: "Residents should know when service returns." },
+      },
+    );
+    fireEvent.change(
+      screen.getByRole("textbox", { name: /Anything you want us to investigate or emphasize/ }),
+      {
+        target: { value: "Confirmed service timing" },
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Cover this Source" }));
 
     expect(await screen.findByText("Story created and Source attached.")).toBeVisible();
     expect(screen.getByText(story.title)).toBeVisible();
@@ -432,7 +443,7 @@ describe("SourceInboxWorkspace", () => {
       await screen.findByText("Extraction failed again: RESPONSE_REJECTED · retryable: no"),
     ).toBeVisible();
     expect(unextracted.prepareEvidence).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Create new Story" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Cover this" })).toBeVisible();
   });
 
   it("keeps the latest successful evidence primary when a later attempt failed", async () => {
@@ -506,22 +517,33 @@ describe("SourceInboxWorkspace", () => {
       vi.fn<NonNullable<SourceInboxWorkspaceProps["onPendingCountChange"]>>();
     renderInbox(inbox, stories, { onStoryLoaded, onPendingCountChange });
     await waitFor(() => expect(onPendingCountChange).toHaveBeenLastCalledWith(1));
-    fireEvent.click(await screen.findByRole("button", { name: "Create new Story" }));
-    fireEvent.change(screen.getByLabelText("What this Source gives the Story"), {
-      target: { value: "Relevant" },
+    fireEvent.click(await screen.findByRole("button", { name: "Cover this" }));
+    fireEvent.change(screen.getByLabelText("Story title"), {
+      target: { value: "Harbour service update" },
     });
-    fireEvent.change(screen.getByLabelText("Why you are making this call"), {
-      target: { value: "New subject" },
+    fireEvent.change(screen.getByLabelText("Why does this matter to your readers?"), {
+      target: { value: "Residents should know when service returns." },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Create, attach, and record decision" }));
+    fireEvent.change(screen.getByLabelText(/Anything you want us to investigate or emphasize/), {
+      target: { value: "Confirmed service timing" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Cover this Source" }));
     await waitFor(() => expect(stories.inspectStory).toHaveBeenCalledWith(story.id));
-    expect(stories.createStory).toHaveBeenCalledWith("Extracted title");
-    expect(stories.attachSource).toHaveBeenCalledWith(story.id, source.id, "Relevant");
+    expect(stories.createStory).toHaveBeenCalledWith("Harbour service update", {
+      readerValue: "Residents should know when service returns.",
+      focus: "Confirmed service timing",
+    });
+    expect(stories.attachSource).toHaveBeenCalledWith(
+      story.id,
+      source.id,
+      "Starting evidence for this Story; investigate: Residents should know when service returns. Focus: Confirmed service timing",
+    );
+    expect(stories.updateStoryPurpose).not.toHaveBeenCalled();
     expect(inbox.recordTriageDecision).toHaveBeenCalledWith(
       source.id,
       "new_story",
       story.id,
-      "New subject",
+      "Covered this Source to investigate: Residents should know when service returns. Focus: Confirmed service timing",
     );
     expect(await screen.findByText("Story created and Source attached.")).toBeVisible();
     expect(onPendingCountChange).toHaveBeenLastCalledWith(0);
@@ -533,20 +555,58 @@ describe("SourceInboxWorkspace", () => {
     );
   });
 
+  it("retries the saved triage reason without recreating or reattaching the Story", async () => {
+    const { inbox, stories } = clients();
+    vi.mocked(inbox.recordTriageDecision).mockResolvedValueOnce({
+      kind: "unavailable",
+      message: SOURCE_INBOX_UNAVAILABLE_MESSAGE,
+    });
+    renderInbox(inbox, stories);
+    fireEvent.click(await screen.findByRole("button", { name: "Cover this" }));
+    fireEvent.change(screen.getByLabelText("Story title"), {
+      target: { value: "Harbour service update" },
+    });
+    fireEvent.change(screen.getByLabelText("Why does this matter to your readers?"), {
+      target: { value: "Residents should know when service returns." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Cover this Source" }));
+    expect(await screen.findByText(/final triage audit outcome is unavailable/i)).toBeVisible();
+
+    fireEvent.change(screen.getByLabelText("Why does this matter to your readers?"), {
+      target: { value: "A changed purpose after the Story already exists." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Retry final triage decision" }));
+
+    await waitFor(() => expect(inbox.recordTriageDecision).toHaveBeenCalledTimes(2));
+    expect(inbox.recordTriageDecision).toHaveBeenNthCalledWith(
+      1,
+      source.id,
+      "new_story",
+      story.id,
+      "Covered this Source to investigate: Residents should know when service returns.",
+    );
+    expect(inbox.recordTriageDecision).toHaveBeenNthCalledWith(
+      2,
+      source.id,
+      "new_story",
+      story.id,
+      "Covered this Source to investigate: Residents should know when service returns.",
+    );
+    expect(stories.createStory).toHaveBeenCalledOnce();
+    expect(stories.attachSource).toHaveBeenCalledOnce();
+  });
+
   it("attaches to an existing Story without creating another Story", async () => {
     const { inbox, stories } = clients();
     const onPendingCountChange =
       vi.fn<NonNullable<SourceInboxWorkspaceProps["onPendingCountChange"]>>();
     renderInbox(inbox, stories, { onPendingCountChange });
     await waitFor(() => expect(onPendingCountChange).toHaveBeenLastCalledWith(1));
-    fireEvent.click(await screen.findByRole("button", { name: "Attach to existing Story" }));
-    fireEvent.change(screen.getByLabelText("What this Source gives the Story"), {
+    fireEvent.click(await screen.findByRole("button", { name: "Add to an existing Story" }));
+    fireEvent.change(screen.getByLabelText("What does this Source add to the Story?"), {
       target: { value: "Additional facts" },
     });
-    fireEvent.change(screen.getByLabelText("Why you are making this call"), {
-      target: { value: "Same subject" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Attach and record decision" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add this Source" }));
     await waitFor(() => expect(inbox.recordTriageDecision).toHaveBeenCalled());
     expect(stories.createStory).not.toHaveBeenCalled();
     expect(stories.attachSource).toHaveBeenCalledWith(story.id, source.id, "Additional facts");
@@ -554,8 +614,9 @@ describe("SourceInboxWorkspace", () => {
       source.id,
       "existing_story",
       story.id,
-      "Same subject",
+      "Added this Source to “Existing Story” because: Additional facts",
     );
+    expect(stories.updateStoryPurpose).not.toHaveBeenCalled();
     expect(await screen.findByText("Source attached to Story.")).toBeVisible();
     expect(onPendingCountChange).toHaveBeenLastCalledWith(0);
     expect(screen.getByRole("button", { name: "Open Story" })).toBeVisible();
@@ -568,16 +629,13 @@ describe("SourceInboxWorkspace", () => {
     renderInbox(inbox, stories, { onPendingCountChange });
     await waitFor(() => expect(onPendingCountChange).toHaveBeenLastCalledWith(1));
     fireEvent.click(await screen.findByRole("button", { name: "Skip" }));
-    fireEvent.change(screen.getByLabelText("Why you are making this call"), {
-      target: { value: "No material facts" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Record skip decision" }));
+    fireEvent.click(screen.getByRole("button", { name: "Skip this Source" }));
     await waitFor(() =>
       expect(inbox.recordTriageDecision).toHaveBeenCalledWith(
         source.id,
         "skip",
         null,
-        "No material facts",
+        "Skipped this Source in Source Inbox; no additional reason supplied.",
       ),
     );
     expect(stories.createStory).not.toHaveBeenCalled();
@@ -607,10 +665,10 @@ describe("SourceInboxWorkspace", () => {
     renderInbox(controlledInbox, stories, { onPendingCountChange });
     await waitFor(() => expect(onPendingCountChange).toHaveBeenLastCalledWith(1));
     fireEvent.click(await screen.findByRole("button", { name: "Skip" }));
-    fireEvent.change(screen.getByLabelText("Why you are making this call"), {
+    fireEvent.change(screen.getByLabelText(/Reason/), {
       target: { value: "No material facts" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Record skip decision" }));
+    fireEvent.click(screen.getByRole("button", { name: "Skip this Source" }));
     expect(await screen.findByText("Recording skip decision…")).toBeVisible();
     expect(onPendingCountChange).toHaveBeenLastCalledWith(1);
     finishDecision?.({ kind: "unavailable", message: SOURCE_INBOX_UNAVAILABLE_MESSAGE });
@@ -633,10 +691,10 @@ describe("SourceInboxWorkspace", () => {
     const view = render(<SourceInboxWorkspace refreshVersion={0} {...props} />);
     await waitFor(() => expect(onPendingCountChange).toHaveBeenLastCalledWith(1));
     fireEvent.click(await screen.findByRole("button", { name: "Skip" }));
-    fireEvent.change(screen.getByLabelText("Why you are making this call"), {
+    fireEvent.change(screen.getByLabelText(/Reason/), {
       target: { value: "No material facts" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Record skip decision" }));
+    fireEvent.click(screen.getByRole("button", { name: "Skip this Source" }));
     expect(await screen.findByText(/Skip decision recorded/)).toBeVisible();
     await waitFor(() => expect(onPendingCountChange).toHaveBeenLastCalledWith(0));
 
@@ -658,14 +716,11 @@ describe("SourceInboxWorkspace", () => {
     const onStoryKnown = vi.fn<SourceInboxWorkspaceProps["onStoryKnown"]>();
     renderInbox(inbox, failedStories, { onStoryKnown });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Create new Story" }));
-    fireEvent.change(screen.getByLabelText("What this Source gives the Story"), {
-      target: { value: "Relevant" },
+    fireEvent.click(await screen.findByRole("button", { name: "Cover this" }));
+    fireEvent.change(screen.getByLabelText("Why does this matter to your readers?"), {
+      target: { value: "Residents should know when service returns." },
     });
-    fireEvent.change(screen.getByLabelText("Why you are making this call"), {
-      target: { value: "New subject" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Create, attach, and record decision" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cover this Source" }));
 
     expect(
       await screen.findByText(/authoritative Story inspection could not be loaded/i),
@@ -685,14 +740,11 @@ describe("SourceInboxWorkspace", () => {
     const onStoryKnown = vi.fn<SourceInboxWorkspaceProps["onStoryKnown"]>();
     renderInbox(inbox, failedStories, { sourceCount: 4, onStoryKnown });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Attach to existing Story" }));
-    fireEvent.change(screen.getByLabelText("What this Source gives the Story"), {
+    fireEvent.click(await screen.findByRole("button", { name: "Add to an existing Story" }));
+    fireEvent.change(screen.getByLabelText("What does this Source add to the Story?"), {
       target: { value: "Additional facts" },
     });
-    fireEvent.change(screen.getByLabelText("Why you are making this call"), {
-      target: { value: "Same subject" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Attach and record decision" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add this Source" }));
 
     expect(
       await screen.findByText(/authoritative Story inspection could not be loaded/i),

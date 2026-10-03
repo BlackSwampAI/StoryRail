@@ -1,4 +1,4 @@
-import type { PolicyRun, PolicyRunId, SiteId, SourceId } from "@/domain/editorial";
+import type { PolicyRun, PolicyRunId, SiteId, SourceId, StoryPurpose } from "@/domain/editorial";
 
 import { siteApiPath } from "./site-paths";
 
@@ -26,6 +26,7 @@ export interface UrlAutopilotClient {
   readonly start: (command: {
     readonly submittedUrl: string;
     readonly research: boolean;
+    readonly purpose?: StoryPurpose;
   }) => Promise<UrlAutopilotStartResult>;
   /**
    * Reads the policy run. A run started from a URL has no Story for its first minutes, so this
@@ -57,6 +58,7 @@ export function createUrlAutopilotClient(dependencies: {
           body: JSON.stringify({
             submittedUrl: command.submittedUrl,
             research: command.research,
+            ...(command.purpose === undefined ? {} : { purpose: command.purpose }),
           }),
         });
         const body: unknown = await response.json();

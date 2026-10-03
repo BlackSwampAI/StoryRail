@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAXIMUM_STANDARDS_CHARACTERS,
+  MAXIMUM_PUBLICATION_BRIEF_FIELD_CHARACTERS,
   newsroomStandardsId,
   operatorId,
   recordNewsroomStandards,
@@ -11,6 +12,13 @@ import {
 } from ".";
 
 const OPERATOR = { type: "operator" as const, operatorId: operatorId("chris-local") };
+const PUBLICATION_BRIEF = {
+  audience: "Local residents",
+  readerBenefit: "Understand the service change and what to do next.",
+  coverageCriteria: "State what changed, when it takes effect, and who is affected.",
+  voice: "Clear, calm, and useful.",
+  avoid: "Speculation and promotional claims.",
+};
 const standards = (overrides: Partial<NewsroomStandards> = {}): NewsroomStandards =>
   ({
     id: newsroomStandardsId("standards-1"),
@@ -45,6 +53,46 @@ describe("a newsroom's editorial standards", () => {
       ok: false,
       error: { code: "NEWSROOM_STANDARDS_REVISION_INVALID" },
     });
+  });
+
+  it("keeps legacy text-only revisions valid and records a bounded structured brief", () => {
+    expect(recordNewsroomStandards(standards())).toMatchObject({ ok: true });
+    expect(
+      recordNewsroomStandards(
+        standards({
+          brief: Object.fromEntries(
+            Object.entries(PUBLICATION_BRIEF).map(([key, value]) => [key, `  ${value}  `]),
+          ) as typeof PUBLICATION_BRIEF,
+        }),
+      ),
+    ).toMatchObject({
+      ok: true,
+      standards: {
+        brief: {
+          audience: PUBLICATION_BRIEF.audience,
+          readerBenefit: PUBLICATION_BRIEF.readerBenefit,
+          coverageCriteria: PUBLICATION_BRIEF.coverageCriteria,
+          voice: PUBLICATION_BRIEF.voice,
+          avoid: PUBLICATION_BRIEF.avoid,
+        },
+      },
+    });
+  });
+
+  it("rejects incomplete or oversized publication brief fields", () => {
+    expect(
+      recordNewsroomStandards(standards({ brief: { ...PUBLICATION_BRIEF, audience: "  " } })),
+    ).toMatchObject({ ok: false, error: { code: "NEWSROOM_STANDARDS_BRIEF_INVALID" } });
+    expect(
+      recordNewsroomStandards(
+        standards({
+          brief: {
+            ...PUBLICATION_BRIEF,
+            avoid: "x".repeat(MAXIMUM_PUBLICATION_BRIEF_FIELD_CHARACTERS + 1),
+          },
+        }),
+      ),
+    ).toMatchObject({ ok: false, error: { code: "NEWSROOM_STANDARDS_BRIEF_INVALID" } });
   });
 });
 
@@ -100,6 +148,51 @@ describe("adding standards to a role's prompt", () => {
     expect(composed.indexOf("Black Swamp AI")).toBeLessThan(
       composed.indexOf("Editorial standards for this newsroom"),
     );
+  });
+
+  it("adds a structured publication brief after the role rules while keeping evidence in control", () => {
+    const composed = withNewsroomStandards(role, standards({ brief: PUBLICATION_BRIEF }));
+
+    expect(composed.startsWith(role)).toBe(true);
+    expect(composed).toContain("Audience: Local residents");
+    expect(composed).toContain(
+      "Reader benefit: Understand the service change and what to do next.",
+    );
+    expect(composed).toContain(
+      "Coverage criteria: State what changed, when it takes effect, and who is affected.",
+    );
+    expect(composed).toContain("never overrides evidence, citation, or safety rules");
+  });
+
+  it("keeps different publication goals distinct instead of folding them into generic house style", () => {
+    const localBrief = {
+      audience: "Harbour district residents",
+      readerBenefit: "Know what changed and what to do next.",
+      coverageCriteria: "Local services and their effects on residents.",
+      voice: "Direct and calm.",
+      avoid: "Speculation about causes.",
+    };
+    const technicalBrief = {
+      audience: "Working software engineers",
+      readerBenefit: "Understand the documented compatibility impact.",
+      coverageCriteria: "Verified release changes and migration steps.",
+      voice: "Precise and practical.",
+      avoid: "Unverified performance claims.",
+    };
+    const localPrompt = withNewsroomStandards(role, standards({ brief: localBrief }));
+    const technicalPrompt = withNewsroomStandards(role, standards({ brief: technicalBrief }));
+
+    expect(localPrompt).toContain("Audience: Harbour district residents");
+    expect(localPrompt).toContain("Reader benefit: Know what changed and what to do next.");
+    expect(localPrompt).not.toContain("Working software engineers");
+    expect(technicalPrompt).toContain("Audience: Working software engineers");
+    expect(technicalPrompt).toContain(
+      "Reader benefit: Understand the documented compatibility impact.",
+    );
+    expect(technicalPrompt).not.toContain("Harbour district residents");
+    for (const prompt of [localPrompt, technicalPrompt]) {
+      expect(prompt).toContain("They never relax the rules above about evidence, citation, tools");
+    }
   });
 });
 

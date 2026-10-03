@@ -2,7 +2,13 @@ import { isDeepStrictEqual } from "node:util";
 
 import { beforeEach, describe, expect, expectTypeOf, it } from "vitest";
 
-import { storyId, type Story, type StoryId } from "@/domain/editorial";
+import {
+  operatorId,
+  storyId,
+  type Story,
+  type StoryId,
+  type StoryPurpose,
+} from "@/domain/editorial";
 
 import type { PersistStoryCommand, PersistStoryResult, StoryRepository } from "./story-repository";
 
@@ -38,6 +44,52 @@ export function describeStoryRepositoryContract(
 
     it("returns null for an unknown Story identity", async () => {
       await expect(repository.findById(storyId("missing-story"))).resolves.toBeNull();
+    });
+
+    it("updates the reader purpose for an intake Story", async () => {
+      const story = makeStory("purpose");
+      const purpose: StoryPurpose = { readerValue: "Know what changed.", focus: "Timing" };
+      await repository.persist({ story });
+
+      await expect(
+        repository.updatePurpose({
+          storyId: story.id,
+          purpose,
+          updatedBy: { type: "operator", operatorId: operatorId("contract-operator") },
+          updatedAt: "purpose-updated",
+        }),
+      ).resolves.toEqual({
+        ok: true,
+        story: {
+          ...story,
+          purpose,
+          purposeUpdatedAt: "purpose-updated",
+          purposeUpdatedBy: { type: "operator", operatorId: "contract-operator" },
+          updatedAt: "purpose-updated",
+        },
+      });
+      await expect(repository.findById(story.id)).resolves.toEqual({
+        ...story,
+        purpose,
+        purposeUpdatedAt: "purpose-updated",
+        purposeUpdatedBy: { type: "operator", operatorId: "contract-operator" },
+        updatedAt: "purpose-updated",
+      });
+    });
+
+    it("refuses to update a reader purpose after the Story leaves intake", async () => {
+      const story = { ...makeStory("purpose-locked"), state: "assigned" as const };
+      await repository.persist({ story });
+
+      await expect(
+        repository.updatePurpose({
+          storyId: story.id,
+          purpose: { readerValue: "Know what changed.", focus: "Timing" },
+          updatedBy: { type: "operator", operatorId: operatorId("contract-operator") },
+          updatedAt: "purpose-update-rejected",
+        }),
+      ).resolves.toMatchObject({ ok: false, error: { code: "STORY_PURPOSE_LOCKED" } });
+      await expect(repository.findById(story.id)).resolves.toEqual(story);
     });
 
     it("treats a structurally exact replay as idempotent success", async () => {
@@ -166,6 +218,30 @@ export function createReferenceStoryRepository(): StoryRepository {
       const stored = structuredClone(command.story);
       stories.set(stored.id, stored);
       return { ok: true, story: structuredClone(stored) };
+    },
+    async updatePurpose(command) {
+      const existing = stories.get(command.storyId);
+      if (!existing) {
+        return {
+          ok: false,
+          error: { code: "STORY_NOT_FOUND", message: "The Story does not exist." },
+        };
+      }
+      if (existing.state !== "intake") {
+        return {
+          ok: false,
+          error: { code: "STORY_PURPOSE_LOCKED", message: "The Story purpose is locked." },
+        };
+      }
+      const updated = {
+        ...existing,
+        purpose: structuredClone(command.purpose),
+        purposeUpdatedAt: command.updatedAt,
+        purposeUpdatedBy: structuredClone(command.updatedBy),
+        updatedAt: command.updatedAt,
+      };
+      stories.set(updated.id, updated);
+      return { ok: true, story: structuredClone(updated) };
     },
   };
 }

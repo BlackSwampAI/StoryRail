@@ -11,6 +11,13 @@ const SITE_ID = siteId("site-second");
 const REVISION = {
   revisionNumber: 2,
   text: "Headlines are sentence case.",
+  brief: {
+    audience: "Local residents",
+    readerBenefit: "Understand the service change.",
+    coverageCriteria: "State what changed and when.",
+    voice: "Clear and calm.",
+    avoid: "Speculation.",
+  },
   updatedAt: "2026-08-25T10:00:00.000Z",
 };
 
@@ -39,13 +46,14 @@ describe("newsroom-standards-client", () => {
 
     const result = await createNewsroomStandardsClient({ siteId: SITE_ID, fetch }).saveRevision(
       REVISION.text,
+      REVISION.brief,
     );
 
     expect(result).toEqual({ kind: "saved", revision: REVISION });
     expect(fetch).toHaveBeenCalledWith("/api/sites/site-second/newsroom-standards", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ text: REVISION.text }),
+      body: JSON.stringify({ text: REVISION.text, brief: REVISION.brief }),
     });
   });
 

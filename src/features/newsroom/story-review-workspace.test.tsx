@@ -14,6 +14,7 @@ const unavailable = async () =>
 const requests: StoryClient = {
   listStories: vi.fn(unavailable),
   createStory: vi.fn(unavailable),
+  updateStoryPurpose: vi.fn(unavailable),
   attachSource: vi.fn(unavailable),
   inspectStory: vi.fn(unavailable),
   assignStory: vi.fn(unavailable),

@@ -24,3 +24,4 @@ export * from "./site-credentials";
 export * from "./site-settings";
 export * from "./model-catalog";
 export * from "./story-deliveries";
+export * from "./editorial-context";

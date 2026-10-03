@@ -4,6 +4,7 @@ import type { Pool, QueryResultRow } from "pg";
 
 import type { SiteId, Story, StoryId, StoryState } from "@/domain/editorial";
 import { STORY_STATES } from "@/domain/editorial";
+import { storySchema } from "@/domain/editorial";
 import type { PersistStoryResult, StoryRepository } from "@/application/story-persistence";
 
 export interface CreatePostgresStoryRepositoryOptions {
@@ -33,10 +34,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
-  return isDeepStrictEqual(Object.keys(value).sort(), [...keys].sort());
-}
-
 function isStoryState(value: unknown): value is StoryState {
   return typeof value === "string" && (STORY_STATES as readonly string[]).includes(value);
 }
@@ -51,7 +48,10 @@ function decodeStory(row: StoryPayloadRow): Story {
     (row.revision_cycle as number) < 0 ||
     (row.revision_cycle as number) > 2 ||
     !isRecord(payload) ||
-    !hasExactKeys(payload, ["id", "title", "state", "revisionCycle", "createdAt", "updatedAt"]) ||
+    !["id", "title", "state", "revisionCycle", "createdAt", "updatedAt"].every(
+      (key) => key in payload,
+    ) ||
+    !storySchema.safeParse(payload).success ||
     typeof payload.id !== "string" ||
     payload.id !== row.story_id ||
     typeof payload.title !== "string" ||
@@ -103,6 +103,61 @@ export function createPostgresStoryRepository(
 
   return {
     findById: (storyIdentity) => findStoryById(pool, siteId, storyIdentity),
+    async updatePurpose(command) {
+      const existing = await findStoryById(pool, siteId, command.storyId);
+      if (!existing)
+        return {
+          ok: false,
+          error: { code: "STORY_NOT_FOUND", message: "The Story to update does not exist." },
+        };
+      if (existing.state !== "intake")
+        return {
+          ok: false,
+          error: {
+            code: "STORY_PURPOSE_LOCKED",
+            message: "Story purpose can only be edited before assignment.",
+          },
+        };
+      const next: Story = {
+        ...existing,
+        purpose: {
+          readerValue: command.purpose.readerValue.trim(),
+          focus: command.purpose.focus.trim(),
+        },
+        purposeUpdatedAt: command.updatedAt,
+        purposeUpdatedBy: command.updatedBy,
+        updatedAt: command.updatedAt,
+      };
+      const updated = await pool.query<StoryPayloadRow>(
+        `UPDATE storyrail.stories AS story
+         SET payload = $3::jsonb
+         WHERE story.story_id = $1 AND story.site_id = $2 AND story.state = 'intake'
+           AND story.payload = $4::jsonb
+           AND NOT EXISTS (
+             SELECT 1 FROM storyrail.agent_runs AS run
+             WHERE run.story_id = story.story_id AND run.outcome = 'running'
+           )
+         RETURNING story_id, state, revision_cycle, payload`,
+        [command.storyId, siteId, serializeStory(next), JSON.stringify(existing)],
+      );
+      if (updated.rows[0]) return { ok: true, story: decodeStory(updated.rows[0]) };
+      const active = await pool.query(
+        `SELECT 1 FROM storyrail.agent_runs WHERE story_id = $1 AND outcome = 'running' LIMIT 1`,
+        [command.storyId],
+      );
+      return {
+        ok: false,
+        error: active.rows.length
+          ? {
+              code: "STORY_AGENT_RUN_ACTIVE",
+              message: "Story purpose cannot change while an agent run is active.",
+            }
+          : {
+              code: "STORY_PURPOSE_LOCKED",
+              message: "Story changed while purpose was being updated; reload and try again.",
+            },
+      };
+    },
     async persist({ story }): Promise<PersistStoryResult> {
       const payload = serializeStory(story);
       const inserted = await pool.query<StoryPayloadRow>(

@@ -33,7 +33,7 @@ function createDependencies(result?: PersistStoryResult) {
       result ?? { ok: true, story: structuredClone(command.story) },
   );
   const dependencies: CreateStoryWorkflowDependencies = {
-    storyRepository: { persist, findById: vi.fn(async () => null) },
+    storyRepository: { persist, findById: vi.fn(async () => null), updatePurpose: vi.fn() },
     createStoryId: vi.fn(() => ID),
     now: vi.fn(() => NOW),
   };
@@ -42,7 +42,10 @@ function createDependencies(result?: PersistStoryResult) {
 
 describe("createCreateStory", () => {
   it("exposes the exact public command and dependency types", () => {
-    expectTypeOf<CreateStoryWorkflowCommand>().toEqualTypeOf<{ readonly title: string }>();
+    expectTypeOf<CreateStoryWorkflowCommand>().toEqualTypeOf<{
+      readonly title: string;
+      readonly purpose?: import("@/domain/editorial").StoryPurpose;
+    }>();
     expectTypeOf<CreateStoryWorkflowDependencies>().toEqualTypeOf<{
       readonly storyRepository: StoryRepository;
       readonly createStoryId: () => typeof ID;

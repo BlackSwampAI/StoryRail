@@ -30,13 +30,23 @@ const URL_VALIDATION_CODES = new Set([
 function isBody(value: unknown): value is {
   readonly submittedUrl: string;
   readonly research?: boolean;
+  readonly purpose?: { readonly readerValue: string; readonly focus: string };
 } {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
   return (
-    Object.keys(record).every((key) => key === "submittedUrl" || key === "research") &&
+    Object.keys(record).every(
+      (key) => key === "submittedUrl" || key === "research" || key === "purpose",
+    ) &&
     typeof record.submittedUrl === "string" &&
-    (!("research" in record) || typeof record.research === "boolean")
+    (!("research" in record) || typeof record.research === "boolean") &&
+    (!("purpose" in record) ||
+      (typeof record.purpose === "object" &&
+        record.purpose !== null &&
+        !Array.isArray(record.purpose) &&
+        Object.keys(record.purpose).sort().join(",") === "focus,readerValue" &&
+        typeof (record.purpose as Record<string, unknown>).readerValue === "string" &&
+        typeof (record.purpose as Record<string, unknown>).focus === "string"))
   );
 }
 
@@ -75,7 +85,7 @@ export function createRunUrlAutopilotHttpHandler(dependencies: {
       return respond(
         error(
           "INVALID_REQUEST",
-          "The request body must contain a string submittedUrl and, at most, a boolean research flag.",
+          "The request body must contain a string submittedUrl, an optional boolean research flag, and an optional purpose with readerValue and focus text.",
         ),
         400,
       );
@@ -96,22 +106,25 @@ export function createRunUrlAutopilotHttpHandler(dependencies: {
         submittedUrl: body.submittedUrl,
         requestedBy,
         research: body.research === true,
+        ...(body.purpose ? { purpose: body.purpose } : {}),
         createPolicyRunId: () => policyRunId(randomUUID()),
       });
       if (!started.ok) {
         const status =
-          started.stage === "policy"
-            ? 409
-            : started.stage === "extraction"
-              ? // Nothing was extracted, so a missing key is not a server fault. The model routes
-                // answer 503 for the same condition and a client must not have to special-case
-                // which route reported it.
-                isCredentialUnavailableError(started.error)
-                ? 503
-                : 500
-              : URL_VALIDATION_CODES.has(started.error.code)
-                ? 422
-                : 409;
+          started.stage === "purpose"
+            ? 422
+            : started.stage === "policy"
+              ? 409
+              : started.stage === "extraction"
+                ? // Nothing was extracted, so a missing key is not a server fault. The model routes
+                  // answer 503 for the same condition and a client must not have to special-case
+                  // which route reported it.
+                  isCredentialUnavailableError(started.error)
+                  ? 503
+                  : 500
+                : URL_VALIDATION_CODES.has(started.error.code)
+                  ? 422
+                  : 409;
         return respond({ ok: false, error: started.error }, status);
       }
 

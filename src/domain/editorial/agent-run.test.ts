@@ -55,6 +55,18 @@ const successful: AgentRun = {
 };
 
 describe("AgentRun", () => {
+  it.each([
+    ["identity name", { name: "n".repeat(2_001), description: "Within the bound." }],
+    ["identity description", { name: "Harbour Desk", description: "d".repeat(8_001) }],
+  ])("rejects an editorial context with an oversized %s", (_field, identity) => {
+    expect(
+      recordAgentRun({
+        ...successful,
+        input: { ...successful.input, editorialContext: { identity, standards: null } },
+      }),
+    ).toMatchObject({ ok: false, error: { code: "AGENT_RUN_INPUT_INVALID" } });
+  });
+
   it("accepts editor_in_chief article_review success and failure", () => {
     const common = {
       id: agentRunId("director-run-38"),

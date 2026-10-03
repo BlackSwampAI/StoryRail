@@ -33,6 +33,7 @@ import {
   type SourceExtraction,
   type SourceEvidencePreparation,
   type Story,
+  type StoryPurpose,
   type StoryDelivery,
   type LegacyDeliveryMappingDecision,
   type LegacyDeliveryMappingResolution,
@@ -113,7 +114,14 @@ export type DeliverStoryOutcome =
 
 export interface StoryClient {
   readonly listStories: () => Promise<StoryClientResult<readonly StoryListItem[]>>;
-  readonly createStory: (title: string) => Promise<StoryClientResult<Story>>;
+  readonly createStory: (
+    title: string,
+    purpose?: StoryPurpose,
+  ) => Promise<StoryClientResult<Story>>;
+  readonly updateStoryPurpose: (
+    storyId: string,
+    purpose: StoryPurpose,
+  ) => Promise<StoryClientResult<Story>>;
   readonly attachSource: (
     storyId: string,
     sourceId: string,
@@ -670,11 +678,15 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
         isStoryList,
         {},
       ),
-    createStory: (title) =>
+    createStory: (title, purpose) =>
       request(
         dependencies.fetch,
         api("/stories"),
-        { method: "POST", headers: jsonHeaders, body: JSON.stringify({ title }) },
+        {
+          method: "POST",
+          headers: jsonHeaders,
+          body: JSON.stringify(purpose === undefined ? { title } : { title, purpose }),
+        },
         201,
         "story",
         isStory,
@@ -682,7 +694,23 @@ export function createStoryClient(dependencies: StoryClientDependencies): StoryC
           400: new Set(["INVALID_JSON", "INVALID_REQUEST"]),
           409: new Set(["STORY_ID_CONFLICT"]),
           415: new Set(["UNSUPPORTED_MEDIA_TYPE"]),
-          422: new Set(["STORY_TITLE_REQUIRED"]),
+          422: new Set(["STORY_TITLE_REQUIRED", "STORY_PURPOSE_INVALID"]),
+        },
+      ),
+    updateStoryPurpose: (storyId, purpose) =>
+      request(
+        dependencies.fetch,
+        api(`/stories/${encodeURIComponent(storyId)}/purpose`),
+        { method: "PATCH", headers: jsonHeaders, body: JSON.stringify({ purpose }) },
+        200,
+        "story",
+        isStory,
+        {
+          400: new Set(["INVALID_JSON", "INVALID_REQUEST"]),
+          404: new Set(["STORY_NOT_FOUND"]),
+          409: new Set(["STORY_PURPOSE_LOCKED", "STORY_AGENT_RUN_ACTIVE"]),
+          415: new Set(["UNSUPPORTED_MEDIA_TYPE"]),
+          422: new Set(["STORY_PURPOSE_INVALID"]),
         },
       ),
     attachSource: (storyId, sourceId, relevance) =>

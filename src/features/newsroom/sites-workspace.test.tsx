@@ -101,10 +101,9 @@ describe("the Sites workspace", () => {
 
     fillCreationForm("second.example");
 
-    expect(await screen.findByRole("link", { name: "Open Second Newsroom" })).toHaveAttribute(
-      "href",
-      "/s/site-second",
-    );
+    expect(
+      await screen.findByRole("link", { name: "Open Second Newsroom and set its newsroom brief" }),
+    ).toHaveAttribute("href", "/s/site-second");
     expect(onSiteCreated).toHaveBeenCalledWith(expect.objectContaining({ id: "site-second" }));
   });
 });

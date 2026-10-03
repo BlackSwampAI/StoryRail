@@ -625,6 +625,28 @@ describe("story-client", () => {
     expect(String(fetch.mock.calls[1]![1]?.body)).not.toMatch(/operator|provenance|actor/i);
   });
 
+  it("updates only the selected intake Story purpose with the exact bounded payload", async () => {
+    const purpose = {
+      readerValue: "Readers should know what changed and what to do next.",
+      focus: "Confirmed service timing",
+    };
+    const updated = { ...STORY, purpose };
+    const fetch = vi.fn<StoryClientDependencies["fetch"]>(async () =>
+      response(200, { ok: true, story: updated }),
+    );
+    const client = createStoryClient({ siteId: SITE_ID, fetch });
+
+    await expect(client.updateStoryPurpose(STORY.id, purpose)).resolves.toEqual({
+      kind: "completed",
+      value: updated,
+    });
+    expect(fetch).toHaveBeenCalledWith(`/api/sites/site-second/stories/${STORY.id}/purpose`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ purpose }),
+    });
+  });
+
   it("accepts opaque timestamp strings from the server and domain contract", async () => {
     const opaqueInspection = {
       story: {

@@ -1,4 +1,5 @@
 import type { SiteId } from "@/domain/editorial";
+import type { PublicationBrief } from "@/domain/editorial/newsroom-standards-types";
 
 import { siteApiPath } from "./site-paths";
 
@@ -9,6 +10,7 @@ import { siteApiPath } from "./site-paths";
 export interface StandardsRevision {
   readonly revisionNumber: number;
   readonly text: string;
+  readonly brief?: PublicationBrief;
   readonly updatedAt: string;
 }
 
@@ -22,7 +24,7 @@ export type SaveStandardsResult =
 
 export interface NewsroomStandardsClient {
   readonly listRevisions: () => Promise<ListStandardsResult>;
-  readonly saveRevision: (text: string) => Promise<SaveStandardsResult>;
+  readonly saveRevision: (text: string, brief?: PublicationBrief) => Promise<SaveStandardsResult>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -34,7 +36,17 @@ function isRevision(value: unknown): value is StandardsRevision {
     isRecord(value) &&
     Number.isInteger(value.revisionNumber) &&
     typeof value.text === "string" &&
+    (value.brief === undefined || isBrief(value.brief)) &&
     typeof value.updatedAt === "string"
+  );
+}
+
+function isBrief(value: unknown): value is PublicationBrief {
+  return (
+    isRecord(value) &&
+    ["audience", "readerBenefit", "coverageCriteria", "voice", "avoid"].every(
+      (key) => typeof value[key] === "string",
+    )
   );
 }
 
@@ -60,12 +72,12 @@ export function createNewsroomStandardsClient(dependencies: {
         return { kind: "unavailable" };
       }
     },
-    async saveRevision(text) {
+    async saveRevision(text, brief) {
       try {
         const response = await dependencies.fetch(api("/newsroom-standards"), {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({ text }),
+          body: JSON.stringify(brief === undefined ? { text } : { text, brief }),
         });
         const body: unknown = await response.json();
         if (response.status !== 201 || !isRecord(body) || !isRevision(body.standards))

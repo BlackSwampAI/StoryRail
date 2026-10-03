@@ -591,6 +591,38 @@ describe("starting a whole run from the URL", () => {
     ).toBeVisible();
   });
 
+  it("keeps a focus-only URL purpose by applying the safe reader-value default", async () => {
+    const requests = autopilot();
+    render(
+      <SourceEvidenceWorkspace
+        requestSourceEvidence={request()}
+        inboxRequests={inbox()}
+        autopilotRequests={requests as never}
+      />,
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "Source URL" }), {
+      target: { value: "https://newsroom.test/apple-m5-ultra" },
+    });
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: /Run this all the way to a published post/ }),
+    );
+    fireEvent.change(screen.getByLabelText(/Anything you want us to investigate or emphasize/), {
+      target: { value: "Confirmed restoration timing" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Start Autopilot" }));
+
+    await waitFor(() =>
+      expect(requests.start).toHaveBeenCalledWith({
+        submittedUrl: "https://newsroom.test/apple-m5-ultra",
+        research: false,
+        purpose: {
+          readerValue: "Investigate what this source means for our readers",
+          focus: "Confirmed restoration timing",
+        },
+      }),
+    );
+  });
+
   it("says what the run is doing while there is still no Story to look at", async () => {
     const requests = autopilot();
     render(

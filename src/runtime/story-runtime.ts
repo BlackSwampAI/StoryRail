@@ -55,6 +55,7 @@ import {
   type RecordSourceTriageDecisionWorkflow,
 } from "@/application/source-triage";
 import { createCreateStory, type CreateStoryWorkflow } from "@/application/story-creation";
+import { createUpdateStoryPurpose } from "@/application/story-creation";
 import { createPublishStory, type PublishStoryWorkflow } from "@/application/story-publications";
 import {
   createDeliverStory,
@@ -109,6 +110,7 @@ export interface StoryRuntime {
     import("@/application/policy-runs").ReconciliationReport
   >;
   readonly createStory: CreateStoryWorkflow;
+  readonly updateStoryPurpose: ReturnType<typeof createUpdateStoryPurpose>;
   readonly attachSourceToStory: AttachSourceToStoryWorkflow;
   readonly inspectStory: StoryInspectionRepository["inspect"];
   readonly listStories: StoryListingRepository["list"];
@@ -230,6 +232,7 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
     createStoryId: () => storyId(createUuid()),
     now,
   });
+  const updateStoryPurpose = createUpdateStoryPurpose({ repository: storyRepository, now });
   const attachSourceToStory = createAttachSourceToStory({ attachmentRepository, now });
   const inspectStory: StoryInspectionRepository["inspect"] = (identity) =>
     inspectionRepository.inspect(identity);
@@ -340,6 +343,7 @@ export function createStoryRuntime(options: CreateStoryRuntimeOptions): StoryRun
     policyRuns,
     reconcileAbandonedWork,
     createStory,
+    updateStoryPurpose,
     attachSourceToStory,
     inspectStory,
     listStories,

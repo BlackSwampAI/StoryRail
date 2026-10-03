@@ -1,4 +1,5 @@
 import type { GroundingFinding } from "./article-grounding";
+import type { EditorialContextSnapshot } from "./editorial-context-types";
 import type { AssignmentProposal } from "./assignment-proposal-types";
 import type { DirectorReviewRecommendation } from "./director-review-types";
 import type { ReviewDecision } from "./review-decision-types";
@@ -43,11 +44,13 @@ export interface AgentRunFailure {
 }
 
 export interface AssignmentProposalAgentRunInput {
+  readonly editorialContext?: EditorialContextSnapshot;
   readonly story: {
     readonly id: StoryId;
     readonly title: string;
     readonly state: StoryState;
     readonly revisionCycle: number;
+    readonly purpose?: import("./story-creation-types").StoryPurpose;
   };
   readonly evidence: readonly EvidenceReference[];
   readonly unavailableSourceIds: readonly SourceId[];
@@ -84,11 +87,13 @@ export type AssignmentProposalAgentRun = AssignmentProposalAgentRunCommon &
  * recorded where the decision was made rather than inferred from attachments later.
  */
 export interface SourceResearchInput {
+  readonly editorialContext?: EditorialContextSnapshot;
   readonly story: {
     readonly id: StoryId;
     readonly title: string;
     readonly state: StoryState;
     readonly revisionCycle: number;
+    readonly purpose?: import("./story-creation-types").StoryPurpose;
   };
   readonly evidence: readonly EvidenceReference[];
   readonly unavailableSourceIds: readonly SourceId[];
@@ -126,6 +131,7 @@ export type SourceResearchAgentRun = SourceResearchAgentRunCommon &
   );
 
 export interface WriterArticleDraftAgentRunInput {
+  readonly editorialContext?: EditorialContextSnapshot;
   readonly story: AssignmentProposalAgentRunInput["story"];
   readonly assignment: {
     readonly id: AssignmentId;
@@ -214,6 +220,7 @@ export type WriterArticleRevisionAgentRun = WriterArticleRevisionAgentRunCommon 
   );
 
 export interface DirectorArticleReviewAgentRunInput {
+  readonly editorialContext?: EditorialContextSnapshot;
   readonly story: AssignmentProposalAgentRunInput["story"];
   readonly assignment: WriterArticleDraftAgentRunInput["assignment"];
   readonly article: {

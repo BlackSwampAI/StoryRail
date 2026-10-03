@@ -73,6 +73,9 @@ export interface Story {
   readonly revisionCycle: number;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly purpose?: import("./story-creation-types").StoryPurpose;
+  readonly purposeUpdatedAt?: string;
+  readonly purposeUpdatedBy?: OperatorActor;
 }
 
 export const AGENT_ROLES = [

@@ -3,6 +3,7 @@ import {
   recordNewsroomStandards,
   type NewsroomStandards,
   type OperatorActor,
+  type PublicationBrief,
 } from "@/domain/editorial";
 
 import type { NewsroomStandardsRepository } from "./newsroom-standards-repository";
@@ -27,6 +28,7 @@ export function createSetNewsroomStandards(dependencies: {
 }) {
   return async (command: {
     readonly text: string;
+    readonly brief?: PublicationBrief;
     readonly updatedBy: OperatorActor;
   }): Promise<SetNewsroomStandardsResult> => {
     const history = await dependencies.repository.list();
@@ -34,6 +36,11 @@ export function createSetNewsroomStandards(dependencies: {
       id: newsroomStandardsId(dependencies.createUuid()),
       revisionNumber: (history.at(-1)?.revisionNumber ?? 0) + 1,
       text: command.text,
+      ...(command.brief !== undefined
+        ? { brief: command.brief }
+        : history.at(-1)?.brief !== undefined
+          ? { brief: history.at(-1)!.brief }
+          : {}),
       updatedBy: command.updatedBy,
       updatedAt: dependencies.now(),
     });

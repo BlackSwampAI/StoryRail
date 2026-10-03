@@ -184,6 +184,32 @@ describe("starting autopilot from a URL over HTTP", () => {
     expect(preserve).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["blank reader value", { readerValue: "  ", focus: "Confirmed timing" }],
+    ["overlong focus", { readerValue: "Useful outcome", focus: "x".repeat(2_001) }],
+  ])("refuses a %s before runtime, provider, or policy work begins", async (_label, purpose) => {
+    const preserve = vi.fn();
+    const runtimes = harness(preserve);
+    const getRuntimes = vi.fn(() => runtimes);
+    const after = vi.fn();
+    const response = await createRunUrlAutopilotHttpHandler({
+      getRuntimes,
+      environment,
+      after,
+    })(request(JSON.stringify({ submittedUrl, purpose })));
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({
+      ok: false,
+      error: { code: "STORY_PURPOSE_INVALID" },
+    });
+    expect(getRuntimes).toHaveBeenCalledOnce();
+    expect(preserve).not.toHaveBeenCalled();
+    expect(runtimes.sourceEvidence?.extractPersistedSource).not.toHaveBeenCalled();
+    expect(runtimes.evidencePreparation?.prepareSourceEvidence).not.toHaveBeenCalled();
+    expect(after).not.toHaveBeenCalled();
+  });
+
   it("refuses a request that is not JSON", async () => {
     const response = await createRunUrlAutopilotHttpHandler({
       getRuntimes: () => harness(vi.fn()),

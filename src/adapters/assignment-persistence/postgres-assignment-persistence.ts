@@ -5,6 +5,7 @@ import type { Pool, QueryResultRow } from "pg";
 import type { AssignmentPersistence } from "@/application/assignments";
 import type { SiteId, Story, StoryState } from "@/domain/editorial";
 import { STORY_STATES } from "@/domain/editorial";
+import { storySchema } from "@/domain/editorial";
 
 import {
   decodePostgresAssignment,
@@ -34,7 +35,7 @@ function decodeStory(row: StoryRow): Story {
     !state(row.state) ||
     !Number.isInteger(row.revision_cycle) ||
     !record(value) ||
-    Object.keys(value).sort().join(",") !== "createdAt,id,revisionCycle,state,title,updatedAt" ||
+    !storySchema.safeParse(value).success ||
     value.id !== row.story_id ||
     value.state !== row.state ||
     value.revisionCycle !== row.revision_cycle ||

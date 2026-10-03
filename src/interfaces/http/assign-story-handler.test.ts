@@ -66,6 +66,7 @@ function runtimeWith(assignStory: StoryRuntime["assignStory"]): StoryRuntime {
     policyRuns: vi.fn() as never,
     reconcileAbandonedWork: vi.fn() as never,
     createStory: vi.fn<StoryRuntime["createStory"]>(),
+    updateStoryPurpose: vi.fn<StoryRuntime["updateStoryPurpose"]>(),
     attachSourceToStory: vi.fn<StoryRuntime["attachSourceToStory"]>(),
     inspectStory: vi.fn<StoryRuntime["inspectStory"]>(),
     listStories: vi.fn<StoryRuntime["listStories"]>(),

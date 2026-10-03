@@ -56,6 +56,13 @@ export const storySnapshotSchema = z
     title: nonEmptyText,
     state: z.enum(STORY_STATES),
     revisionCycle: z.number().int().min(0).max(2),
+    purpose: z
+      .object({
+        readerValue: nonEmptyText.refine((value) => value.length <= 2_000),
+        focus: z.string().refine((value) => value.length <= 2_000),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 

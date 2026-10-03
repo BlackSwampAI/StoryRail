@@ -26,11 +26,12 @@ import {
   type StoryId,
   type TransitionId,
 } from "@/domain/editorial";
+import { resolveEditorialContext } from "@/application/editorial-context";
 
 import { correctedCitedBlocks } from "./correct-cited-blocks";
 import type { WriterDraftPersistence } from "./writer-draft-persistence";
 
-export const WRITER_DRAFT_PROMPT = Object.freeze({ key: "storyrail_writer_draft", version: "1" });
+export const WRITER_DRAFT_PROMPT = Object.freeze({ key: "storyrail_writer_draft", version: "2" });
 export const articleCitationOutputSchema = z
   .object({
     sourceId: z.string().trim().min(1),
@@ -77,7 +78,7 @@ export function citedArticleBlocks(
 }
 
 export function writerSystemPrompt(profileInstructions: string): string {
-  return `You are StoryRail's supervised Writer. Create only the first Article draft requested by the durable Assignment. Follow its angle, brief, constraints, and the immutable Writer Profile instructions below. Return only the requested structured draft output.
+  return `You are StoryRail's supervised Writer. Create only the first Article draft requested by the durable Assignment. Follow its angle, brief, constraints, Story purpose, and publication context: serve the intended audience, deliver the promised reader benefit, and satisfy coverage criteria. Treat purpose as a question to investigate, not evidence or a predetermined conclusion; do not imply sources answered it when they did not. Follow the immutable Writer Profile instructions below. Return only the requested structured draft output.
 
 Write the Article as an ordered list of blocks rather than one block of prose, and label each block with what kind of sentence it is.
 
@@ -167,6 +168,9 @@ export function createWriterDraft(dependencies: {
   readonly readNewsroomStandards?: () => Promise<string | null>;
   /** Who this newsroom is, read when the run starts. A newsroom that has said nothing is normal. */
   readonly readNewsroomIdentity?: () => Promise<NewsroomIdentity | null>;
+  readonly readEditorialContext?: () => Promise<
+    import("@/domain/editorial").EditorialContextSnapshot
+  >;
   readonly now: () => string;
 }) {
   return async (command: {
@@ -267,6 +271,7 @@ export function createWriterDraft(dependencies: {
     const resolved = await dependencies.resolveModel(writerProfile.model);
     if (!resolved.ok) return { ok: false, error: { ...resolved.error, storyId: story.id } };
     const id = dependencies.createAgentRunId();
+    const editorialContext = await resolveEditorialContext(dependencies);
     const startedAt = dependencies.now();
 
     const input = {
@@ -275,7 +280,9 @@ export function createWriterDraft(dependencies: {
         title: story.title,
         state: story.state,
         revisionCycle: story.revisionCycle,
+        ...(story.purpose ? { purpose: story.purpose } : {}),
       },
+      ...(editorialContext.snapshot ? { editorialContext: editorialContext.snapshot } : {}),
       assignment: {
         id: assignment.id,
         storyId: assignment.storyId,
@@ -344,15 +351,8 @@ export function createWriterDraft(dependencies: {
     };
 
     const execute = async (): Promise<CreateWriterDraftResult> => {
-      const standards = (await dependencies.readNewsroomStandards?.()) ?? null;
-      const newsroom = (await dependencies.readNewsroomIdentity?.()) ?? null;
       const modelInput = {
-        story: {
-          id: story.id,
-          title: story.title,
-          state: story.state,
-          revisionCycle: story.revisionCycle,
-        },
+        story: input.story,
         assignment,
         evidence: selected.map(({ reference, document }) => ({ ...reference, document })),
         unavailableSourceIds,
@@ -366,8 +366,8 @@ export function createWriterDraft(dependencies: {
         .generateStructured({
           systemPrompt: withNewsroomStandards(
             writerSystemPrompt(writerProfile.instructions),
-            standards,
-            newsroom,
+            editorialContext.standards,
+            editorialContext.identity,
           ),
           input: modelInput,
           schema: writerDraftOutputSchema,
@@ -388,8 +388,8 @@ export function createWriterDraft(dependencies: {
             model: resolved.model,
             systemPrompt: withNewsroomStandards(
               writerSystemPrompt(writerProfile.instructions),
-              standards,
-              newsroom,
+              editorialContext.standards,
+              editorialContext.identity,
             ),
             input: modelInput,
             schema: writerDraftOutputSchema,

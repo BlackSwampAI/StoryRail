@@ -19,6 +19,18 @@ interface ObservedPolicyRun {
   readonly requestedBy: { readonly type: string; readonly operatorId: string };
 }
 
+const AUTOPILOT_PURPOSE = {
+  readerValue: "Residents should know when harbour service returns.",
+  focus: "Confirmed restoration timing",
+};
+const HARBOUR_BRIEF = {
+  audience: "Harbour district residents",
+  readerBenefit: "Know what changed and what to do next.",
+  coverageCriteria: "Local services and their effects on residents.",
+  voice: "Direct and calm.",
+  avoid: "Speculation about causes.",
+};
+
 test("runs a URL to a delivered WordPress post through the newsroom UI under autopilot", async ({
   page,
   request,
@@ -26,6 +38,22 @@ test("runs a URL to a delivered WordPress post through the newsroom UI under aut
   test.setTimeout(240_000);
   const site = await createAcceptanceSite(request, "autopilot");
   await configureAcceptanceProviders(request, site);
+  const savedBrief = await request.post(`${site.api}/newsroom-standards`, {
+    data: { text: "Use direct, sentence-case headlines.", brief: HARBOUR_BRIEF },
+  });
+  expect(savedBrief.status()).toBe(201);
+  const revision = (
+    (await savedBrief.json()) as {
+      standards: {
+        revisionNumber: number;
+        text: string;
+        brief: typeof HARBOUR_BRIEF;
+        id: string;
+        updatedAt: string;
+        updatedBy: { type: string; operatorId: string };
+      };
+    }
+  ).standards;
   const submittedUrl = `https://${site.domain}/harbour-notice`;
 
   // The operator opens the newsroom and chooses to add a Source.
@@ -38,14 +66,23 @@ test("runs a URL to a delivered WordPress post through the newsroom UI under aut
   // The operator authorizes autopilot for this URL and submits it.
   await page.getByRole("textbox", { name: "Source URL" }).fill(submittedUrl);
   await page.getByRole("checkbox", { name: /Run this all the way to a published post/ }).check();
-  await expect(
-    page.getByRole("checkbox", { name: /Look for more Sources first/ }),
-  ).not.toBeChecked();
+  await page
+    .getByLabel("Why does this matter to your readers?")
+    .fill(AUTOPILOT_PURPOSE.readerValue);
+  await page
+    .getByLabel("Anything you want us to investigate or emphasize?")
+    .fill(AUTOPILOT_PURPOSE.focus);
+  await page.getByRole("checkbox", { name: /Look for more Sources first/ }).check();
   const autopilotResponse = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" && response.url().endsWith(`${site.api}/autopilot`),
   );
+  const requestBody = page.waitForRequest(
+    (candidate) =>
+      candidate.method() === "POST" && candidate.url().endsWith(`${site.api}/autopilot`),
+  );
   await page.getByRole("button", { name: "Start Autopilot" }).click();
+  expect((await requestBody).postDataJSON()).toMatchObject({ purpose: AUTOPILOT_PURPOSE });
 
   // Intake is durable before the response, and everything after it is followed as progress.
   const started = await autopilotResponse;
@@ -84,7 +121,7 @@ test("runs a URL to a delivered WordPress post through the newsroom UI under aut
   const policyRun = await readPolicyRun();
   expect(policyRun).toMatchObject({
     policy: "autopilot",
-    research: false,
+    research: true,
     status: "settled",
     conclusion: "completed",
     reason: "The policy ran to delivery.",
@@ -100,7 +137,12 @@ test("runs a URL to a delivered WordPress post through the newsroom UI under aut
   expect(inspected.ok()).toBeTruthy();
   const { inspection } = (await inspected.json()) as {
     inspection: {
-      story: { title: string; state: string; revisionCycle: number };
+      story: {
+        title: string;
+        state: string;
+        revisionCycle: number;
+        purpose?: typeof AUTOPILOT_PURPOSE;
+      };
       sources: readonly {
         source: { id: string };
         attachment: { relevance: string };
@@ -112,12 +154,21 @@ test("runs a URL to a delivered WordPress post through the newsroom UI under aut
       } | null;
       article: { revisions: readonly unknown[] };
       reviewDecisions: readonly { decision: string; reason: string }[];
-      agentRuns: readonly { role: string; operation: string; outcome: string }[];
+      agentRuns: readonly {
+        role: string;
+        operation: string;
+        outcome: string;
+        input: {
+          editorialContext?: unknown;
+          story?: { purpose?: typeof AUTOPILOT_PURPOSE };
+        };
+      }[];
       deliveries: readonly { outcome: string; remoteId: string; destination: string }[];
     };
   };
   expect(inspection.story.title).toBe("Harbour service notice");
   expect(inspection.story.state).toBe("published");
+  expect(inspection.story.purpose).toEqual(AUTOPILOT_PURPOSE);
   expect(inspection.sources).toHaveLength(1);
   expect(inspection.sources[0]?.source.id).toBe(startedBody.sourceId);
   expect(inspection.sources[0]?.attachment.relevance).toBe(AUTOPILOT_SOURCE_RELEVANCE);
@@ -129,6 +180,19 @@ test("runs a URL to a delivered WordPress post through the newsroom UI under aut
     },
   });
   expect(inspection.article.revisions).toHaveLength(2);
+  const expectedEditorialContext = {
+    identity: {
+      name: "Acceptance Newsroom autopilot",
+      description: "Isolated newsroom for the autopilot acceptance journey.",
+    },
+    standards: revision,
+  };
+  for (const run of inspection.agentRuns) {
+    expect(run.input.editorialContext).toEqual(expectedEditorialContext);
+  }
+  expect(
+    inspection.agentRuns.find(({ role }) => role === "researcher")?.input.story?.purpose,
+  ).toEqual(AUTOPILOT_PURPOSE);
   expect(inspection.reviewDecisions).toEqual([
     expect.objectContaining({
       decision: "request_changes",
@@ -139,6 +203,7 @@ test("runs a URL to a delivered WordPress post through the newsroom UI under aut
   expect(
     inspection.agentRuns.map(({ role, operation, outcome }) => ({ role, operation, outcome })),
   ).toEqual([
+    { role: "researcher", operation: "source_research", outcome: "succeeded" },
     { role: "assignment_editor", operation: "assignment_proposal", outcome: "succeeded" },
     { role: "writer", operation: "article_draft", outcome: "succeeded" },
     { role: "editor_in_chief", operation: "article_review", outcome: "succeeded" },

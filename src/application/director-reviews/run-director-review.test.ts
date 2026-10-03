@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { settleAgentRun } from "@/test/settle-agent-run";
+import { HARBOUR_EDITORIAL_CONTEXT } from "@/test/editorial-context";
 import type { StructuredModel, StructuredModelRequest } from "@/application/model";
 import {
   agentProfileId,
@@ -180,6 +181,7 @@ describe("run Director review", () => {
     // Whether a piece belongs here is a judgement about the publication, so the Director is told
     // what this one is — under the same guard that it may not soften evidence or citation rules.
     const facts = fixture();
+    const completedRuns: AgentRun[] = [];
     const generateStructured = vi.fn(async () => ({
       ok: true as const,
       output: {
@@ -208,7 +210,10 @@ describe("run Director review", () => {
       },
       runs: {
         append: vi.fn(async (run) => ({ ok: true as const, run })),
-        complete: vi.fn(async (run) => ({ ok: true as const, run })),
+        complete: vi.fn(async (run) => {
+          completedRuns.push(run);
+          return { ok: true as const, run };
+        }),
         listByStoryId: vi.fn(),
       },
       resolveModel: async () => ({
@@ -221,11 +226,7 @@ describe("run Director review", () => {
         },
       }),
       createAgentRunId: () => agentRunId("director-run-38"),
-      readNewsroomIdentity: async () => ({
-        name: "Black Swamp AI",
-        description: "Guides, Tips and News from the AI World",
-      }),
-      readNewsroomStandards: async () => "Headlines are sentence case.",
+      readEditorialContext: async () => structuredClone(HARBOUR_EDITORIAL_CONTEXT),
       now: () => "now",
     });
 
@@ -236,10 +237,18 @@ describe("run Director review", () => {
     const prompt = (
       generateStructured.mock.calls[0] as unknown as [StructuredModelRequest<unknown>]
     )[0].systemPrompt;
-    expect(prompt).toContain("Black Swamp AI");
-    expect(prompt).toContain("Guides, Tips and News from the AI World");
+    expect(prompt).toContain("Harbour Ledger");
+    expect(prompt).toContain("Harbour district residents");
+    expect(prompt).toContain("Know what changed and what to do next.");
     expect(prompt).toContain("never relaxes the rules above about evidence");
-    expect(prompt).toContain("Headlines are sentence case.");
+    expect(prompt).toContain("Use direct, sentence-case headlines.");
+    expect(completedRuns.at(-1)?.input.editorialContext).toEqual(HARBOUR_EDITORIAL_CONTEXT);
+    const modelInput = (
+      generateStructured.mock.calls[0] as unknown as [StructuredModelRequest<unknown>]
+    )[0].input;
+    expect(modelInput).toMatchObject({
+      evidence: [{ document: { content: "Evidence A" } }],
+    });
   });
 
   it("resolves the Writer run's exact historical evidence and stores references without bodies", async () => {

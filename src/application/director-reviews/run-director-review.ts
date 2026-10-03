@@ -21,10 +21,11 @@ import {
   type ModelDescriptor,
   type StoryId,
 } from "@/domain/editorial";
+import { resolveEditorialContext } from "@/application/editorial-context";
 
 export const DIRECTOR_REVIEW_PROMPT = Object.freeze({
   key: "storyrail_director_review",
-  version: "1",
+  version: "2",
 });
 
 const checkSchema = z
@@ -53,7 +54,7 @@ export const directorReviewOutputSchema = z
   .strict();
 
 export function directorSystemPrompt(profileInstructions: string): string {
-  return `You are StoryRail's supervised Director / Editor-in-Chief. Review only the supplied current Article Revision against its durable Assignment and the exact evidence supplied. Evaluate Assignment alignment (angle, brief, constraints), claim support, factual grounding (claims, quotations, attribution, and timeline details), headline support, structure, and prose/style.
+  return `You are StoryRail's supervised Director / Editor-in-Chief. Review only the supplied current Article Revision against its durable Assignment, Story purpose, publication context, and the exact evidence supplied. Treat Story purpose as a question to investigate, not evidence, and say when available sources cannot answer it. The assignment check must assess audience relevance, promised reader usefulness, coverage criteria, focus, and Assignment alignment (angle, brief, constraints). The style check must assess publication voice and avoided practices. Also assess claim support, factual grounding (claims, quotations, attribution, and timeline details), headline support, and structure.
 
 Each claim in the Article arrives with the passage it cites, already checked to appear verbatim in the evidence. That check proves the passage exists; it does not prove the claim is a fair reading of it. The "support" check is yours: for each claim, decide whether the cited passage actually establishes what the claim asserts, and mark it needs_changes when a claim overstates, generalises beyond, or misreads its passage.
 
@@ -129,6 +130,9 @@ export function createRunDirectorReview(dependencies: {
   readonly readNewsroomStandards?: () => Promise<string | null>;
   /** Who this newsroom is, read when the run starts. A newsroom that has said nothing is normal. */
   readonly readNewsroomIdentity?: () => Promise<NewsroomIdentity | null>;
+  readonly readEditorialContext?: () => Promise<
+    import("@/domain/editorial").EditorialContextSnapshot
+  >;
   readonly now: () => string;
 }) {
   return async (command: {
@@ -257,6 +261,7 @@ export function createRunDirectorReview(dependencies: {
     if (!resolved.ok) return { ok: false, error: { ...resolved.error, storyId: story.id } };
 
     const id = dependencies.createAgentRunId();
+    const editorialContext = await resolveEditorialContext(dependencies);
     const startedAt = dependencies.now();
     const input = {
       story: {
@@ -264,7 +269,9 @@ export function createRunDirectorReview(dependencies: {
         title: story.title,
         state: story.state,
         revisionCycle: story.revisionCycle,
+        ...(story.purpose ? { purpose: story.purpose } : {}),
       },
+      ...(editorialContext.snapshot ? { editorialContext: editorialContext.snapshot } : {}),
       assignment: {
         id: assigned.assignment.id,
         storyId: assigned.assignment.storyId,
@@ -321,14 +328,12 @@ export function createRunDirectorReview(dependencies: {
     // The run is durable now, so the caller can stop waiting. Only the model call and the
     // completion it produces continue past this point.
     const completion = (async (): Promise<RunDirectorReviewResult> => {
-      const standards = (await dependencies.readNewsroomStandards?.()) ?? null;
-      const newsroom = (await dependencies.readNewsroomIdentity?.()) ?? null;
       const generated = await resolved.model
         .generateStructured({
           systemPrompt: withNewsroomStandards(
             directorSystemPrompt(profile.instructions),
-            standards,
-            newsroom,
+            editorialContext.standards,
+            editorialContext.identity,
           ),
           input: {
             ...input,

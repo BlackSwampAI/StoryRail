@@ -40,6 +40,34 @@ export const modelFailureSchema = z
   .strict();
 
 const evidence = z.array(evidenceReferenceSchema).min(1);
+const editorialContext = z
+  .object({
+    identity: z
+      .object({ name: z.string().max(2_000), description: z.string().max(8_000) })
+      .strict()
+      .nullable(),
+    standards: z
+      .object({
+        id: nonEmptyText,
+        revisionNumber: z.number().int().min(1),
+        text: z.string().max(8_000),
+        brief: z
+          .object({
+            audience: z.string().max(2_000),
+            readerBenefit: z.string().max(2_000),
+            coverageCriteria: z.string().max(2_000),
+            voice: z.string().max(2_000),
+            avoid: z.string().max(2_000),
+          })
+          .strict()
+          .optional(),
+        updatedBy: operatorActorSchema,
+        updatedAt: nonEmptyText,
+      })
+      .strict()
+      .nullable(),
+  })
+  .strict();
 
 const assignmentSnapshot = z
   .object({
@@ -74,6 +102,7 @@ const assignmentInput = z
     evidence,
     unavailableSourceIds: z.array(nonEmptyText),
     writerProfileIds: z.array(nonEmptyText).min(1),
+    editorialContext: editorialContext.optional(),
   })
   .strict();
 
@@ -82,6 +111,7 @@ const researchInput = z
     story: storySnapshotSchema,
     evidence,
     unavailableSourceIds: z.array(nonEmptyText),
+    editorialContext: editorialContext.optional(),
   })
   .strict();
 
@@ -91,6 +121,7 @@ const writerInput = z
     assignment: assignmentSnapshot,
     evidence,
     unavailableSourceIds: z.array(nonEmptyText),
+    editorialContext: editorialContext.optional(),
   })
   .strict();
 
@@ -121,6 +152,7 @@ const directorInput = z
     revision: revisionSnapshot,
     evidence,
     unavailableSourceIds: z.array(nonEmptyText),
+    editorialContext: editorialContext.optional(),
   })
   .strict();
 

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { settleAgentRun } from "@/test/settle-agent-run";
+import { HARBOUR_EDITORIAL_CONTEXT } from "@/test/editorial-context";
 import type { SourceExtractor } from "@/adapters/source-extraction";
 import type { ArchiveRepository } from "@/application/archive";
 import type { WebSearchProvider } from "@/application/web-search";
@@ -16,6 +17,7 @@ import {
   storyId,
   type AgentProfile,
   type AgentRun,
+  type EditorialContextSnapshot,
   type AgentToolCall,
   type NewsroomIdentity,
 } from "@/domain/editorial";
@@ -108,6 +110,7 @@ function workflow(options: {
   readonly attachOk?: boolean;
   readonly archive?: ArchiveRepository;
   readonly webSearch?: WebSearchProvider;
+  readonly readEditorialContext?: () => Promise<EditorialContextSnapshot>;
   readonly readNewsroomIdentity?: () => Promise<NewsroomIdentity | null>;
   readonly readNewsroomStandards?: () => Promise<string | null>;
   readonly budget?: { readonly maximumCalls: number; readonly maximumTurns: number };
@@ -188,6 +191,7 @@ function workflow(options: {
     createExtractionId: () => sourceExtractionId(`extraction-${(ids += 1)}`),
     readNewsroomIdentity: options.readNewsroomIdentity,
     readNewsroomStandards: options.readNewsroomStandards,
+    readEditorialContext: options.readEditorialContext,
     readResearchBudget: options.budget === undefined ? undefined : async () => options.budget!,
     now: () => "now",
   });
@@ -213,18 +217,16 @@ describe("sending the Researcher out to widen a Story's evidence", () => {
     // Which sources matter depends on what this publication is for, so the Researcher is told.
     const test = workflow({
       turns: [{ kind: "output", output: { attach: [], reasoning: "Nothing to add." } }],
-      readNewsroomIdentity: async () => ({
-        name: "Black Swamp AI",
-        description: "Guides, Tips and News from the AI World",
-      }),
-      readNewsroomStandards: async () => "Headlines are sentence case.",
+      readEditorialContext: async () => structuredClone(HARBOUR_EDITORIAL_CONTEXT),
     });
 
     await settleAgentRun(test.run({ storyId: STORY, requestedBy: OPERATOR }) as never);
 
-    expect(test.prompts[0]).toContain("Black Swamp AI");
-    expect(test.prompts[0]).toContain("Guides, Tips and News from the AI World");
-    expect(test.prompts[0]).toContain("Headlines are sentence case.");
+    expect(test.prompts[0]).toContain("Harbour Ledger");
+    expect(test.prompts[0]).toContain("Harbour district residents");
+    expect(test.prompts[0]).toContain("Know what changed and what to do next.");
+    expect(test.prompts[0]).toContain("Use direct, sentence-case headlines.");
+    expect(test.completed.at(-1)?.input.editorialContext).toEqual(HARBOUR_EDITORIAL_CONTEXT);
   });
 
   it("attaches what it retrieved and records which Sources it added", async () => {

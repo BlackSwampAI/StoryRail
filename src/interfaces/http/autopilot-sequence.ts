@@ -10,6 +10,8 @@ import {
   type ModelFailureCode,
   type OperatorActor,
   type PolicyRunId,
+  type StoryPurpose,
+  validateStoryPurpose,
   type SourceExtraction,
   type SourceId,
   type StoryId,
@@ -170,7 +172,7 @@ export type StartUrlAutopilotResult =
     }
   | {
       readonly ok: false;
-      readonly stage: "preservation" | "extraction" | "policy";
+      readonly stage: "preservation" | "extraction" | "policy" | "purpose";
       readonly error: { readonly code: string; readonly message: string };
     };
 
@@ -518,6 +520,7 @@ export function createAutopilot(runtimes: AutopilotRuntimes) {
     extraction: SourceExtraction,
     operator: OperatorActor,
     wantsResearch: boolean,
+    purpose: StoryPurpose | undefined,
     progress: Progress,
   ): Promise<AutopilotResult> {
     if (runtimes.evidencePreparation === undefined)
@@ -554,6 +557,7 @@ export function createAutopilot(runtimes: AutopilotRuntimes) {
     // line before anybody had read the evidence.
     const created = await stories.createStory({
       title: extracted.document.title ?? source.canonicalUrl,
+      ...(purpose ? { purpose } : {}),
     });
     if (!created.ok) return refused(null, "story_creation", created.error);
     const storyId = created.story.id;
@@ -688,9 +692,15 @@ export function createAutopilot(runtimes: AutopilotRuntimes) {
       readonly submittedUrl: string;
       readonly requestedBy: OperatorActor;
       readonly research?: boolean;
+      readonly purpose?: StoryPurpose;
       readonly createPolicyRunId?: () => PolicyRunId;
       readonly now?: () => string;
     }): Promise<StartUrlAutopilotResult> {
+      if (command.purpose !== undefined) {
+        const validPurpose = validateStoryPurpose(command.purpose);
+        if (!validPurpose.ok) return { ok: false, stage: "purpose", error: validPurpose.error };
+        command = { ...command, purpose: validPurpose.purpose };
+      }
       const now = command.now ?? (() => new Date().toISOString());
       if (runtimes.sourceEvidence === undefined)
         return {
@@ -747,6 +757,7 @@ export function createAutopilot(runtimes: AutopilotRuntimes) {
           extraction.extraction,
           command.requestedBy,
           command.research === true,
+          command.purpose,
           progress,
         ).then((result) => progress.settle(result)),
       };
