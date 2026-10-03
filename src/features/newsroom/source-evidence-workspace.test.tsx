@@ -527,7 +527,7 @@ describe("starting a whole run from the URL", () => {
     fireEvent.click(
       screen.getByRole("checkbox", { name: /Run this all the way to a published post/ }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Run this to a published post" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start Autopilot" }));
   }
 
   it("hands the URL to autopilot instead of preserving it by hand", async () => {
@@ -552,6 +552,36 @@ describe("starting a whole run from the URL", () => {
     expect(
       await screen.findByRole("heading", { name: "Running this to a published post…" }),
     ).toBeVisible();
+  });
+
+  it("starts only after the explicit action and sends the selected research setting", async () => {
+    const requests = autopilot();
+    render(
+      <SourceEvidenceWorkspace
+        requestSourceEvidence={request()}
+        inboxRequests={inbox()}
+        autopilotRequests={requests as never}
+      />,
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "Source URL" }), {
+      target: { value: "https://newsroom.test/apple-m5-ultra" },
+    });
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: /Run this all the way to a published post/ }),
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: /Look for more Sources first/ }));
+
+    expect(requests.start).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Start Autopilot" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Start Autopilot" }));
+
+    await waitFor(() =>
+      expect(requests.start).toHaveBeenCalledWith({
+        submittedUrl: "https://newsroom.test/apple-m5-ultra",
+        research: true,
+      }),
+    );
+    expect(screen.getByText(/Story rail opens automatically/)).toBeVisible();
   });
 
   it("says what the run is doing while there is still no Story to look at", async () => {
@@ -586,7 +616,9 @@ describe("starting a whole run from the URL", () => {
     );
     chooseAutopilotAndSubmit();
 
-    await waitFor(() => expect(onAutopilotStory).toHaveBeenCalledWith("story-from-a-url"));
+    await waitFor(() =>
+      expect(onAutopilotStory).toHaveBeenCalledWith("story-from-a-url", policyRunId("policy-1")),
+    );
     expect(screen.getByText("Writing the draft — attempt 2 of 3")).toBeVisible();
   });
 

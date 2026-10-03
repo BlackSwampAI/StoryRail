@@ -793,6 +793,7 @@ function AuditPanel({
 
 export interface StoryWorkspaceProps {
   readonly inspection: StoryInspection;
+  readonly followingUrlAutopilot?: boolean;
   readonly notice?: string;
   readonly requests: StoryClient;
   readonly staff: StaffState;
@@ -840,6 +841,7 @@ export function resolveWriterDropSelection(input: {
 
 export function StoryWorkspace({
   inspection,
+  followingUrlAutopilot = false,
   notice,
   requests,
   staff,
@@ -904,6 +906,7 @@ export function StoryWorkspace({
   useEffect(() => {
     observedStateRef.current = story.state;
   }, [story.state]);
+  const [receivedInspection, setReceivedInspection] = useState(inspection);
   const [runs, setRuns] = useState<readonly AgentRun[]>(agentRuns);
   // Tool calls arrive with the inspection and are refreshed by the same polls that follow the
   // runs, so the list grows while a run is still working rather than only once it has finished.
@@ -921,6 +924,12 @@ export function StoryWorkspace({
     readonly progress: string;
     readonly observedAt: number;
   } | null>(null);
+  if (receivedInspection !== inspection) {
+    setReceivedInspection(inspection);
+    setRuns(agentRuns);
+    setToolCalls(inspection.toolCalls);
+    if (agentRuns.some(isSuccessfulProposal)) setProposalReady(true);
+  }
 
   // A run recorded as in flight is the authority on what is happening, not local component
   // state. Reopening the Story mid-run therefore rejoins it instead of showing an idle
@@ -1202,7 +1211,7 @@ export function StoryWorkspace({
 
   const anythingRunning = runningOperations.size > 0;
   useEffect(() => {
-    if (!anythingRunning) return;
+    if (!anythingRunning || followingUrlAutopilot) return;
     let active = true;
     const timer = setInterval(() => {
       void (async () => {
@@ -1227,9 +1236,16 @@ export function StoryWorkspace({
       active = false;
       clearInterval(timer);
     };
-  }, [anythingRunning, requests, story.id, onWriterCompleted, onReviewStateChanged]);
+  }, [
+    anythingRunning,
+    followingUrlAutopilot,
+    requests,
+    story.id,
+    onWriterCompleted,
+    onReviewStateChanged,
+  ]);
 
-  const autopilotRunning = autopilotWatch !== null;
+  const autopilotRunning = autopilotWatch !== null || followingUrlAutopilot;
   // The in-flight poll above stops as soon as no run is running, which is true in every gap
   // between two autopilot steps. An automated run therefore needs its own follow: it keeps
   // inspecting the Story until publication, a failure, or a durable silence.
@@ -1580,11 +1596,20 @@ export function StoryWorkspace({
   const latestRevision = article?.revisions.at(-1);
   return (
     <article className={styles.storyWorkspace} aria-labelledby="workspace-story-title">
+      <StoryRail
+        state={story.state}
+        delivered={inspection.deliveries.some((delivery) => delivery.outcome === "succeeded")}
+        leftFrom={rejectionTransition?.previousState}
+        activity={
+          railActivity(runs) ??
+          (followingUrlAutopilot ? "Autopilot is continuing this Story…" : null)
+        }
+        failure={railFailure(runs)}
+      />
       <header
         className={`${styles.storyWorkspaceHeader} ${article ? styles.storyWorkspaceHeaderCompact : ""}`}
       >
         <div>
-          <p className={styles.sectionKicker}>Active work</p>
           <h1 id="workspace-story-title">{story.title}</h1>
           <div className={styles.storyMeta}>
             <span>
@@ -1595,13 +1620,6 @@ export function StoryWorkspace({
         </div>
         <span className={styles.stateBadge}>{STORY_STATE_LABELS[story.state]}</span>
       </header>
-      <StoryRail
-        state={story.state}
-        delivered={inspection.deliveries.some((delivery) => delivery.outcome === "succeeded")}
-        leftFrom={rejectionTransition?.previousState}
-        activity={railActivity(runs)}
-        failure={railFailure(runs)}
-      />
       {notice ? (
         <p role="status" className={styles.workspaceNotice}>
           {notice}

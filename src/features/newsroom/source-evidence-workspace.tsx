@@ -44,7 +44,7 @@ export interface SourceEvidenceWorkspaceProps {
    * Called the moment an automated run has a Story, so the operator is handed to the rail that
    * shows the rest of it. Everything before this point has no Story to show.
    */
-  readonly onAutopilotStory?: (storyId: StoryId) => void;
+  readonly onAutopilotStory?: (storyId: StoryId, policyRunId: PolicyRunId | null) => void;
 }
 
 /** How often the watcher asks the policy run where it has got to. */
@@ -670,7 +670,7 @@ export function SourceEvidenceWorkspace({
       );
       if (observed.run.storyId !== null) {
         active = false;
-        onAutopilotStory?.(observed.run.storyId);
+        onAutopilotStory?.(observed.run.storyId, followedRunId);
       }
     };
     void observe();
@@ -691,8 +691,9 @@ export function SourceEvidenceWorkspace({
         <p className={styles.sectionKicker}>Source intake</p>
         <h1 id="source-intake-title">Add a Source to the newsroom</h1>
         <p>
-          StoryRail preserves the URL, extracts raw evidence, and prepares it for editorial review
-          when extraction succeeds. Triage remains a separate decision in Source Inbox.
+          {autopilot
+            ? "Press Start Autopilot to begin. The Story rail opens automatically once a Story is ready."
+            : "StoryRail preserves the URL, extracts raw evidence, and prepares it for editorial review when extraction succeeds. Triage remains a separate decision in Source Inbox."}
         </p>
       </header>
 
@@ -714,7 +715,7 @@ export function SourceEvidenceWorkspace({
               onChange={(event) => setSubmittedUrl(event.currentTarget.value)}
             />
             <button type="submit" disabled={pending}>
-              {autopilot ? "Run this to a published post" : "Bring into newsroom"}
+              {autopilot ? "Start Autopilot" : "Bring into newsroom"}
             </button>
           </div>
           <p className={styles.formHint}>The exact submitted value is validated on the server.</p>
@@ -735,8 +736,8 @@ export function SourceEvidenceWorkspace({
               <span>
                 Run this all the way to a published post
                 <small>
-                  Prepares the evidence, opens a Story, writes it, reviews it, publishes it, and
-                  delivers it. No human reads the Article, and every record says so.
+                  StoryRail prepares evidence, opens a Story, writes it, reviews it, publishes it,
+                  and delivers it. The operator does not read the Article, and every record says so.
                 </small>
               </span>
             </label>
@@ -844,7 +845,9 @@ export function SourceEvidenceWorkspace({
             <h2 id="autopilot-active-heading">Running this to a published post…</h2>
             <p className={styles.preparationWaitCopy}>
               {state.run === null
-                ? "The page is preserved. Nothing else has happened yet."
+                ? state.policyRunId === null
+                  ? "Starting Autopilot…"
+                  : "Autopilot has started. StoryRail is preserving the page and preparing its evidence. The Story rail opens automatically when a Story is ready."
                 : `${POLICY_RUN_STEP_LABELS[state.run.step]}${
                     (state.run.step === "writer_draft" || state.run.step === "writer_revision") &&
                     state.run.attempt > 1
