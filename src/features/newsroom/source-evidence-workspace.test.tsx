@@ -573,6 +573,11 @@ describe("starting a whole run from the URL", () => {
 
     expect(requests.start).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Start Autopilot" })).toBeVisible();
+    expect(
+      screen.getByText(
+        "Press Start Autopilot to begin. The Story rail opens automatically once a Story is ready.",
+      ),
+    ).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Start Autopilot" }));
 
     await waitFor(() =>
@@ -581,7 +586,9 @@ describe("starting a whole run from the URL", () => {
         research: true,
       }),
     );
-    expect(screen.getByText(/Story rail opens automatically/)).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { name: "Running this to a published post…" }),
+    ).toBeVisible();
   });
 
   it("says what the run is doing while there is still no Story to look at", async () => {
