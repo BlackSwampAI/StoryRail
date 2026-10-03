@@ -1,30 +1,32 @@
 import { randomUUID } from "node:crypto";
 
-import { expect, test } from "@playwright/test";
+import { expect, test, type TestInfo } from "@playwright/test";
 import { Pool } from "pg";
 
 import { createPostgresSourceRepositories } from "@/adapters/source-persistence/postgres-source-repositories";
-import { createPostgresStoryRepository } from "@/adapters/story-persistence/postgres-story-repository";
-import { createPostgresStorySourceAttachmentRepository } from "@/adapters/story-source-persistence/postgres-story-source-attachment-repository";
 import {
-  attachSourceToStory,
-  createStory,
   intakeUrlSource,
   operatorId,
   recordSourceExtraction,
   siteId,
   sourceExtractionId,
   sourceId,
-  storyId,
 } from "@/domain/editorial";
 
 const databaseUrl = process.env.STORYRAIL_TEST_DATABASE_URL as string;
 const WORKFLOW_COMPLETION_TIMEOUT = 30_000;
+const PUBLICATION_BRIEF = {
+  audience: "Harbour district residents",
+  readerBenefit: "Know what changed and what to do next.",
+  coverageCriteria: "Local services and their effects on residents.",
+  voice: "Direct and calm.",
+  avoid: "Speculation about causes.",
+};
 
-test("runs a supervised Story from evidence through WordPress delivery", async ({
+test("sets up the brief, covers a Source, edits Story purpose, and delivers under manual control", async ({
   page,
   request,
-}) => {
+}, testInfo: TestInfo) => {
   test.setTimeout(150_000);
   const unique = randomUUID();
   const domain = `journey-${unique}.acceptance.storyrail.test`;
@@ -71,7 +73,6 @@ test("runs a supervised Story from evidence through WordPress delivery", async (
   const actor = { type: "operator" as const, operatorId: operatorId("acceptance-operator") };
   const sourceIdentity = sourceId(`source-${unique}`);
   const extractionIdentity = sourceExtractionId(`extraction-${unique}`);
-  const storyIdentity = storyId(`story-${unique}`);
   try {
     const source = intakeUrlSource(
       {
@@ -101,45 +102,216 @@ test("runs a supervised Story from evidence through WordPress delivery", async (
       },
     });
     if (!extraction.ok) throw new Error("Acceptance extraction fixture is invalid.");
-    const story = createStory({
-      storyId: storyIdentity,
-      title: "Harbour service restoration",
-      createdAt: "2026-09-06T10:02:00.000Z",
-    });
-    if (!story.ok) throw new Error("Acceptance Story fixture is invalid.");
-    const attachment = attachSourceToStory({
-      storyId: storyIdentity,
-      sourceId: sourceIdentity,
-      relevance: "Primary service restoration notice",
-      attachedBy: actor,
-      attachedAt: "2026-09-06T10:03:00.000Z",
-    });
-    if (!attachment.ok) throw new Error("Acceptance attachment fixture is invalid.");
-
     const sources = createPostgresSourceRepositories({ pool, siteId: siteIdentity });
     expect((await sources.sources.persist({ source: source.source })).ok).toBe(true);
     expect((await sources.extractions.append({ extraction: extraction.extraction })).ok).toBe(true);
-    expect(
-      (
-        await createPostgresStoryRepository({ pool, siteId: siteIdentity }).persist({
-          story: story.story,
-        })
-      ).ok,
-    ).toBe(true);
-    expect(
-      (
-        await createPostgresStorySourceAttachmentRepository({
-          pool,
-          siteId: siteIdentity,
-        }).attach({ attachment: attachment.attachment })
-      ).ok,
-    ).toBe(true);
   } finally {
     await pool.end();
   }
 
   await page.goto(`/s/${encodeURIComponent(siteIdentity)}`);
+  await expect(page.getByRole("button", { name: "Inbox" })).toBeVisible();
+  await page.getByRole("button", { name: "Newsroom brief" }).click();
+  await page.getByLabel("Who do you write for?").fill(PUBLICATION_BRIEF.audience);
+  await page
+    .getByLabel("What do you help them understand or do?")
+    .fill(PUBLICATION_BRIEF.readerBenefit);
+  await page
+    .getByLabel("What makes a story worth covering?")
+    .fill(PUBLICATION_BRIEF.coverageCriteria);
+  await page.getByLabel("How should your articles sound?").fill(PUBLICATION_BRIEF.voice);
+  await page.getByLabel("What should writers avoid?").fill(PUBLICATION_BRIEF.avoid);
+  const savedBriefResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith(`${api}/newsroom-standards`),
+  );
+  await page.getByRole("button", { name: "Save newsroom brief" }).click();
+  await expect(
+    page.getByText("Saved newsroom brief as revision 1", { exact: false }),
+  ).toBeVisible();
+  const briefRevision = (
+    (await (await savedBriefResponse).json()) as {
+      standards: {
+        revisionNumber: number;
+        text: string;
+        brief: typeof PUBLICATION_BRIEF;
+        id: string;
+        updatedAt: string;
+        updatedBy: { type: string; operatorId: string };
+      };
+    }
+  ).standards;
+  await page.getByLabel("Who do you write for?").scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: testInfo.outputPath("manual-newsroom-brief-desktop-top.png"),
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "Save newsroom brief" }).scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: testInfo.outputPath("manual-newsroom-brief-desktop-bottom.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator('[data-layout="stacked"]')).toBeVisible();
+  // The desk has a separate mobile layout; re-enter the editor after its breakpoint remount.
+  await page.getByRole("button", { name: "Newsroom brief" }).click();
+  await expect(page.getByLabel("Who do you write for?")).toHaveValue(PUBLICATION_BRIEF.audience);
+  await page.getByLabel("Who do you write for?").scrollIntoViewIfNeeded();
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+    .toBeLessThanOrEqual(390);
+  await page.screenshot({
+    path: testInfo.outputPath("manual-newsroom-brief-narrow.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(page.locator("#storyrail-newsroom-layout")).toBeVisible();
+
+  // Revisit the saved revision, edit one answer, and make a new revision without rewriting history.
+  await page.getByRole("button", { name: "Inbox" }).click();
+  await page.getByRole("button", { name: "Newsroom brief" }).click();
+  await expect(page.getByLabel("What do you help them understand or do?")).toHaveValue(
+    PUBLICATION_BRIEF.readerBenefit,
+  );
+  await page
+    .getByLabel("What do you help them understand or do?")
+    .fill("Know what changed and how to respond.");
+  const updatedBriefResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith(`${api}/newsroom-standards`),
+  );
+  await page.getByRole("button", { name: "Save newsroom brief" }).click();
+  await expect(
+    page.getByText("Saved newsroom brief as revision 2", { exact: false }),
+  ).toBeVisible();
+  const secondBriefRevision = (
+    (await (await updatedBriefResponse).json()) as {
+      standards: {
+        revisionNumber: number;
+        text: string;
+        brief: typeof PUBLICATION_BRIEF;
+        id: string;
+        updatedAt: string;
+        updatedBy: { type: string; operatorId: string };
+      };
+    }
+  ).standards;
+  expect(secondBriefRevision.revisionNumber).toBe(2);
+  expect(secondBriefRevision.brief.readerBenefit).toBe("Know what changed and how to respond.");
+  const standardsHistory = await request.get(`${api}/newsroom-standards`);
+  expect(await standardsHistory.json()).toMatchObject({
+    standards: [briefRevision, secondBriefRevision],
+  });
+
+  await page.getByRole("button", { name: "Inbox" }).click();
+  await expect(page.getByRole("heading", { name: "Harbour service notice" })).toBeVisible();
+  await page.getByRole("button", { name: "Cover this" }).click();
+  await page.getByLabel("Story title").fill("Harbour service restoration");
+  await page
+    .getByLabel("Why does this matter to your readers?")
+    .fill("Residents need to know service is restored and when to use it.");
+  await page
+    .getByLabel("Anything you want us to investigate or emphasize?")
+    .fill("Confirm restoration timing.");
+  await page.getByLabel("Story title").scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: testInfo.outputPath("manual-source-triage-desktop.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator('[data-layout="stacked"]')).toBeVisible();
+  // The desktop and mobile desk layouts remount their workspaces at the breakpoint, so reopen
+  // the intake form and enter the values in this viewport before checking or capturing it.
+  await page.getByRole("button", { name: "Cover this" }).click();
+  await page.getByLabel("Story title").fill("Harbour service restoration");
+  await page
+    .getByLabel("Why does this matter to your readers?")
+    .fill("Residents need to know service is restored and when to use it.");
+  await page
+    .getByLabel("Anything you want us to investigate or emphasize?")
+    .fill("Confirm restoration timing.");
+  await page.getByLabel("Story title").scrollIntoViewIfNeeded();
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+    .toBeLessThanOrEqual(390);
+  for (const label of [
+    "Story title",
+    "Why does this matter to your readers?",
+    "Anything you want us to investigate or emphasize?",
+  ]) {
+    const bounds = await page.getByLabel(label).boundingBox();
+    expect(bounds, `${label} should be visible in the narrow viewport`).not.toBeNull();
+    expect(bounds!.x, `${label} should not be clipped on the left`).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width, `${label} should fit inside 390px`).toBeLessThanOrEqual(390);
+  }
+  const sourceTitleBounds = await page
+    .getByRole("heading", { name: "Harbour service notice" })
+    .boundingBox();
+  expect(sourceTitleBounds).not.toBeNull();
+  expect(sourceTitleBounds!.x + sourceTitleBounds!.width).toBeLessThanOrEqual(390);
+  const formBounds = await page
+    .locator("form")
+    .filter({ has: page.getByLabel("Story title") })
+    .boundingBox();
+  expect(formBounds).not.toBeNull();
+  expect(formBounds!.x).toBeGreaterThanOrEqual(0);
+  expect(formBounds!.x + formBounds!.width).toBeLessThanOrEqual(390);
+  await page.screenshot({
+    path: testInfo.outputPath("manual-source-triage-narrow.png"),
+    fullPage: true,
+  });
+  const createStoryResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" && response.url().endsWith(`${api}/stories`),
+  );
+  await page.getByRole("button", { name: "Cover this Source" }).click();
+  const storyId = ((await (await createStoryResponse).json()) as { story: { id: string } }).story
+    .id;
+  await expect(page.getByRole("button", { name: "Open Story" })).toBeVisible();
+  await page.getByRole("button", { name: "Open Story" }).click();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(page.locator("#storyrail-newsroom-layout")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "What this Story should do for readers" }),
+  ).toBeVisible();
+  await page.getByLabel("Why does this matter to your readers?").scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: testInfo.outputPath("manual-story-purpose-desktop.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator('[data-layout="stacked"]')).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Harbour service restoration, Intake/ }),
+  ).toBeVisible();
   await page.getByRole("button", { name: /Harbour service restoration, Intake/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "What this Story should do for readers" }),
+  ).toBeVisible();
+  await page.getByLabel("Why does this matter to your readers?").scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: testInfo.outputPath("manual-story-purpose-narrow.png"),
+    fullPage: true,
+  });
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+    .toBeLessThanOrEqual(390);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(page.locator("#storyrail-newsroom-layout")).toBeVisible();
+  await page.getByRole("button", { name: /Harbour service restoration, Intake/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "What this Story should do for readers" }),
+  ).toBeVisible();
+  await page
+    .getByLabel("Why does this matter to your readers?")
+    .fill("Residents need to know service is back and how that affects their commute.");
+  await page.getByRole("button", { name: "Save reader purpose" }).click();
+  await expect(
+    page.getByText("Reader purpose saved for this Story.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Who do you write for?")).toHaveCount(0);
   await page.getByRole("button", { name: "Write the Assignment myself" }).click();
   await page
     .getByRole("textbox", { name: "Angle", exact: true })
@@ -194,18 +366,27 @@ test("runs a supervised Story from evidence through WordPress delivery", async (
     page.getByRole("heading", { name: "This Story is published" }).locator(".."),
   ).toContainText("Delivered to wordpress as 412", { timeout: WORKFLOW_COMPLETION_TIMEOUT });
 
-  const inspected = await request.get(`${api}/stories/${encodeURIComponent(storyIdentity)}`);
+  const inspected = await request.get(`${api}/stories/${encodeURIComponent(storyId)}`);
   expect(inspected.ok()).toBeTruthy();
   const body = (await inspected.json()) as {
     inspection: {
-      story: { state: string };
+      story: { state: string; purpose?: { readerValue: string; focus: string } };
       article: { revisions: readonly unknown[] };
       reviewDecisions: readonly { decision: string }[];
-      agentRuns: readonly { role: string; operation: string; outcome: string }[];
+      agentRuns: readonly {
+        role: string;
+        operation: string;
+        outcome: string;
+        input: { editorialContext?: unknown };
+      }[];
       deliveries: readonly unknown[];
     };
   };
   expect(body.inspection.story.state).toBe("published");
+  expect(body.inspection.story.purpose).toEqual({
+    readerValue: "Residents need to know service is back and how that affects their commute.",
+    focus: "Confirm restoration timing.",
+  });
   expect(body.inspection.article.revisions).toHaveLength(2);
   expect(body.inspection.reviewDecisions.map(({ decision }) => decision)).toEqual([
     "request_changes",
@@ -221,6 +402,15 @@ test("runs a supervised Story from evidence through WordPress delivery", async (
     { role: "writer", operation: "article_revision" },
     { role: "editor_in_chief", operation: "article_review" },
   ]);
+  for (const run of body.inspection.agentRuns.filter(({ outcome }) => outcome === "succeeded")) {
+    expect(run.input.editorialContext).toEqual({
+      identity: {
+        name: "Supervised Journey Newsroom",
+        description: "Isolated newsroom for the supervised editorial acceptance journey.",
+      },
+      standards: secondBriefRevision,
+    });
+  }
   expect(body.inspection.deliveries).toEqual([
     expect.objectContaining({ outcome: "succeeded", remoteId: "412", destination: "wordpress" }),
   ]);

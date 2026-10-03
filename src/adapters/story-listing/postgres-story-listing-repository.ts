@@ -1,9 +1,13 @@
-import { isDeepStrictEqual } from "node:util";
-
 import type { Pool, QueryResultRow } from "pg";
 
 import type { StoryListItem, StoryListingRepository } from "@/application/story-listing";
-import { STORY_STATES, type SiteId, type Story, type StoryState } from "@/domain/editorial";
+import {
+  STORY_STATES,
+  storySchema,
+  type SiteId,
+  type Story,
+  type StoryState,
+} from "@/domain/editorial";
 
 export interface CreatePostgresStoryListingRepositoryOptions {
   readonly pool: Pool;
@@ -33,10 +37,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
-  return isDeepStrictEqual(Object.keys(value).sort(), [...keys].sort());
-}
-
 function isStoryState(value: unknown): value is StoryState {
   return typeof value === "string" && (STORY_STATES as readonly string[]).includes(value);
 }
@@ -51,7 +51,7 @@ function decodeStory(row: StoryListingRow): Story {
     (row.story_revision_cycle as number) < 0 ||
     (row.story_revision_cycle as number) > 2 ||
     !isRecord(payload) ||
-    !hasExactKeys(payload, ["id", "title", "state", "revisionCycle", "createdAt", "updatedAt"]) ||
+    !storySchema.safeParse(payload).success ||
     payload.id !== row.story_id ||
     typeof payload.title !== "string" ||
     payload.title.length === 0 ||

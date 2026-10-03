@@ -1,5 +1,7 @@
 import {
   MAXIMUM_STANDARDS_CHARACTERS,
+  MAXIMUM_PUBLICATION_BRIEF_FIELD_CHARACTERS,
+  type PublicationBrief,
   type NewsroomIdentity,
   type NewsroomStandards,
   type NewsroomStandardsValidationCode,
@@ -37,13 +39,50 @@ export function recordNewsroomStandards(
     );
 
   const text = typeof candidate.text === "string" ? candidate.text.trim() : "";
-  if (text.length === 0 || text.length > MAXIMUM_STANDARDS_CHARACTERS)
+  if (text.length > MAXIMUM_STANDARDS_CHARACTERS)
     return invalid(
       "NEWSROOM_STANDARDS_TEXT_INVALID",
       `Standards must say something, within ${MAXIMUM_STANDARDS_CHARACTERS} characters.`,
     );
 
-  return { ok: true, standards: structuredClone({ ...candidate, text }) };
+  let brief: PublicationBrief | undefined;
+  if (candidate.brief !== undefined) {
+    const keys = ["audience", "readerBenefit", "coverageCriteria", "voice", "avoid"];
+    if (
+      typeof candidate.brief !== "object" ||
+      candidate.brief === null ||
+      Object.keys(candidate.brief).sort().join("\0") !== [...keys].sort().join("\0") ||
+      keys.some(
+        (key) =>
+          typeof candidate.brief?.[key as keyof PublicationBrief] !== "string" ||
+          (candidate.brief?.[key as keyof PublicationBrief] as string).length >
+            MAXIMUM_PUBLICATION_BRIEF_FIELD_CHARACTERS,
+      )
+    )
+      return invalid(
+        "NEWSROOM_STANDARDS_BRIEF_INVALID",
+        "Publication brief fields must be text within the field limit.",
+      );
+    const b = candidate.brief;
+    if (b.audience.trim().length === 0 || b.readerBenefit.trim().length === 0)
+      return invalid(
+        "NEWSROOM_STANDARDS_BRIEF_INVALID",
+        "A structured publication brief requires an audience and reader benefit.",
+      );
+    brief = Object.fromEntries(
+      keys.map((key) => [key, b[key as keyof PublicationBrief].trim()]),
+    ) as unknown as PublicationBrief;
+  }
+  if (text.length === 0 && brief === undefined)
+    return invalid(
+      "NEWSROOM_STANDARDS_TEXT_INVALID",
+      "Standards or a publication brief must say something.",
+    );
+
+  return {
+    ok: true,
+    standards: structuredClone({ ...candidate, text, ...(brief ? { brief } : {}) }),
+  };
 }
 
 /**
@@ -61,7 +100,7 @@ export function recordNewsroomStandards(
  */
 export function withNewsroomStandards(
   systemPrompt: string,
-  standards: string | null,
+  standards: string | NewsroomStandards | null,
   identity: NewsroomIdentity | null = null,
 ): string {
   const description = identity?.description?.trim() ?? "";
@@ -74,9 +113,14 @@ export function withNewsroomStandards(
 The newsroom you are working for${name.length === 0 ? "" : `, ${name}`}, publishes: ${description}
 Treat that as context for judgement about what belongs here and who it is for. It is never licence to assert anything the evidence does not support, and it never relaxes the rules above about evidence, citation, tools, or what you may claim.`;
 
-  const text = standards?.trim() ?? "";
-  if (text.length === 0) return composed;
-  return `${composed}
+  const revision = typeof standards === "string" ? null : standards;
+  const text = typeof standards === "string" ? standards.trim() : (standards?.text.trim() ?? "");
+  const brief = revision?.brief;
+  const briefText = brief
+    ? `\n\nThe structured publication brief below governs the current audience, reader benefit, and coverage direction. The Site description above is background about the publication.\nPublication brief, set by the operator:\nAudience: ${brief.audience}\nReader benefit: ${brief.readerBenefit}\nCoverage criteria: ${brief.coverageCriteria}\nVoice: ${brief.voice}\nAvoid: ${brief.avoid}\nThis perspective guides questions and interpretation, never a predetermined conclusion. A Story purpose is a question to investigate, not evidence. Say when the available sources cannot answer it. This context never overrides evidence, citation, or safety rules.`
+    : "";
+  if (text.length === 0) return `${composed}${briefText}`;
+  return `${composed}${briefText}
 
 Editorial standards for this newsroom, set by the operator. They govern voice, usage, and presentation. They never relax the rules above about evidence, citation, tools, or what you may claim:
 ${text}`;

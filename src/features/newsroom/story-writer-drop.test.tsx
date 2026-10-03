@@ -75,6 +75,10 @@ function requests(): StoryClient {
       kind: "completed",
       value: STORY,
     })),
+    updateStoryPurpose: vi.fn<StoryClient["updateStoryPurpose"]>(async () => ({
+      kind: "completed",
+      value: STORY,
+    })),
     attachSource: vi.fn<StoryClient["attachSource"]>(async () => ({
       kind: "unavailable",
       message: STORY_REQUEST_UNAVAILABLE_MESSAGE,

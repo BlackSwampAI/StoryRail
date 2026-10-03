@@ -688,9 +688,12 @@
 .sourceWorkspace {
   display: grid;
   gap: 2rem;
+  box-sizing: border-box;
+  min-width: 0;
 }
 
 .sourceWorkspaceHeader {
+  min-width: 0;
   max-width: 52rem;
 }
 
@@ -706,6 +709,7 @@
 
 .sourceWorkspaceHeader h1 {
   font-size: clamp(2.15rem, 5vw, 4.15rem);
+  overflow-wrap: anywhere;
 }
 
 .sourceWorkspaceHeader > p:last-child {
@@ -1380,6 +1384,8 @@
 }
 
 .persistedSource {
+  box-sizing: border-box;
+  min-width: 0;
   margin-top: 1.25rem;
   border: 1px solid var(--tone-39);
   border-radius: 0.9rem;
@@ -1398,6 +1404,7 @@
 
 .persistedSource a {
   color: var(--tone-111);
+  overflow-wrap: anywhere;
 }
 
 .primarySourceFacts {
@@ -2527,6 +2534,239 @@
   resize: vertical;
   text-transform: none;
   letter-spacing: normal;
+}
+
+.briefQuestionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.briefQuestionGrid label,
+.autopilotPurpose label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.38rem;
+  color: var(--tone-142);
+  font-size: 0.9rem;
+  font-weight: 650;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.briefQuestionGrid label > span,
+.autopilotPurpose > p,
+.briefSummary header p,
+.briefHint {
+  margin: 0;
+  color: var(--tone-97);
+  font-size: 0.78rem;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.briefQuestionGrid textarea,
+.autopilotPurpose textarea {
+  width: 100%;
+  min-height: 4.2rem;
+  resize: vertical;
+  border: 1px solid var(--tone-48);
+  border-radius: 0.55rem;
+  background: rgb(var(--veil-04) / 70%);
+  color: var(--tone-152);
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  padding: 0.7rem 0.8rem;
+}
+
+.briefQuestionGrid textarea:focus-visible,
+.autopilotPurpose textarea:focus-visible {
+  outline: 2px solid var(--accent-strong, var(--tone-103));
+  outline-offset: 2px;
+}
+
+.briefSummary {
+  border: 1px solid var(--tone-45);
+  border-radius: 0.75rem;
+  background: var(--tone-07);
+  padding: 1rem 1.2rem;
+}
+
+.briefSummary h4 {
+  margin: 0;
+  color: var(--tone-142);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.1rem;
+  font-weight: 500;
+}
+
+.briefSummary ul {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.75rem 0 0;
+  padding-left: 1.2rem;
+  color: var(--tone-105);
+  font-size: 0.84rem;
+}
+
+.briefHint {
+  margin-top: -0.6rem;
+}
+
+.newSiteNextStep {
+  margin-top: 1rem;
+  border-left: 0.25rem solid var(--tone-97);
+  padding: 0.7rem 0 0.7rem 1rem;
+}
+
+.newSiteNextStep p {
+  margin: 0 0 0.65rem;
+  color: var(--tone-105);
+  line-height: 1.5;
+}
+
+.newSiteNextStep a {
+  color: var(--tone-142);
+  font-weight: 700;
+}
+
+.newsroomBriefCallout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid var(--tone-54);
+  border-radius: 0.8rem;
+  background: var(--tone-17);
+  padding: 0.9rem 1.1rem;
+}
+
+.newsroomBriefCallout strong {
+  color: var(--tone-142);
+}
+
+.newsroomBriefCallout p {
+  margin: 0.25rem 0 0;
+  color: var(--tone-97);
+  font-size: 0.82rem;
+}
+
+.newsroomBriefCallout button {
+  flex: 0 0 auto;
+  min-height: 2.7rem;
+  border: 1px solid var(--tone-54);
+  border-radius: 0.6rem;
+  background: var(--tone-49);
+  padding: 0.6rem 0.85rem;
+  color: var(--tone-154);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+@media (max-width: 680px) {
+  .newsroomBriefCallout {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+.suggestionRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 0.25rem 0;
+}
+
+.suggestionRow > span {
+  color: var(--tone-97);
+  font-size: 0.75rem;
+}
+
+.storyPurpose {
+  display: grid;
+  gap: 0.9rem;
+  border: 1px solid var(--tone-45);
+  border-radius: 0.8rem;
+  background: var(--tone-07);
+  padding: 1rem 1.2rem;
+}
+
+.storyPurpose h2 {
+  margin: 0.2rem 0 0.55rem;
+  color: var(--tone-142);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.2rem;
+  font-weight: 500;
+}
+
+.storyPurpose p {
+  color: var(--tone-105);
+  line-height: 1.5;
+}
+
+.storyPurposeCurrent {
+  margin: 0.25rem 0;
+  font-size: 0.95rem;
+}
+
+.storyPurposeEditor {
+  display: grid;
+  gap: 0.55rem;
+  max-width: 48rem;
+}
+
+.storyPurposeEditor label {
+  color: var(--tone-131);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.storyPurposeEditor textarea {
+  width: 100%;
+  min-height: 4rem;
+  resize: vertical;
+  border: 1px solid var(--tone-54);
+  border-radius: 0.6rem;
+  background: var(--tone-02);
+  padding: 0.7rem 0.85rem;
+  color: var(--tone-146);
+  font: inherit;
+  line-height: 1.5;
+}
+
+.storyPurposeEditor button {
+  justify-self: start;
+}
+
+.assignmentPurposeHint {
+  display: block;
+  margin-top: 0.3rem;
+  color: var(--tone-97);
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+
+.autopilotPurpose {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0.4rem 0 0 1.8rem;
+  border-left: 2px solid var(--tone-45);
+  padding-left: 1rem;
+}
+
+@media (max-width: 680px) {
+  .briefQuestionGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .autopilotPurpose {
+    margin-left: 0;
+  }
 }
 
 .standardsFooter {

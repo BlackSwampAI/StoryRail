@@ -193,6 +193,6 @@ describe("AgentProfilesWorkspace", () => {
     expect(listProfiles).toHaveBeenCalledTimes(2);
     const header = screen.getByRole("heading", { name: "Agent Profiles" }).parentElement;
     if (header === null) throw new Error("The Agent Profiles heading must have a header.");
-    expect(within(header).getByText(/future Assignments/)).toBeVisible();
+    expect(within(header).getByText(/future assignments and agent runs/i)).toBeVisible();
   });
 });

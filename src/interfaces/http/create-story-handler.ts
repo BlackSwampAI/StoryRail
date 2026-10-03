@@ -3,6 +3,7 @@ import type { StoryRuntime } from "@/runtime";
 
 export interface CreateStoryHttpRequestBody {
   readonly title: string;
+  readonly purpose?: { readonly readerValue: string; readonly focus: string };
 }
 
 export interface CreateStoryHttpHandlerDependencies {
@@ -32,12 +33,21 @@ function isRequestBody(value: unknown): value is CreateStoryHttpRequestBody {
     return false;
   }
 
-  const keys = Object.keys(value);
+  const keys = Object.keys(value).sort();
+  const body = value as Record<string, unknown>;
+  if (
+    !(keys.join(",") === "title" || keys.join(",") === "purpose,title") ||
+    typeof body.title !== "string"
+  )
+    return false;
+  if (body.purpose === undefined) return true;
+  if (typeof body.purpose !== "object" || body.purpose === null || Array.isArray(body.purpose))
+    return false;
+  const purpose = body.purpose as Record<string, unknown>;
   return (
-    keys.length === 1 &&
-    keys[0] === "title" &&
-    Object.prototype.hasOwnProperty.call(value, "title") &&
-    typeof (value as Record<string, unknown>).title === "string"
+    Object.keys(purpose).sort().join(",") === "focus,readerValue" &&
+    typeof purpose.readerValue === "string" &&
+    typeof purpose.focus === "string"
   );
 }
 
@@ -46,7 +56,10 @@ function statusForResult(result: CreateStoryWorkflowResult): number {
     return 201;
   }
 
-  return result.error.code === "STORY_TITLE_REQUIRED" ? 422 : 409;
+  return result.error.code === "STORY_TITLE_REQUIRED" ||
+    result.error.code === "STORY_PURPOSE_INVALID"
+    ? 422
+    : 409;
 }
 
 const UNSUPPORTED_MEDIA_TYPE_RESPONSE = Object.freeze({
@@ -101,7 +114,9 @@ export function createCreateStoryHttpHandler(
     }
 
     try {
-      const result = await dependencies.getRuntime().createStory({ title: body.title });
+      const result = await dependencies
+        .getRuntime()
+        .createStory({ title: body.title, ...(body.purpose ? { purpose: body.purpose } : {}) });
       return jsonResponse(result, statusForResult(result));
     } catch {
       return jsonResponse(INTERNAL_SERVER_ERROR_RESPONSE, 500);

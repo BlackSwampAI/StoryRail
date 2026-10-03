@@ -16,6 +16,13 @@ const unavailable = async () =>
 const requests = {
   listStories: vi.fn(unavailable),
   createStory: vi.fn(unavailable),
+  updateStoryPurpose: vi.fn<StoryClient["updateStoryPurpose"]>(async (_storyId, purpose) => ({
+    kind: "completed",
+    value: {
+      ...inspection("intake").story,
+      purpose,
+    },
+  })),
   attachSource: vi.fn(unavailable),
   inspectStory: vi.fn(unavailable),
   assignStory: vi.fn(unavailable),
@@ -42,6 +49,7 @@ function inspection(state: StoryInspection["story"]["state"]): StoryInspection {
     revisionCycle: 0,
     createdAt: "created",
     updatedAt: "updated",
+    purpose: { readerValue: "Residents should know what changed.", focus: "Confirmed timing" },
   } as const;
   const assignment = {
     id: "assignment-103",
@@ -104,11 +112,14 @@ function inspection(state: StoryInspection["story"]["state"]): StoryInspection {
   } as unknown as StoryInspection;
 }
 
-function renderWorkspace(state: StoryInspection["story"]["state"]) {
+function renderWorkspace(
+  state: StoryInspection["story"]["state"],
+  providedInspection = inspection(state),
+) {
   return render(
     <DragDropProvider>
       <StoryWorkspace
-        inspection={inspection(state)}
+        inspection={providedInspection}
         requests={requests}
         staff={{ kind: "loaded", profiles: [] }}
         onAssigned={vi.fn()}
@@ -146,6 +157,96 @@ describe("what the Story workspace tells someone who is only watching", () => {
     const rail = screen.getByRole("region", { name: "Story rail" });
     expect(within(rail).getByText("Delivered")).toBeVisible();
     expect(within(rail).getByText("Intake").closest("li")).toHaveAttribute("aria-current", "step");
+  });
+
+  it("lets an intake Story save an edited purpose while keeping it read-only after assignment", async () => {
+    const intake = renderWorkspace("intake");
+    const readerValue = screen.getByLabelText("Why does this matter to your readers?");
+    const focus = screen.getByLabelText(/Anything you want us to investigate or emphasize/);
+    expect(readerValue).toHaveValue("Residents should know what changed.");
+    expect(focus).toHaveValue("Confirmed timing");
+    fireEvent.change(readerValue, { target: { value: "Residents should know what to do next." } });
+    fireEvent.change(focus, { target: { value: "Service restoration" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save reader purpose" }));
+
+    expect(requests.updateStoryPurpose).toHaveBeenCalledWith("story-103", {
+      readerValue: "Residents should know what to do next.",
+      focus: "Service restoration",
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Reader purpose saved for this Story.",
+    );
+
+    intake.unmount();
+    renderWorkspace("assigned");
+    expect(screen.getByText("Residents should know what changed.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Save reader purpose" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("Why does this matter to your readers?"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("requires an edited purpose to be saved before asking for an Assignment suggestion", () => {
+    renderWorkspace("intake");
+    fireEvent.change(screen.getByLabelText("Why does this matter to your readers?"), {
+      target: { value: "Residents need to know what to do next." },
+    });
+    expect(requests.generateAssignmentProposal).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Draw up the Assignment" })).toBeDisabled();
+    expect(
+      screen.getByText("Save this purpose before starting research or preparing an Assignment."),
+    ).toBeVisible();
+  });
+
+  it("marks a saved purpose change while preserving the historical suggestion for editing", () => {
+    const current = inspection("intake");
+    (current as { story: { purpose: { readerValue: string; focus: string } } }).story.purpose = {
+      readerValue: "Residents should know what to do next.",
+      focus: "Service restoration",
+    };
+    const oldPurpose = {
+      readerValue: "Residents should know what changed.",
+      focus: "Confirmed timing",
+    };
+    (current as { agentRuns: readonly unknown[] }).agentRuns = [
+      {
+        id: "proposal-run-103",
+        storyId: current.story.id,
+        profileId: "assignment-editor-103",
+        role: "assignment_editor",
+        operation: "assignment_proposal",
+        outcome: "succeeded",
+        model: { provider: "test-provider", model: "assignment-test" },
+        prompt: { key: "assignment_proposal", version: "1" },
+        requestedBy: { type: "operator", operatorId: "operator-103" },
+        startedAt: "proposal-started",
+        completedAt: "proposal-completed",
+        input: {
+          story: { ...current.story, purpose: oldPurpose },
+          evidence: [],
+          unavailableSourceIds: [],
+        },
+        proposal: {
+          writerProfileId: "writer-103",
+          angle: "Keep the confirmed timeline clear.",
+          brief: "Explain the service restoration timeline.",
+          constraints: null,
+          reason: "The timing is useful to readers.",
+        },
+      },
+    ] as never;
+
+    renderWorkspace("intake", current);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /the saved reader purpose has changed since this suggestion was generated/i,
+    );
+    expect(screen.getAllByText("Keep the confirmed timeline clear.")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Edit before assigning" }));
+    expect(screen.getByLabelText("Angle")).toHaveValue("Keep the confirmed timeline clear.");
+    expect(
+      screen.getByText(/The saved reader purpose changed after this suggestion/),
+    ).toBeVisible();
   });
 
   /**

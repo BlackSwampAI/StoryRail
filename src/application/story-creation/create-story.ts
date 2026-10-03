@@ -9,6 +9,7 @@ import type { StoryIdConflictError, StoryRepository } from "../story-persistence
 
 export interface CreateStoryWorkflowCommand {
   readonly title: string;
+  readonly purpose?: import("@/domain/editorial").StoryPurpose;
 }
 
 export interface CreateStoryWorkflowDependencies {
@@ -24,7 +25,10 @@ export type CreateStoryWorkflowResult =
     }
   | {
       readonly ok: false;
-      readonly error: StoryTitleRequiredError | StoryIdConflictError;
+      readonly error:
+        | StoryTitleRequiredError
+        | StoryIdConflictError
+        | { readonly code: "STORY_PURPOSE_INVALID"; readonly message: string };
     };
 
 export type CreateStoryWorkflow = (
@@ -40,6 +44,7 @@ export function createCreateStory(
     const creationResult = createStory({
       storyId,
       title: command.title,
+      ...(command.purpose ? { purpose: command.purpose } : {}),
       createdAt,
     });
 

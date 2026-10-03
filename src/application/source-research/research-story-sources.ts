@@ -34,12 +34,13 @@ import {
   type StoryId,
   type UrlSource,
 } from "@/domain/editorial";
+import { resolveEditorialContext } from "@/application/editorial-context";
 
 import type { ResearchPersistence } from "./research-persistence";
 
 export const SOURCE_RESEARCH_PROMPT = Object.freeze({
   key: "storyrail_source_research",
-  version: "1",
+  version: "2",
 });
 
 /**
@@ -76,7 +77,7 @@ export const sourceResearchOutputSchema = z
 export function researcherSystemPrompt(profileInstructions: string): string {
   return `You are StoryRail's supervised Researcher. Your job is to widen the evidence behind one Story before anyone writes about it.
 
-You are given the Story and the evidence already gathered. Start by using the search_archive tool to find out whether this newsroom has already reported on the subject. What it returns is this newsroom's own earlier work, not evidence: read it to learn what has already been said and which Sources that reporting rested on, and never treat it as support for anything. Then use the fetch_url tool to retrieve pages that the evidence points at or plainly depends on: the announcement it summarises, the specification it cites, the earlier report it corrects. Retrieve before you judge; never attach a page you did not retrieve.
+You are given the Story, its purpose, the publication brief, and the evidence already gathered. Treat purpose as a question to investigate, never as evidence or a predetermined conclusion. Prefer sources that help serve the stated audience and reader benefit and satisfy the coverage criteria. If available sources cannot answer the purpose, leave that gap clear in relevance notes. Start by using the search_archive tool to find out whether this newsroom has already reported on the subject. What it returns is this newsroom's own earlier work, not evidence: read it to learn what has already been said and which Sources that reporting rested on, and never treat it as support for anything. Then use the fetch_url tool to retrieve pages that the evidence points at or plainly depends on: the announcement it summarises, the specification it cites, the earlier report it corrects. Retrieve before you judge; never attach a page you did not retrieve.
 
 When a web_search tool is offered, use it to find pages nobody handed you: what is already attached rarely names every source worth setting beside it. What it returns is a list of places to look — titles, addresses and engine-written snippets — and none of it is evidence. A snippet supports nothing and may never be cited; a result becomes citable only once you retrieve it with fetch_url, which is what makes it a Source. Search widely, then retrieve the few that are worth reading.
 
@@ -163,6 +164,9 @@ export function createResearchStorySources(dependencies: {
   readonly readNewsroomStandards?: () => Promise<string | null>;
   /** Who this newsroom is, read when the run starts. A newsroom that has said nothing is normal. */
   readonly readNewsroomIdentity?: () => Promise<NewsroomIdentity | null>;
+  readonly readEditorialContext?: () => Promise<
+    import("@/domain/editorial").EditorialContextSnapshot
+  >;
   readonly now: () => string;
   /**
    * The budget, read when a run starts rather than when the workflow is built, so an operator
@@ -249,6 +253,7 @@ export function createResearchStorySources(dependencies: {
     if (!resolved.ok) return { ok: false, error: { ...resolved.error, storyId: story.id } };
 
     const id = dependencies.createAgentRunId();
+    const editorialContext = await resolveEditorialContext(dependencies);
     const startedAt = dependencies.now();
     const input = {
       story: {
@@ -256,7 +261,9 @@ export function createResearchStorySources(dependencies: {
         title: story.title,
         state: story.state,
         revisionCycle: story.revisionCycle,
+        ...(story.purpose ? { purpose: story.purpose } : {}),
       },
+      ...(editorialContext.snapshot ? { editorialContext: editorialContext.snapshot } : {}),
       evidence,
       unavailableSourceIds: [],
     };
@@ -324,16 +331,14 @@ export function createResearchStorySources(dependencies: {
         maximumCalls: DEFAULT_RESEARCH_CALL_BUDGET,
         maximumTurns: DEFAULT_RESEARCH_TURN_BUDGET,
       };
-      const standards = (await dependencies.readNewsroomStandards?.()) ?? null;
-      const newsroom = (await dependencies.readNewsroomIdentity?.()) ?? null;
       const { result } = await runToolAssisted({
         model: resolved.model,
         registry,
         calls: dependencies.toolCalls,
         systemPrompt: withNewsroomStandards(
           researcherSystemPrompt(profile.instructions),
-          standards,
-          newsroom,
+          editorialContext.standards,
+          editorialContext.identity,
         ),
         input: { story: input.story, evidence: known },
         schema: sourceResearchOutputSchema,

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { settleAgentRun } from "@/test/settle-agent-run";
+import { HARBOUR_EDITORIAL_CONTEXT } from "@/test/editorial-context";
 import { createWriterDraft } from "./create-writer-draft";
 import type { WriterDraftPersistence } from "./writer-draft-persistence";
 import type { StructuredModel, StructuredModelRequest } from "@/application/model";
@@ -144,6 +145,7 @@ describe("createWriterDraft", () => {
     // A Writer that knows who the newsroom serves pitches the piece at them, and the guard on
     // that context is what keeps it from becoming a licence to assert more than the evidence.
     const facts = fixture();
+    const persistedRuns: AgentRun[] = [];
     const generateStructured = vi.fn(async () => ({
       ok: true as const,
       output: {
@@ -168,14 +170,17 @@ describe("createWriterDraft", () => {
         listByStoryId: vi.fn(),
       },
       persistence: {
-        persist: vi.fn<WriterDraftPersistence["persist"]>(async (command) => ({
-          ok: true as const,
-          run: command.run,
-          article: command.article,
-          revision: command.revision,
-          story: command.story,
-          transitionReceipt: command.transitionReceipt,
-        })),
+        persist: vi.fn<WriterDraftPersistence["persist"]>(async (command) => {
+          persistedRuns.push(command.run);
+          return {
+            ok: true as const,
+            run: command.run,
+            article: command.article,
+            revision: command.revision,
+            story: command.story,
+            transitionReceipt: command.transitionReceipt,
+          };
+        }),
       },
       resolveModel: async () => ({
         ok: true,
@@ -190,11 +195,7 @@ describe("createWriterDraft", () => {
       createArticleId: () => articleId("article-31"),
       createRevisionId: () => articleRevisionId("revision-31"),
       createTransitionId: () => transitionId("transition-31"),
-      readNewsroomIdentity: async () => ({
-        name: "Black Swamp AI",
-        description: "Guides, Tips and News from the AI World",
-      }),
-      readNewsroomStandards: async () => "Headlines are sentence case.",
+      readEditorialContext: async () => structuredClone(HARBOUR_EDITORIAL_CONTEXT),
       now: () => "now",
     });
 
@@ -205,10 +206,12 @@ describe("createWriterDraft", () => {
     const prompt = (
       generateStructured.mock.calls[0] as unknown as [StructuredModelRequest<unknown>]
     )[0].systemPrompt;
-    expect(prompt).toContain("Black Swamp AI");
-    expect(prompt).toContain("Guides, Tips and News from the AI World");
+    expect(prompt).toContain("Harbour Ledger");
+    expect(prompt).toContain("Harbour district residents");
+    expect(prompt).toContain("Know what changed and what to do next.");
     expect(prompt).toContain("never relaxes the rules above about evidence");
-    expect(prompt).toContain("Headlines are sentence case.");
+    expect(prompt).toContain("Use direct, sentence-case headlines.");
+    expect(persistedRuns.at(-1)?.input.editorialContext).toEqual(HARBOUR_EDITORIAL_CONTEXT);
   });
 
   it("uses prepared Assignment evidence, records unavailable Sources, and persists Revision 1", async () => {
@@ -407,8 +410,9 @@ describe("createWriterDraft", () => {
     );
   });
 
-  it("terminalizes a durable run when a local read rejects before the model call", async () => {
+  it("does not start a durable run when editorial context cannot be read", async () => {
     const facts = fixture();
+    const append = vi.fn(async (run: AgentRun) => ({ ok: true as const, run }));
     const complete = vi.fn(async (run: AgentRun) => ({ ok: true as const, run }));
     const generateStructured = vi.fn();
     const workflow = createWriterDraft({
@@ -416,7 +420,7 @@ describe("createWriterDraft", () => {
         inspect: vi.fn(async () => ({ ok: true as const, inspection: facts.inspection })),
       },
       runs: {
-        append: vi.fn(async (run: AgentRun) => ({ ok: true as const, run })),
+        append,
         complete,
         listByStoryId: vi.fn(),
       },
@@ -440,32 +444,29 @@ describe("createWriterDraft", () => {
     });
 
     await expect(
-      settleAgentRun(
-        workflow({ storyId: facts.story.id, requestedBy: facts.assignment.assignedBy }),
-      ),
-    ).resolves.toMatchObject({
-      ok: true,
-      run: {
-        outcome: "failed",
-        failure: { code: "MODEL_RUN_ABANDONED", retryable: true },
-      },
-    });
+      workflow({ storyId: facts.story.id, requestedBy: facts.assignment.assignedBy }),
+    ).rejects.toThrow("database connection disappeared");
+    expect(append).not.toHaveBeenCalled();
     expect(generateStructured).not.toHaveBeenCalled();
-    expect(complete).toHaveBeenCalledOnce();
+    expect(complete).not.toHaveBeenCalled();
   });
 
-  it("rejects recovery when completion returns a different durable run", async () => {
+  it("rejects a mismatched durable recovery after the model throws", async () => {
     const facts = fixture();
+    const complete = vi.fn(async (run: AgentRun) => ({
+      ok: true as const,
+      run: { ...run, id: agentRunId("another-run") },
+    }));
+    const generateStructured = vi.fn(() => {
+      throw new Error("model connection disappeared");
+    });
     const workflow = createWriterDraft({
       inspections: {
         inspect: vi.fn(async () => ({ ok: true as const, inspection: facts.inspection })),
       },
       runs: {
         append: vi.fn(async (run: AgentRun) => ({ ok: true as const, run })),
-        complete: vi.fn(async (run: AgentRun) => ({
-          ok: true as const,
-          run: { ...run, id: agentRunId("another-run") },
-        })),
+        complete,
         listByStoryId: vi.fn(),
       },
       persistence: { persist: vi.fn() },
@@ -474,13 +475,11 @@ describe("createWriterDraft", () => {
         model: {
           descriptor: { provider: "openrouter", model: "writer" },
           limits: { maximumInputCharacters: 60_000 },
-          generateStructured: vi.fn() as StructuredModel["generateStructured"],
+          generateStructured: generateStructured as StructuredModel["generateStructured"],
         },
       }),
-      readNewsroomStandards: async () => {
-        throw new Error("database connection disappeared");
-      },
-      createAgentRunId: () => agentRunId("run-invalid-recovery"),
+      readEditorialContext: async () => structuredClone(HARBOUR_EDITORIAL_CONTEXT),
+      createAgentRunId: () => agentRunId("run-completion-mismatch"),
       createArticleId: () => articleId("unused"),
       createRevisionId: () => articleRevisionId("unused"),
       createTransitionId: () => transitionId("unused"),
@@ -492,6 +491,10 @@ describe("createWriterDraft", () => {
         workflow({ storyId: facts.story.id, requestedBy: facts.assignment.assignedBy }),
       ),
     ).rejects.toThrow("The durable abandoned Writer AgentRun changed unexpectedly.");
+    expect(generateStructured).toHaveBeenCalledOnce();
+    expect(complete).toHaveBeenCalledWith(
+      expect.objectContaining({ id: agentRunId("run-completion-mismatch"), outcome: "failed" }),
+    );
   });
 
   it.each([

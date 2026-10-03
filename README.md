@@ -113,6 +113,7 @@ PostgreSQL integration and browser tests require a disposable database named `st
 - [Product vision](docs/product/vision.md)
 - [MVP scope and current limitations](docs/product/mvp.md)
 - [Terminology](docs/product/terminology.md)
+- [Publication direction, story purpose, and editorial evaluation](docs/product/editorial-context.md)
 - [Architecture decisions](docs/architecture/README.md)
 - [Generated OpenWiki technical documentation](openwiki/index.md) (optional; refresh locally when needed)
 

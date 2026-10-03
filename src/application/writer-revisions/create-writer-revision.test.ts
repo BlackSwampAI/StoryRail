@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { settleAgentRun } from "@/test/settle-agent-run";
+import { HARBOUR_EDITORIAL_CONTEXT } from "@/test/editorial-context";
 
 import type { StructuredModel, StructuredModelRequest } from "@/application/model";
 import type { StoryInspection } from "@/application/story-inspection";
@@ -229,6 +230,7 @@ describe("createWriterRevision", () => {
   it("tells the Writer which newsroom it is revising for", async () => {
     // A revision is written for the same readers as the draft, so the same context reaches it.
     const inspection = fixture();
+    const persistedRuns: AgentRun[] = [];
     const generateStructured = vi.fn(async () => ({
       ok: true as const,
       output: {
@@ -257,13 +259,16 @@ describe("createWriterRevision", () => {
         listByStoryId: vi.fn(),
       },
       persistence: {
-        persist: vi.fn<WriterRevisionPersistence["persist"]>(async (command) => ({
-          ok: true as const,
-          run: command.run,
-          revision: command.revision,
-          story: command.story,
-          transitionReceipt: command.transitionReceipt,
-        })),
+        persist: vi.fn<WriterRevisionPersistence["persist"]>(async (command) => {
+          persistedRuns.push(command.run);
+          return {
+            ok: true as const,
+            run: command.run,
+            revision: command.revision,
+            story: command.story,
+            transitionReceipt: command.transitionReceipt,
+          };
+        }),
       },
       resolveModel: async () => ({
         ok: true,
@@ -277,11 +282,7 @@ describe("createWriterRevision", () => {
       createAgentRunId: () => agentRunId("writer-run-2-41"),
       createRevisionId: () => articleRevisionId("revision-2-41"),
       createTransitionId: () => transitionId("transition-41"),
-      readNewsroomIdentity: async () => ({
-        name: "Black Swamp AI",
-        description: "Guides, Tips and News from the AI World",
-      }),
-      readNewsroomStandards: async () => "Headlines are sentence case.",
+      readEditorialContext: async () => structuredClone(HARBOUR_EDITORIAL_CONTEXT),
       now: () => "now",
     });
 
@@ -295,10 +296,12 @@ describe("createWriterRevision", () => {
     const prompt = (
       generateStructured.mock.calls[0] as unknown as [StructuredModelRequest<unknown>]
     )[0].systemPrompt;
-    expect(prompt).toContain("Black Swamp AI");
-    expect(prompt).toContain("Guides, Tips and News from the AI World");
+    expect(prompt).toContain("Harbour Ledger");
+    expect(prompt).toContain("Harbour district residents");
+    expect(prompt).toContain("Know what changed and what to do next.");
     expect(prompt).toContain("never relaxes the rules above about evidence");
-    expect(prompt).toContain("Headlines are sentence case.");
+    expect(prompt).toContain("Use direct, sentence-case headlines.");
+    expect(persistedRuns.at(-1)?.input.editorialContext).toEqual(HARBOUR_EDITORIAL_CONTEXT);
   });
 
   it("uses the operator decision and exact historical evidence to persist Revision 2", async () => {

@@ -138,7 +138,15 @@ export function SitesWorkspace({
           {submitting ? "Creating…" : "Create Site"}
         </button>
         {message === null ? null : <p role="status">{message}</p>}
-        {created === null ? null : <a href={sitePagePath(created.id)}>Open {created.name}</a>}
+        {created === null ? null : (
+          <div className={styles.newSiteNextStep} role="status">
+            <p>
+              <strong>{created.name} is ready.</strong> Start with a short newsroom brief about who
+              you write for and what readers should gain.
+            </p>
+            <a href={sitePagePath(created.id)}>Open {created.name} and set its newsroom brief</a>
+          </div>
+        )}
       </form>
     </section>
   );

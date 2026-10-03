@@ -102,6 +102,7 @@ function makeRepositories() {
   const storyRepository: StoryRepository = {
     findById: vi.fn<StoryRepository["findById"]>(async () => null),
     persist: vi.fn<StoryRepository["persist"]>(async ({ story }) => ({ ok: true, story })),
+    updatePurpose: vi.fn<StoryRepository["updatePurpose"]>(),
   };
   const attachmentRepository: StorySourceAttachmentRepository = {
     attach: vi.fn<StorySourceAttachmentRepository["attach"]>(async ({ attachment }) => ({
@@ -227,6 +228,7 @@ describe("createStoryRuntime", () => {
       "policyRuns",
       "reconcileAbandonedWork",
       "createStory",
+      "updateStoryPurpose",
       "attachSourceToStory",
       "inspectStory",
       "listStories",

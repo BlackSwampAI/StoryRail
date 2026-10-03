@@ -25,12 +25,13 @@ import {
   type StoryId,
   type TransitionId,
 } from "@/domain/editorial";
+import { resolveEditorialContext } from "@/application/editorial-context";
 
 import type { WriterRevisionPersistence } from "./writer-revision-persistence";
 
 export const WRITER_REVISION_PROMPT = Object.freeze({
   key: "storyrail_writer_revision",
-  version: "1",
+  version: "2",
 });
 export const writerRevisionOutputSchema = z
   .object({
@@ -41,7 +42,7 @@ export const writerRevisionOutputSchema = z
   .strict();
 
 export function writerRevisionSystemPrompt(profileInstructions: string): string {
-  return `You are StoryRail's supervised Writer. Revise only the supplied current Article Revision. Follow the durable Assignment and the operator's authoritative request-changes reason. Treat the Director review as advisory context: when it differs from the operator decision, follow the operator. Return a complete replacement headline, optional dek, and body Markdown as the requested structured output.
+  return `You are StoryRail's supervised Writer. Revise only the supplied current Article Revision. Follow the durable Assignment, Story purpose, publication context, and the operator's authoritative request-changes reason. Preserve alignment with the intended audience, reader benefit, and coverage criteria. Treat purpose as a question to investigate, not evidence; do not imply sources answered it when they did not. Treat the Director review as advisory context: when it differs from the operator decision, follow the operator. Return a complete replacement headline, optional dek, and body Markdown as the requested structured output.
 
 Write the Article as an ordered list of blocks rather than one block of prose, and label each block with what kind of sentence it is.
 
@@ -120,6 +121,9 @@ export function createWriterRevision(dependencies: {
   readonly readNewsroomStandards?: () => Promise<string | null>;
   /** Who this newsroom is, read when the run starts. A newsroom that has said nothing is normal. */
   readonly readNewsroomIdentity?: () => Promise<NewsroomIdentity | null>;
+  readonly readEditorialContext?: () => Promise<
+    import("@/domain/editorial").EditorialContextSnapshot
+  >;
   readonly now: () => string;
 }) {
   return async (command: {
@@ -271,6 +275,7 @@ export function createWriterRevision(dependencies: {
     const resolved = await dependencies.resolveModel(writerProfile.model);
     if (!resolved.ok) return { ok: false, error: { ...resolved.error, storyId: story.id } };
     const id = dependencies.createAgentRunId();
+    const editorialContext = await resolveEditorialContext(dependencies);
     const startedAt = dependencies.now();
     const input = {
       story: {
@@ -278,7 +283,9 @@ export function createWriterRevision(dependencies: {
         title: story.title,
         state: story.state,
         revisionCycle: story.revisionCycle,
+        ...(story.purpose ? { purpose: story.purpose } : {}),
       },
+      ...(editorialContext.snapshot ? { editorialContext: editorialContext.snapshot } : {}),
       assignment: {
         id: assignment.id,
         storyId: assignment.storyId,
@@ -338,8 +345,6 @@ export function createWriterRevision(dependencies: {
     // The run is durable now, so the caller can stop waiting. Only the model call and the
     // completion it produces continue past this point.
     const completion = (async (): Promise<CreateWriterRevisionResult> => {
-      const standards = (await dependencies.readNewsroomStandards?.()) ?? null;
-      const newsroom = (await dependencies.readNewsroomIdentity?.()) ?? null;
       const modelInput = {
         ...input,
         evidence: selected.map(({ reference, document }) => ({ ...reference, document })),
@@ -353,8 +358,8 @@ export function createWriterRevision(dependencies: {
         .generateStructured({
           systemPrompt: withNewsroomStandards(
             writerRevisionSystemPrompt(writerProfile.instructions),
-            standards,
-            newsroom,
+            editorialContext.standards,
+            editorialContext.identity,
           ),
           input: modelInput,
           schema: writerRevisionOutputSchema,
@@ -374,8 +379,8 @@ export function createWriterRevision(dependencies: {
             model: resolved.model,
             systemPrompt: withNewsroomStandards(
               writerRevisionSystemPrompt(writerProfile.instructions),
-              standards,
-              newsroom,
+              editorialContext.standards,
+              editorialContext.identity,
             ),
             input: modelInput,
             schema: writerRevisionOutputSchema,

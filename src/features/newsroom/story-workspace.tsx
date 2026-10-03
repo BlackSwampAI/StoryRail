@@ -12,6 +12,7 @@ import {
   type Assignment,
   type EditorialActor,
   type StoryTransitionReceipt,
+  type StoryPurpose,
 } from "@/domain/editorial";
 
 /** How often a Story with an in-flight agent run is re-inspected. */
@@ -898,6 +899,18 @@ export function StoryWorkspace({
   const [reviewStatus, setReviewStatus] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
   const [rejectionStatus, setRejectionStatus] = useState<string | null>(null);
+  const [purposeReaderValue, setPurposeReaderValue] = useState(story.purpose?.readerValue ?? "");
+  const [purposeFocus, setPurposeFocus] = useState(story.purpose?.focus ?? "");
+  const [purposeSaving, setPurposeSaving] = useState(false);
+  const [purposeStatus, setPurposeStatus] = useState<string | null>(null);
+  const purposeStoryId = useRef(story.id);
+  useEffect(() => {
+    if (purposeStoryId.current === story.id) return;
+    purposeStoryId.current = story.id;
+    setPurposeReaderValue(story.purpose?.readerValue ?? "");
+    setPurposeFocus(story.purpose?.focus ?? "");
+    setPurposeStatus(null);
+  }, [story.id, story.purpose?.readerValue, story.purpose?.focus]);
   // The rail and the state badge read the Story the parent owns, so a poll that sees a later
   // state has to hand that Story up rather than keep it. The last state seen is held in a ref
   // because the polling intervals close over the render that started them and would otherwise
@@ -1023,6 +1036,9 @@ export function StoryWorkspace({
   const dragOperation = useDragOperation();
   const writerDragging = assignmentEligible && dragOperation.source?.type === WRITER_DRAG_TYPE;
   const selectedWriterProfileId = writerProfileId || profiles[0]?.id || "";
+  const purposeDirty =
+    purposeReaderValue.trim() !== (story.purpose?.readerValue ?? "") ||
+    purposeFocus.trim() !== (story.purpose?.focus ?? "");
 
   useDragDropMonitor({
     onDragEnd(event) {
@@ -1054,9 +1070,18 @@ export function StoryWorkspace({
     latestProposal !== undefined &&
     (currentSourceIds.size !== proposalSourceIds.size ||
       [...currentSourceIds].some((sourceId) => !proposalSourceIds.has(sourceId)));
+  const proposalPurpose = latestProposal?.input.story.purpose;
+  const purposeChangedSinceProposal =
+    latestProposal !== undefined &&
+    ((proposalPurpose?.readerValue ?? "") !== (story.purpose?.readerValue ?? "") ||
+      (proposalPurpose?.focus ?? "") !== (story.purpose?.focus ?? ""));
 
   async function generateProposal() {
-    if (proposalPending) return;
+    if (proposalPending || purposeSaving || purposeDirty) {
+      if (purposeDirty)
+        setPurposeStatus("Save the reader purpose before preparing an Assignment suggestion.");
+      return;
+    }
     setProposalPending(true);
     setProposalStatus(null);
     try {
@@ -1099,7 +1124,10 @@ export function StoryWorkspace({
   }
 
   async function submitAssignment(): Promise<boolean> {
-    if (assignmentPending) return false;
+    if (assignmentPending || purposeSaving || purposeDirty) {
+      if (purposeDirty) setPurposeStatus("Save the reader purpose before creating the Assignment.");
+      return false;
+    }
     setAssignmentPending(true);
     setSubmissionError(null);
     try {
@@ -1287,7 +1315,10 @@ export function StoryWorkspace({
   }, [autopilotWatch, requests, story.id, onReviewStateChanged]);
 
   async function findMoreSources() {
-    if (researchPending) return;
+    if (researchPending || purposeSaving || purposeDirty) {
+      if (purposeDirty) setPurposeStatus("Save the reader purpose before starting research.");
+      return;
+    }
     setResearchPending(true);
     setResearchStatus("Researcher is looking for corroborating Sources…");
     try {
@@ -1314,7 +1345,10 @@ export function StoryWorkspace({
   }
 
   async function startAutopilot() {
-    if (autopilotPending || autopilotRunning) return;
+    if (autopilotPending || autopilotRunning || purposeSaving || purposeDirty) {
+      if (purposeDirty) setPurposeStatus("Save the reader purpose before starting Autopilot.");
+      return;
+    }
     setAutopilotPending(true);
     setAutopilotStatus(null);
     try {
@@ -1593,6 +1627,44 @@ export function StoryWorkspace({
     }
   }
 
+  async function saveStoryPurpose() {
+    if (
+      purposeSaving ||
+      anythingRunning ||
+      autopilotRunning ||
+      story.state !== "intake" ||
+      purposeReaderValue.trim().length === 0
+    )
+      return;
+    setPurposeSaving(true);
+    setPurposeStatus(null);
+    const purpose: StoryPurpose = {
+      readerValue: purposeReaderValue.trim(),
+      focus: purposeFocus.trim(),
+    };
+    try {
+      const result = await requests.updateStoryPurpose(story.id, purpose);
+      if (result.kind !== "completed") {
+        setPurposeStatus(
+          result.kind === "application-failure"
+            ? result.error.message
+            : "The Story purpose could not be saved. Your answer is still here; try again.",
+        );
+        return;
+      }
+      setPurposeReaderValue(result.value.purpose?.readerValue ?? purpose.readerValue);
+      setPurposeFocus(result.value.purpose?.focus ?? purpose.focus);
+      setPurposeStatus("Reader purpose saved for this Story.");
+      onReviewStateChanged({ ...inspection, story: result.value });
+    } catch {
+      setPurposeStatus(
+        "The Story purpose could not be saved. Your answer is still here; try again.",
+      );
+    } finally {
+      setPurposeSaving(false);
+    }
+  }
+
   const latestRevision = article?.revisions.at(-1);
   return (
     <article className={styles.storyWorkspace} aria-labelledby="workspace-story-title">
@@ -1625,6 +1697,67 @@ export function StoryWorkspace({
           {notice}
         </p>
       ) : null}
+      <section className={styles.storyPurpose} aria-labelledby="story-purpose-heading">
+        <div>
+          <p className={styles.sectionKicker}>Reader purpose</p>
+          <h2 id="story-purpose-heading">What this Story should do for readers</h2>
+          {story.purpose ? (
+            <p className={styles.storyPurposeCurrent}>{story.purpose.readerValue}</p>
+          ) : (
+            <p className={styles.storyPurposeCurrent}>No reader purpose has been set.</p>
+          )}
+          {story.purpose?.focus ? <p>Focus: {story.purpose.focus}</p> : null}
+        </div>
+        {story.state === "intake" && assignment === null ? (
+          <div className={styles.storyPurposeEditor}>
+            <label htmlFor="story-purpose-reader-value">
+              Why does this matter to your readers?
+            </label>
+            <textarea
+              id="story-purpose-reader-value"
+              value={purposeReaderValue}
+              maxLength={2_000}
+              disabled={purposeSaving || anythingRunning || autopilotRunning}
+              onChange={(event) => setPurposeReaderValue(event.currentTarget.value)}
+            />
+            <label htmlFor="story-purpose-focus">
+              Anything you want us to investigate or emphasize?
+            </label>
+            <p className={styles.assignmentPurposeHint}>Optional.</p>
+            <textarea
+              id="story-purpose-focus"
+              value={purposeFocus}
+              maxLength={2_000}
+              disabled={purposeSaving || anythingRunning || autopilotRunning}
+              onChange={(event) => setPurposeFocus(event.currentTarget.value)}
+            />
+            <button
+              type="button"
+              className={styles.secondaryAction}
+              disabled={
+                purposeSaving ||
+                anythingRunning ||
+                autopilotRunning ||
+                purposeReaderValue.trim().length === 0 ||
+                !purposeDirty
+              }
+              onClick={() => void saveStoryPurpose()}
+            >
+              {purposeSaving ? "Saving purpose…" : "Save reader purpose"}
+            </button>
+            {purposeDirty ? (
+              <p className={styles.assignmentPurposeHint}>
+                Save this purpose before starting research or preparing an Assignment.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+        {purposeStatus ? (
+          <p role={purposeStatus.startsWith("Reader purpose saved") ? "status" : "alert"}>
+            {purposeStatus}
+          </p>
+        ) : null}
+      </section>
       {researchStatus ? (
         <p
           role={researchStatus.startsWith("Research could not") ? "alert" : "status"}
@@ -2180,6 +2313,11 @@ export function StoryWorkspace({
                   <section className={styles.briefAngle} aria-labelledby="proposal-angle-heading">
                     <h3 id="proposal-angle-heading">Angle</h3>
                     <p>{angle}</p>
+                    {story.purpose ? (
+                      <p className={styles.assignmentPurposeHint}>
+                        Suggested for this reader purpose: {story.purpose.readerValue}
+                      </p>
+                    ) : null}
                   </section>
                   <section className={styles.briefCopy} aria-labelledby="proposal-brief-heading">
                     <h3 id="proposal-brief-heading">Brief</h3>
@@ -2197,10 +2335,16 @@ export function StoryWorkspace({
                     <p>{reason}</p>
                   </aside>
                 </div>
-                {evidenceChanged ? (
+                {evidenceChanged || purposeChangedSinceProposal ? (
                   <p role="alert" className={styles.inlineAlert}>
-                    Story evidence has changed since this suggestion was generated. Regenerate
-                    before relying on it.
+                    {[
+                      ...(evidenceChanged ? ["Story evidence has changed"] : []),
+                      ...(purposeChangedSinceProposal
+                        ? ["the saved reader purpose has changed"]
+                        : []),
+                    ].join(" and ")}{" "}
+                    since this suggestion was generated. Regenerate it, or review and edit the angle
+                    and brief before assigning.
                   </p>
                 ) : null}
                 <div className={styles.taskActions}>
@@ -2208,7 +2352,11 @@ export function StoryWorkspace({
                     type="button"
                     className={styles.primaryAction}
                     disabled={
-                      assignmentPending || draftRunning || selectedWriterProfileId.length === 0
+                      assignmentPending ||
+                      draftRunning ||
+                      selectedWriterProfileId.length === 0 ||
+                      purposeDirty ||
+                      purposeSaving
                     }
                     onClick={() => void assignAndDraft()}
                   >
@@ -2268,7 +2416,7 @@ export function StoryWorkspace({
                     <button
                       type="button"
                       className={styles.tertiaryAction}
-                      disabled={proposalRunning}
+                      disabled={proposalRunning || purposeDirty || purposeSaving}
                       onClick={() => void generateProposal()}
                     >
                       {proposalRunning ? "Drawing it up…" : "Draw up the Assignment"}
@@ -2279,6 +2427,12 @@ export function StoryWorkspace({
                   <p className={styles.writerOverrideNotice} role="status">
                     Writer recommendation changed locally. The Assignment Editor suggestion and its
                     editorial fields remain unchanged until you create the Assignment.
+                  </p>
+                ) : null}
+                {purposeChangedSinceProposal ? (
+                  <p role="alert" className={styles.inlineAlert}>
+                    The saved reader purpose changed after this suggestion. Regenerate it, or review
+                    and edit the angle and brief before creating the Assignment.
                   </p>
                 ) : null}
                 <p>
@@ -2317,6 +2471,11 @@ export function StoryWorkspace({
                     required
                   />
                 </label>
+                {story.purpose ? (
+                  <p className={styles.assignmentPurposeHint}>
+                    Make the angle a useful path toward this Story&apos;s reader purpose.
+                  </p>
+                ) : null}
                 <label>
                   Brief
                   <textarea
@@ -2351,7 +2510,11 @@ export function StoryWorkspace({
                   type="submit"
                   className={styles.primaryAction}
                   disabled={
-                    assignmentPending || draftRunning || selectedWriterProfileId.length === 0
+                    assignmentPending ||
+                    draftRunning ||
+                    selectedWriterProfileId.length === 0 ||
+                    purposeDirty ||
+                    purposeSaving
                   }
                 >
                   {assignmentPending
@@ -2384,7 +2547,7 @@ export function StoryWorkspace({
                   <button
                     type="button"
                     className={styles.primaryAction}
-                    disabled={proposalRunning}
+                    disabled={proposalRunning || purposeDirty || purposeSaving}
                     onClick={() => void generateProposal()}
                   >
                     {proposalRunning ? "Drawing it up…" : "Draw up the Assignment"}
@@ -2399,7 +2562,7 @@ export function StoryWorkspace({
                   <button
                     type="button"
                     className={styles.secondaryAction}
-                    disabled={researchPending || researchRunning}
+                    disabled={researchPending || researchRunning || purposeDirty || purposeSaving}
                     onClick={() => void findMoreSources()}
                   >
                     {researchRunning ? "Researcher is working…" : "Find more Sources"}
@@ -2417,7 +2580,9 @@ export function StoryWorkspace({
                     <input
                       type="checkbox"
                       checked={autopilotResearch}
-                      disabled={autopilotPending || autopilotRunning}
+                      disabled={
+                        autopilotPending || autopilotRunning || purposeDirty || purposeSaving
+                      }
                       onChange={(event) => setAutopilotResearch(event.target.checked)}
                     />
                     <span>
@@ -2432,7 +2597,7 @@ export function StoryWorkspace({
                   <button
                     type="button"
                     className={styles.tertiaryAction}
-                    disabled={autopilotPending || autopilotRunning}
+                    disabled={autopilotPending || autopilotRunning || purposeDirty || purposeSaving}
                     onClick={() => void startAutopilot()}
                   >
                     {autopilotRunning ? "Autopilot is running…" : "Run this Story to publication"}

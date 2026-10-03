@@ -11,9 +11,8 @@ export type AppendNewsroomStandardsResult =
     };
 
 /**
- * Standards are an append-only history. Reading the whole history rather than only the current
- * revision is what lets a past run be explained: the standards a run worked under are the ones
- * that were current when it started.
+ * Standards are an append-only history. Older runs can be explained by the revision in force
+ * at their start; new runs also snapshot the exact selected revision in their inputs.
  */
 export interface NewsroomStandardsRepository {
   append(standards: NewsroomStandards): Promise<AppendNewsroomStandardsResult>;

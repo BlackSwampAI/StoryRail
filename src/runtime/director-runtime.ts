@@ -1,8 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Pool, type PoolConfig } from "pg";
 
-import { createPostgresNewsroomStandardsRepository } from "@/adapters/newsroom-standards-persistence";
-
 import { createPostgresAgentProfileRepository } from "@/adapters/agent-profile-persistence";
 import { createPostgresAgentRunRepository } from "@/adapters/agent-run-persistence";
 import { createOpenRouterStructuredModel } from "@/adapters/model";
@@ -20,7 +18,7 @@ import {
   type SiteId,
   type StoryId,
 } from "@/domain/editorial";
-import { createNewsroomIdentityReader } from "./newsroom-identity";
+import { createEditorialContextReader } from "./newsroom-identity";
 import { createSiteStore } from "./site-store";
 import {
   loadDirectorRuntimeConfiguration,
@@ -70,16 +68,7 @@ export function createDirectorRuntime(options: {
   const pool = (options.createPool ?? ((configuration) => new Pool(configuration)))({
     connectionString: options.configuration.databaseUrl,
   });
-  // The standards in force when a run starts. Read per run rather than cached, so an edit
-  // reaches the next piece of work rather than the next restart.
-  const readNewsroomStandards = async (): Promise<string | null> => {
-    const history = await createPostgresNewsroomStandardsRepository({
-      pool,
-      siteId: options.siteId,
-    }).list();
-    return history.at(-1)?.text ?? null;
-  };
-  const readNewsroomIdentity = createNewsroomIdentityReader({ pool, siteId: options.siteId });
+  const readEditorialContext = createEditorialContextReader({ pool, siteId: options.siteId });
   const uuid = options.createUuid ?? randomUUID;
   const store = createSiteStore({
     pool,
@@ -87,8 +76,7 @@ export function createDirectorRuntime(options: {
     credentialKey: options.configuration.credentialKey,
   });
   const workflow = createRunDirectorReview({
-    readNewsroomStandards,
-    readNewsroomIdentity,
+    readEditorialContext,
     inspections: createPostgresStoryInspectionRepository({ pool, siteId: options.siteId }),
     profiles: createPostgresAgentProfileRepository({ pool, siteId: options.siteId }),
     runs: createPostgresAgentRunRepository({ pool }),

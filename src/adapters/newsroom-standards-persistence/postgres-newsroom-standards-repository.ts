@@ -5,7 +5,12 @@ import type {
   AppendNewsroomStandardsResult,
   NewsroomStandardsRepository,
 } from "@/application/newsroom-standards";
-import { recordNewsroomStandards, type NewsroomStandards, type SiteId } from "@/domain/editorial";
+import {
+  MAXIMUM_PUBLICATION_BRIEF_FIELD_CHARACTERS,
+  recordNewsroomStandards,
+  type NewsroomStandards,
+  type SiteId,
+} from "@/domain/editorial";
 
 export class PostgresNewsroomStandardsInvariantError extends Error {
   constructor() {
@@ -19,9 +24,19 @@ const schema = z
   .object({
     id: nonEmpty,
     revisionNumber: z.number().int().min(1),
-    text: nonEmpty,
+    text: z.string().max(8_000),
     updatedBy: z.object({ type: z.literal("operator"), operatorId: nonEmpty }).strict(),
     updatedAt: nonEmpty,
+    brief: z
+      .object({
+        audience: z.string().max(MAXIMUM_PUBLICATION_BRIEF_FIELD_CHARACTERS),
+        readerBenefit: z.string().max(MAXIMUM_PUBLICATION_BRIEF_FIELD_CHARACTERS),
+        coverageCriteria: z.string().max(MAXIMUM_PUBLICATION_BRIEF_FIELD_CHARACTERS),
+        voice: z.string().max(MAXIMUM_PUBLICATION_BRIEF_FIELD_CHARACTERS),
+        avoid: z.string().max(MAXIMUM_PUBLICATION_BRIEF_FIELD_CHARACTERS),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 

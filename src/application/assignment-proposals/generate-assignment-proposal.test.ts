@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { settleAgentRun } from "@/test/settle-agent-run";
+import { ENGINEERING_EDITORIAL_CONTEXT, HARBOUR_EDITORIAL_CONTEXT } from "@/test/editorial-context";
 
 import { createReferenceAgentProfileRepository } from "@/application/agent-profiles/agent-profile-repository.contract";
 import { createReferenceAgentRunRepository } from "@/application/agent-runs/agent-run-repository.contract";
@@ -16,6 +17,7 @@ import {
   sourceId,
   storyId,
   type AgentProfile,
+  type EditorialContextSnapshot,
   type NewsroomIdentity,
 } from "@/domain/editorial";
 
@@ -159,6 +161,7 @@ function setup(
   },
   profiles: readonly AgentProfile[] = [editor, builtInWriter, customWriter],
   newsroom: Partial<{
+    readonly readEditorialContext: () => Promise<EditorialContextSnapshot>;
     readonly readNewsroomStandards: () => Promise<string | null>;
     readonly readNewsroomIdentity: () => Promise<NewsroomIdentity | null>;
   }> = {},
@@ -219,6 +222,44 @@ describe("generateAssignmentProposal", () => {
     expect(prompt).toContain("Black Swamp AI");
     expect(prompt).toContain("Guides, Tips and News from the AI World");
     expect(prompt).toContain("Headlines are sentence case.");
+  });
+
+  it("stores the exact Site identity and full standards revision used by the proposal", async () => {
+    const context = structuredClone(HARBOUR_EDITORIAL_CONTEXT);
+    const readEditorialContext = vi.fn(async () => context);
+    const { workflow, generateStructured, runs } = setup(undefined, undefined, undefined, {
+      readEditorialContext,
+    });
+    let releaseModel!: (result: { readonly ok: true; readonly output: unknown }) => void;
+    const pendingModel = new Promise<{ readonly ok: true; readonly output: unknown }>((resolve) => {
+      releaseModel = resolve;
+    });
+    generateStructured.mockImplementation(async () => pendingModel);
+
+    const started = await workflow({ storyId: story.id, requestedBy: actor });
+    if (!started.ok) throw new Error("The Assignment Editor should have started.");
+    Object.assign(context.identity!, structuredClone(ENGINEERING_EDITORIAL_CONTEXT.identity!));
+    Object.assign(context.standards!, structuredClone(ENGINEERING_EDITORIAL_CONTEXT.standards!));
+    releaseModel({
+      ok: true,
+      output: {
+        writerProfileId: customWriter.id,
+        angle: "Focused angle",
+        brief: "Bounded brief",
+        constraints: null,
+        reason: "Specialist fit",
+      },
+    });
+    await started.completion;
+    const recorded = await runs.listByStoryId(story.id);
+    const run = recorded.at(-1);
+    const prompt = generateStructured.mock.calls[0]![0].systemPrompt;
+
+    expect(readEditorialContext).toHaveBeenCalledOnce();
+    expect(run?.input.editorialContext).toEqual(HARBOUR_EDITORIAL_CONTEXT);
+    expect(prompt).toContain("Audience: Harbour district residents");
+    expect(prompt).toContain("Reader benefit: Know what changed and what to do next.");
+    expect(prompt).toContain("Use direct, sentence-case headlines.");
   });
 
   it("makes exactly one safe structured request and persists exact prepared-evidence provenance", async () => {

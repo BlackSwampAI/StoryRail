@@ -27,7 +27,7 @@ import type {
   StoryTransitionReceipt,
   UrlSource,
 } from "@/domain/editorial";
-import { AGENT_ROLES, STORY_STATES } from "@/domain/editorial";
+import { AGENT_ROLES, STORY_STATES, storySchema } from "@/domain/editorial";
 import type { InspectStoryResult, StoryInspectionRepository } from "@/application/story-inspection";
 
 import { decodePostgresSourceExtraction } from "../source-persistence/postgres-source-extraction-decoder";
@@ -154,7 +154,7 @@ function decodeStory(row: StoryInspectionRow): Story {
     (row.story_revision_cycle as number) < 0 ||
     (row.story_revision_cycle as number) > 2 ||
     !isRecord(payload) ||
-    !hasExactKeys(payload, ["id", "title", "state", "revisionCycle", "createdAt", "updatedAt"]) ||
+    !storySchema.safeParse(payload).success ||
     typeof payload.id !== "string" ||
     payload.id !== row.story_id ||
     typeof payload.title !== "string" ||

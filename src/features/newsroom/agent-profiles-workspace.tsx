@@ -6,7 +6,6 @@ import type { AgentProfile } from "@/domain/editorial";
 
 import type { AgentProfileClient } from "./agent-profile-client";
 import { useNewsroomClients } from "./newsroom-clients";
-import { NewsroomStandardsEditor } from "./newsroom-standards-editor";
 import styles from "./newsroom-shell.module.css";
 
 type ProfileState =
@@ -138,9 +137,12 @@ export function AgentProfilesWorkspace({
   return (
     <section className={styles.agentsWorkspace} aria-labelledby="agents-workspace-title">
       <header className={styles.agentsHeader}>
-        <p className={styles.sectionKicker}>Durable configuration</p>
+        <p className={styles.sectionKicker}>Agent configuration</p>
         <h2 id="agents-workspace-title">Agent Profiles</h2>
-        <p>Agent Profiles configure the roles future Assignments and agent runs will use.</p>
+        <p>
+          Choose the profiles future assignments and agent runs will use. Set the publication&apos;s
+          direction in Newsroom brief.
+        </p>
         <span className={styles.disconnectedStatus}>No agents are running</span>
       </header>
 
@@ -187,8 +189,6 @@ export function AgentProfilesWorkspace({
           </a>
         </div>
       )}
-
-      <NewsroomStandardsEditor />
 
       <form
         className={styles.profileForm}

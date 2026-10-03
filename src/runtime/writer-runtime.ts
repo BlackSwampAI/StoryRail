@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Pool, type PoolConfig } from "pg";
 
-import { createPostgresNewsroomStandardsRepository } from "@/adapters/newsroom-standards-persistence";
 import { createPostgresAgentRunRepository } from "@/adapters/agent-run-persistence";
 import {
   createPostgresWriterDraftPersistence,
@@ -29,7 +28,7 @@ import {
   type SiteId,
   type StoryId,
 } from "@/domain/editorial";
-import { createNewsroomIdentityReader } from "./newsroom-identity";
+import { createEditorialContextReader } from "./newsroom-identity";
 import { createSiteStore } from "./site-store";
 import {
   loadWriterRuntimeConfiguration,
@@ -83,16 +82,7 @@ export function createWriterRuntime(options: {
   const pool = (options.createPool ?? ((configuration) => new Pool(configuration)))({
     connectionString: options.configuration.databaseUrl,
   });
-  // The standards in force when a run starts. Read per run rather than cached, so an edit
-  // reaches the next piece of work rather than the next restart.
-  const readNewsroomStandards = async (): Promise<string | null> => {
-    const history = await createPostgresNewsroomStandardsRepository({
-      pool,
-      siteId: options.siteId,
-    }).list();
-    return history.at(-1)?.text ?? null;
-  };
-  const readNewsroomIdentity = createNewsroomIdentityReader({ pool, siteId: options.siteId });
+  const readEditorialContext = createEditorialContextReader({ pool, siteId: options.siteId });
   const uuid = options.createUuid ?? randomUUID;
   const store = createSiteStore({
     pool,
@@ -120,8 +110,7 @@ export function createWriterRuntime(options: {
     );
   };
   const workflow = createWriterDraft({
-    readNewsroomStandards,
-    readNewsroomIdentity,
+    readEditorialContext,
     inspections: createPostgresStoryInspectionRepository({ pool, siteId: options.siteId }),
     runs: createPostgresAgentRunRepository({ pool }),
     persistence: createPostgresWriterDraftPersistence({ pool }),
@@ -133,8 +122,7 @@ export function createWriterRuntime(options: {
     now: options.now ?? (() => new Date().toISOString()),
   });
   const revisionWorkflow = createWriterRevision({
-    readNewsroomStandards,
-    readNewsroomIdentity,
+    readEditorialContext,
     inspections: createPostgresStoryInspectionRepository({ pool, siteId: options.siteId }),
     runs: createPostgresAgentRunRepository({ pool }),
     persistence: createPostgresWriterRevisionPersistence({ pool }),

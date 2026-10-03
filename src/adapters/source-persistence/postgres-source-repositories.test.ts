@@ -253,6 +253,14 @@ const storyDeliveryRecoveryMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0080-story-delivery-recovery.sql",
 );
+const publicationBriefMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0081-publication-brief.sql",
+);
+const storyPurposeAndContextMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0082-story-purpose-and-run-context.sql",
+);
 
 const DEFAULT_SITE = siteId("site-default");
 const OTHER_SITE = siteId("site-other");
@@ -496,6 +504,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let ambiguousDeliveryReconciliationMigrationSql: string;
   let agentRunRecoveryMigrationSql: string;
   let storyDeliveryRecoveryMigrationSql: string;
+  let publicationBriefMigrationSql: string;
+  let storyPurposeAndContextMigrationSql: string;
 
   /** Every migration, in order. One list so a rebuild can never drift from the first build. */
   const orderedMigrations = (): readonly string[] => [
@@ -539,6 +549,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
     ambiguousDeliveryReconciliationMigrationSql,
     agentRunRecoveryMigrationSql,
     storyDeliveryRecoveryMigrationSql,
+    publicationBriefMigrationSql,
+    storyPurposeAndContextMigrationSql,
   ];
   let destructiveSetupAllowed = false;
 
@@ -632,6 +644,11 @@ describePostgres("PostgreSQL persistence repositories", () => {
     );
     agentRunRecoveryMigrationSql = await readFile(agentRunRecoveryMigrationPath, "utf8");
     storyDeliveryRecoveryMigrationSql = await readFile(storyDeliveryRecoveryMigrationPath, "utf8");
+    publicationBriefMigrationSql = await readFile(publicationBriefMigrationPath, "utf8");
+    storyPurposeAndContextMigrationSql = await readFile(
+      storyPurposeAndContextMigrationPath,
+      "utf8",
+    );
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -691,6 +708,54 @@ describePostgres("PostgreSQL persistence repositories", () => {
   describeStoryRepositoryContract(() =>
     createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }),
   );
+  describe("Story reader purpose persistence", () => {
+    it("retains the saved purpose when evidence is attached and blocks edits during an active run", async () => {
+      const repository = createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE });
+      const story = makeStory("purpose-with-attachment", {
+        purpose: {
+          readerValue: "Residents should know what changed.",
+          focus: "Confirmed timing",
+        },
+      });
+      await expect(repository.persist({ story })).resolves.toEqual({ ok: true, story });
+      const source = makeSource("purpose-with-attachment");
+      await expect(
+        createPostgresSourceRepositories({ pool, siteId: DEFAULT_SITE }).sources.persist({
+          source,
+        }),
+      ).resolves.toMatchObject({ ok: true });
+      await expect(
+        createPostgresStorySourceAttachmentRepository({ pool, siteId: DEFAULT_SITE }).attach({
+          attachment: makeAttachment("purpose-with-attachment", {
+            storyId: story.id,
+            sourceId: source.id,
+          }),
+        }),
+      ).resolves.toMatchObject({ ok: true });
+      await expect(repository.findById(story.id)).resolves.toEqual(story);
+
+      const activeStory = makeStory("purpose-active-run");
+      await repository.persist({ story: activeStory });
+      const { proposal: _proposal, ...started } = makeAgentRun(
+        activeStory,
+        "purpose-active-run",
+      ) as never as { proposal: unknown } & Record<string, unknown>;
+      await createPostgresAgentRunRepository({ pool }).append({
+        ...started,
+        completedAt: null,
+        outcome: "running",
+      } as unknown as AgentRun);
+      await expect(
+        repository.updatePurpose({
+          storyId: activeStory.id,
+          purpose: { readerValue: "Know what changed.", focus: "Timing" },
+          updatedBy: OPERATOR,
+          updatedAt: "purpose-change-during-run",
+        }),
+      ).resolves.toMatchObject({ ok: false, error: { code: "STORY_AGENT_RUN_ACTIVE" } });
+      await expect(repository.findById(activeStory.id)).resolves.toEqual(activeStory);
+    });
+  });
   describeStoryInspectionRepositoryContract(() => ({
     createRepository: () => createPostgresStoryInspectionRepository({ pool, siteId: DEFAULT_SITE }),
     async addStory(story) {
@@ -858,6 +923,115 @@ describePostgres("PostgreSQL persistence repositories", () => {
       await expect(repository.list()).resolves.toMatchObject([
         { revisionNumber: 1, text: "Headlines are sentence case." },
       ]);
+    });
+
+    it("keeps text-only history beside structured-only revisions and rejects malformed briefs", async () => {
+      const repository = createPostgresNewsroomStandardsRepository({ pool, siteId: DEFAULT_SITE });
+      const legacy = {
+        id: newsroomStandardsId("standards-legacy-history"),
+        revisionNumber: 1,
+        text: "Headlines are sentence case.",
+        updatedBy: OPERATOR,
+        updatedAt: "legacy-saved-at",
+      };
+      const briefOnly = {
+        id: newsroomStandardsId("standards-brief-only-history"),
+        revisionNumber: 2,
+        text: "",
+        brief: {
+          audience: "Harbour residents",
+          readerBenefit: "Know what changed and what to do next.",
+          coverageCriteria: "Local services.",
+          voice: "Direct and calm.",
+          avoid: "Speculation.",
+        },
+        updatedBy: OPERATOR,
+        updatedAt: "brief-saved-at",
+      };
+      await expect(repository.append(legacy as never)).resolves.toMatchObject({ ok: true });
+      await expect(repository.append(briefOnly as never)).resolves.toMatchObject({ ok: true });
+      await expect(repository.list()).resolves.toEqual([legacy, briefOnly]);
+
+      const malformed = {
+        ...briefOnly,
+        id: newsroomStandardsId("standards-invalid-brief-history"),
+        revisionNumber: 3,
+        brief: { ...briefOnly.brief, readerBenefit: false },
+      };
+      await expect(
+        pool.query(
+          `INSERT INTO storyrail.newsroom_standards
+             (standards_id, site_id, revision_number, payload)
+           VALUES ($1, $2, $3, $4::jsonb)`,
+          [malformed.id, DEFAULT_SITE, malformed.revisionNumber, JSON.stringify(malformed)],
+        ),
+      ).rejects.toMatchObject({ constraint: "newsroom_standards_payload_check" });
+      await expect(repository.list()).resolves.toEqual([legacy, briefOnly]);
+    });
+
+    it("preserves historical text-only standards, Stories, and AgentRuns through both editorial-context migrations", async () => {
+      const client = await pool.connect();
+      const migrationWithoutTransaction = (sql: string) =>
+        sql.replace(/^BEGIN;\s*/m, "").replace(/\s*COMMIT;\s*$/m, "");
+      try {
+        await client.query("BEGIN");
+        await client.query("DROP SCHEMA IF EXISTS storyrail CASCADE");
+        for (const migration of orderedMigrations().slice(0, -2)) {
+          await client.query(migrationWithoutTransaction(migration));
+        }
+
+        const historicalStandards = {
+          id: newsroomStandardsId("standards-before-brief-migration"),
+          revisionNumber: 1,
+          text: "Keep historical style language intact.",
+          updatedBy: OPERATOR,
+          updatedAt: "historical-standards-time",
+        };
+        await client.query(
+          `INSERT INTO storyrail.newsroom_standards
+             (standards_id, site_id, revision_number, payload)
+           VALUES ($1, $2, $3, $4::jsonb)`,
+          [
+            historicalStandards.id,
+            DEFAULT_SITE,
+            historicalStandards.revisionNumber,
+            JSON.stringify(historicalStandards),
+          ],
+        );
+        const historicalStory = makeStory("before-purpose-migration");
+        await createPostgresStoryRepository({
+          pool: client as unknown as Pool,
+          siteId: DEFAULT_SITE,
+        }).persist({ story: historicalStory });
+        const historicalRun = makeAgentRun(historicalStory, "before-context-migration");
+        await createPostgresAgentRunRepository({ pool: client as unknown as Pool }).append(
+          historicalRun,
+        );
+
+        await client.query(migrationWithoutTransaction(publicationBriefMigrationSql));
+        await client.query(migrationWithoutTransaction(storyPurposeAndContextMigrationSql));
+
+        await expect(
+          createPostgresNewsroomStandardsRepository({
+            pool: client as unknown as Pool,
+            siteId: DEFAULT_SITE,
+          }).list(),
+        ).resolves.toEqual([historicalStandards]);
+        await expect(
+          createPostgresStoryRepository({
+            pool: client as unknown as Pool,
+            siteId: DEFAULT_SITE,
+          }).findById(historicalStory.id),
+        ).resolves.toEqual(historicalStory);
+        await expect(
+          createPostgresAgentRunRepository({ pool: client as unknown as Pool }).listByStoryId(
+            historicalStory.id,
+          ),
+        ).resolves.toEqual([historicalRun]);
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
     });
   });
 
@@ -1628,6 +1802,210 @@ describePostgres("PostgreSQL persistence repositories", () => {
           ],
         ),
       ).rejects.toMatchObject({ code: "23503" });
+    });
+
+    it("accepts full captured editorial context and legacy snapshots, while rejecting malformed nested context", async () => {
+      const story = makeStory("agent-run-editorial-context");
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
+      const repository = createPostgresAgentRunRepository({ pool });
+      const base = makeAgentRun(story, "editorial-context");
+      const editorialContext = {
+        identity: { name: "Harbour Desk", description: "Local service reporting." },
+        standards: {
+          id: "standards-revision-1",
+          revisionNumber: 1,
+          text: "Use direct headlines.",
+          brief: {
+            audience: "Harbour residents",
+            readerBenefit: "Know what changed.",
+            coverageCriteria: "Local services.",
+            voice: "Direct and calm.",
+            avoid: "Speculation.",
+          },
+          updatedBy: OPERATOR,
+          updatedAt: "standards-saved-at",
+        },
+      };
+      const captured = {
+        ...base,
+        input: {
+          ...base.input,
+          story: {
+            ...base.input.story,
+            purpose: { readerValue: "Know what changed.", focus: "Timing" },
+          },
+          editorialContext,
+        },
+      } as AgentRun;
+      await expect(repository.append(captured)).resolves.toMatchObject({ ok: true, run: captured });
+      await expect(repository.listByStoryId(story.id)).resolves.toEqual([captured]);
+
+      const legacy = makeAgentRun(story, "editorial-context-legacy");
+      await expect(repository.append(legacy)).resolves.toMatchObject({ ok: true, run: legacy });
+
+      const malformed = {
+        ...makeAgentRun(story, "editorial-context-invalid-brief"),
+        input: {
+          ...base.input,
+          editorialContext: {
+            ...editorialContext,
+            standards: {
+              ...editorialContext.standards,
+              brief: { ...editorialContext.standards.brief, audience: 7 },
+            },
+          },
+        },
+      };
+      const oversizedIdentity = {
+        ...makeAgentRun(story, "editorial-context-oversized-identity"),
+        input: {
+          ...base.input,
+          editorialContext: {
+            identity: { name: "Harbour Desk", description: "d".repeat(8_001) },
+            standards: null,
+          },
+        },
+      };
+      for (const invalidRun of [malformed, oversizedIdentity]) {
+        await expect(
+          pool.query(
+            `INSERT INTO storyrail.agent_runs
+               (run_id, story_id, profile_id, role, operation, outcome, payload)
+             VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+            [
+              invalidRun.id,
+              invalidRun.storyId,
+              invalidRun.profileId,
+              invalidRun.role,
+              invalidRun.operation,
+              invalidRun.outcome,
+              JSON.stringify(invalidRun),
+            ],
+          ),
+        ).rejects.toMatchObject({ constraint: "agent_runs_payload_input_check" });
+      }
+    });
+
+    it("keeps the writer revision cycle bounds and prior-revision relationship in the database", async () => {
+      const story = makeStory("agent-run-revision-cycle");
+      await createPostgresStoryRepository({ pool, siteId: DEFAULT_SITE }).persist({ story });
+      const base = makeAgentRun(story, "revision-cycle");
+      const writerRevision = (suffix: string, cycle: number, priorRevisionNumber: number) => {
+        const { proposal: _proposal, ...baseRun } = base as never as {
+          proposal: unknown;
+        } & Record<string, unknown>;
+        return {
+          ...baseRun,
+          id: agentRunId(`agent-run-revision-cycle-${suffix}`),
+          storyId: story.id,
+          profileId: agentProfileId("storyrail-general-writer-v1"),
+          role: "writer",
+          operation: "article_revision",
+          input: {
+            story: { ...base.input.story, state: "changes_requested", revisionCycle: cycle },
+            assignment: {
+              id: "assignment-revision-cycle",
+              storyId: story.id,
+              writerProfileId: "storyrail-general-writer-v1",
+              sourceIds: base.input.evidence.map(({ sourceId }) => sourceId),
+              angle: "Angle",
+              brief: "Brief",
+              constraints: null,
+            },
+            article: { id: "article-revision-cycle", assignmentId: "assignment-revision-cycle" },
+            revision: {
+              id: "revision-revision-cycle",
+              articleId: "article-revision-cycle",
+              revisionNumber: priorRevisionNumber,
+              writerProfileId: "storyrail-general-writer-v1",
+              agentRunId: "prior-writer-run",
+              headline: "Previous headline",
+              dek: null,
+              bodyMarkdown: "Previous body",
+            },
+            directorReview: {
+              recommendation: "request_changes",
+              summary: "The current draft needs a correction.",
+              checks: {
+                assignment: {
+                  status: "needs_changes",
+                  note: "The angle needs attention.",
+                  quoted: "Angle",
+                },
+                support: { status: "pass", note: "Supported.", quoted: "Previous body" },
+                accuracy: { status: "pass", note: "Supported.", quoted: "Previous body" },
+                headline: { status: "pass", note: "Supported.", quoted: "Previous headline" },
+                structure: { status: "pass", note: "Clear.", quoted: "Previous body" },
+                style: { status: "pass", note: "Clear.", quoted: "Previous body" },
+              },
+              revisionInstructions: "Correct the angle and keep claims supported.",
+            },
+            reviewDecision: {
+              id: "decision-revision-cycle",
+              storyId: story.id,
+              articleId: "article-revision-cycle",
+              revisionId: "revision-revision-cycle",
+              directorRunId: "director-run-revision-cycle",
+              decision: "request_changes",
+              reason: "Please make the requested correction.",
+              decidedBy: OPERATOR,
+              decidedAt: "decision-recorded-at",
+            },
+            evidence: base.input.evidence,
+            unavailableSourceIds: [],
+          },
+          outcome: "succeeded",
+          articleId: articleId("article-revision-cycle-result"),
+          revisionId: articleRevisionId("revision-revision-cycle-result"),
+        };
+      };
+
+      const cases = [
+        writerRevision("cycle-zero", 0, 1),
+        writerRevision("prior-number-mismatch", 1, 2),
+        writerRevision("state-not-json-string", 1, 1),
+      ];
+      (cases[2]!.input.story as { state: unknown }).state = { value: "changes_requested" };
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        // Copy the actual check constraints while omitting foreign keys: the probe isolates JSON
+        // validity and revision arithmetic from the separate durable cross-record references.
+        await client.query(
+          "CREATE TEMP TABLE writer_revision_constraint_probe (LIKE storyrail.agent_runs INCLUDING DEFAULTS INCLUDING IDENTITY INCLUDING CONSTRAINTS) ON COMMIT DROP",
+        );
+        const insert = async (candidate: ReturnType<typeof writerRevision>) =>
+          client.query(
+            `INSERT INTO writer_revision_constraint_probe
+               (run_id, story_id, profile_id, role, operation, outcome, payload)
+             VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+            [
+              candidate.id,
+              candidate.storyId,
+              candidate.profileId,
+              candidate.role,
+              candidate.operation,
+              candidate.outcome,
+              JSON.stringify(candidate),
+            ],
+          );
+
+        // Positive control proves the fixture satisfies the complete stored check before each
+        // malformed variant changes one of the prior cycle invariants.
+        await expect(insert(writerRevision("valid-control", 1, 1))).resolves.toMatchObject({
+          rowCount: 1,
+        });
+        for (const [index, malformed] of cases.entries()) {
+          await client.query(`SAVEPOINT malformed_writer_revision_${index}`);
+          await expect(insert(malformed)).rejects.toMatchObject({
+            constraint: "agent_runs_payload_input_check",
+          });
+          await client.query(`ROLLBACK TO SAVEPOINT malformed_writer_revision_${index}`);
+        }
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
     });
 
     it("turns a malformed persisted run into one safe inspection invariant failure", async () => {

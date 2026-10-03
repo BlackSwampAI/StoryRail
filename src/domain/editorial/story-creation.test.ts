@@ -68,6 +68,50 @@ describe("createStory", () => {
     expect(result.story.updatedAt).toBe(OPAQUE_TIMESTAMP);
   });
 
+  it("creates a Story with a bounded, trimmed reader purpose and optional focus", () => {
+    const purpose = {
+      readerValue: "  What readers will understand  ",
+      focus: "  Service timing  ",
+    };
+    const result = createStory({
+      storyId: ID,
+      title: "A purposeful Story",
+      createdAt: OPAQUE_TIMESTAMP,
+      purpose,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      story: {
+        title: "A purposeful Story",
+        purpose: { readerValue: "What readers will understand", focus: "Service timing" },
+      },
+    });
+    expect(purpose).toEqual({
+      readerValue: "  What readers will understand  ",
+      focus: "  Service timing  ",
+    });
+  });
+
+  it("rejects an empty reader benefit and overlong purpose fields", () => {
+    expect(
+      createStory({
+        storyId: ID,
+        title: "A Story",
+        createdAt: OPAQUE_TIMESTAMP,
+        purpose: { readerValue: "  ", focus: "" },
+      }),
+    ).toMatchObject({ ok: false, error: { code: "STORY_PURPOSE_INVALID" } });
+    expect(
+      createStory({
+        storyId: ID,
+        title: "A Story",
+        createdAt: OPAQUE_TIMESTAMP,
+        purpose: { readerValue: "Useful", focus: "x".repeat(2_001) },
+      }),
+    ).toMatchObject({ ok: false, error: { code: "STORY_PURPOSE_INVALID" } });
+  });
+
   it("does not mutate the creation command", () => {
     const command: CreateStoryCommand = {
       storyId: ID,

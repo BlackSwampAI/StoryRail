@@ -10,6 +10,7 @@ import {
   type SourceEvidencePreparation,
   type SourceExtraction,
   type StoryId,
+  type StoryPurpose,
   type UrlSource,
 } from "@/domain/editorial";
 
@@ -482,6 +483,8 @@ export function SourceEvidenceWorkspace({
   const [submittedUrl, setSubmittedUrl] = useState("");
   const [autopilot, setAutopilot] = useState(false);
   const [autopilotResearch, setAutopilotResearch] = useState(false);
+  const [autopilotReaderValue, setAutopilotReaderValue] = useState("");
+  const [autopilotFocus, setAutopilotFocus] = useState("");
   const [state, setState] = useState<IntakeState>({ kind: "idle" });
   const pendingRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -584,6 +587,16 @@ export function SourceEvidenceWorkspace({
       const started = await autopilotRequests.start({
         submittedUrl,
         research: autopilotResearch,
+        ...(autopilotReaderValue.trim().length === 0 && autopilotFocus.trim().length === 0
+          ? {}
+          : {
+              purpose: {
+                readerValue:
+                  autopilotReaderValue.trim() ||
+                  "Investigate what this source means for our readers",
+                focus: autopilotFocus.trim(),
+              } satisfies StoryPurpose,
+            }),
       });
       if (started.kind === "started") {
         setSubmittedUrl("");
@@ -756,6 +769,39 @@ export function SourceEvidenceWorkspace({
                 </small>
               </span>
             </label>
+            {autopilot ? (
+              <div className={styles.autopilotPurpose}>
+                <p>
+                  Optional: set a reader purpose for the Story. Starting Autopilot authorizes it to
+                  prepare evidence, create, write, review, and publish without manual intake triage.
+                </p>
+                <label htmlFor="url-autopilot-reader-value">
+                  Why does this matter to your readers?
+                </label>
+                <textarea
+                  id="url-autopilot-reader-value"
+                  value={autopilotReaderValue}
+                  disabled={pending}
+                  maxLength={2_000}
+                  rows={2}
+                  onChange={(event) => setAutopilotReaderValue(event.currentTarget.value)}
+                  placeholder="A clear picture of what changed and what happens next"
+                />
+                <label htmlFor="url-autopilot-focus">
+                  Anything you want us to investigate or emphasize?
+                </label>
+                <p>Optional.</p>
+                <textarea
+                  id="url-autopilot-focus"
+                  value={autopilotFocus}
+                  disabled={pending}
+                  maxLength={2_000}
+                  rows={2}
+                  onChange={(event) => setAutopilotFocus(event.currentTarget.value)}
+                  placeholder="The confirmed effects on nearby residents"
+                />
+              </div>
+            ) : null}
           </fieldset>
           {state.kind === "preserving" ? (
             <p className={styles.pendingStatus} role="status">

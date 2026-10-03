@@ -11,7 +11,10 @@ import type {
   SourceExtraction,
   SourceExtractionId,
   Story,
+  StoryPurpose,
 } from "@/domain/editorial";
+import type { PublicationBrief } from "@/domain/editorial/newsroom-standards-types";
+import { MAXIMUM_STORY_PURPOSE_FIELD_CHARACTERS } from "@/domain/editorial/story-creation-types";
 
 import styles from "./newsroom-shell.module.css";
 import { modelFailureExplanation } from "./model-failure";
@@ -33,6 +36,13 @@ type InboxState =
     }
   | { readonly kind: "unavailable"; readonly refreshVersion: number };
 
+const DEFAULT_READER_VALUE = "Investigate what this source means for our readers";
+const DEFAULT_SOURCE_CONTRIBUTION =
+  "Use this Source as starting evidence only where it directly supports the Story.";
+const TRIAGE_REASON = {
+  skip: "Skipped this Source in Source Inbox; no additional reason supplied.",
+} as const;
+
 export interface SourceInboxWorkspaceProps {
   readonly refreshVersion: number;
   readonly focusedSourceId?: string | null;
@@ -50,6 +60,31 @@ function extractedTitle(item: SourceInboxItem): string {
     if (extraction?.outcome === "succeeded") return extraction.document.title?.trim() ?? "";
   }
   return "";
+}
+
+function readerValueSuggestion(item: SourceInboxItem, brief: PublicationBrief | null): string {
+  const title = excerpt(extractedTitle(item) || "this source", 80);
+  const audience = excerpt(brief?.audience.trim() || "our readers", 90);
+  const benefit = excerpt(
+    brief?.readerBenefit.trim() || "understand what changes and what happens next",
+    90,
+  );
+  return `What does “${title}” mean for ${audience}? Investigate how it relates to: ${benefit}.`;
+}
+
+function contributionSuggestion(item: SourceInboxItem, brief: PublicationBrief | null): string {
+  const title = excerpt(extractedTitle(item) || "this page", 80);
+  const audience = excerpt(brief?.audience.trim() || "our readers", 80);
+  const benefit = excerpt(
+    brief?.readerBenefit.trim() || "understand what changes and what happens next",
+    90,
+  );
+  return `Use “${title}” to investigate ${benefit} for ${audience}. Identify what evidence it adds and what remains unanswered.`;
+}
+
+function excerpt(text: string, maximum: number): string {
+  const trimmed = text.trim();
+  return trimmed.length <= maximum ? trimmed : `${trimmed.slice(0, maximum - 1).trimEnd()}…`;
 }
 
 function actorLabel(actor: EditorialActor): string {
@@ -339,6 +374,11 @@ type Progress =
       readonly retryTriage?: {
         readonly decision: "new_story" | "existing_story";
         readonly sourceCount: number;
+        readonly reason: string;
+      };
+      readonly retryAttachment?: {
+        readonly relevance: string;
+        readonly reason: string;
       };
     }
   | {
@@ -358,6 +398,7 @@ function TriageItem({
   onStoryKnown,
   onStoryLoaded,
   focusRequested,
+  publicationBrief,
 }: Readonly<{
   item: SourceInboxItem;
   stories: readonly StoryListItem[];
@@ -368,12 +409,15 @@ function TriageItem({
   onStoryKnown: SourceInboxWorkspaceProps["onStoryKnown"];
   onStoryLoaded: SourceInboxWorkspaceProps["onStoryLoaded"];
   focusRequested: boolean;
+  publicationBrief: PublicationBrief | null;
 }>) {
   const [action, setAction] = useState<Action>(null);
   const [title, setTitle] = useState(extractedTitle(item));
   const [storyIdentity, setStoryIdentity] = useState<string>(stories[0]?.story.id ?? "");
-  const [relevance, setRelevance] = useState("");
-  const [reason, setReason] = useState("");
+  const [readerValue, setReaderValue] = useState(DEFAULT_READER_VALUE);
+  const [focus, setFocus] = useState("");
+  const [contribution, setContribution] = useState(DEFAULT_SOURCE_CONTRIBUTION);
+  const [skipReason, setSkipReason] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [progress, setProgress] = useState<Progress>({ kind: "idle" });
   const [preparations, setPreparations] = useState(item.preparations);
@@ -463,13 +507,11 @@ function TriageItem({
     setProgress({ kind: "idle" });
   }
 
-  function validate(fields: readonly ("title" | "story" | "relevance" | "reason")[]): boolean {
-    const values = { title, story: storyIdentity, relevance, reason };
+  function validate(fields: readonly ("title" | "story")[]): boolean {
+    const values = { title, story: storyIdentity };
     const messages = {
       title: "Enter a non-empty Story title.",
       story: "Choose an existing Story.",
-      relevance: "Explain why this Source is relevant.",
-      reason: "Say why you are making this call.",
     };
     const next: Record<string, string> = {};
     for (const field of fields)
@@ -496,11 +538,21 @@ function TriageItem({
 
   async function createNew(event: FormEvent) {
     event.preventDefault();
-    if (pendingRef.current || !validate(["title", "relevance", "reason"])) return;
+    if (pendingRef.current || !validate(["title"])) return;
     pendingRef.current = true;
+    const purpose: StoryPurpose = {
+      readerValue: readerValue.trim() || DEFAULT_READER_VALUE,
+      focus: focus.trim(),
+    };
+    const sourceContribution = `Starting evidence for this Story; investigate: ${purpose.readerValue}${
+      purpose.focus ? ` Focus: ${purpose.focus}` : ""
+    }`;
+    const decisionReason = `Covered this Source to investigate: ${purpose.readerValue}${
+      purpose.focus ? ` Focus: ${purpose.focus}` : ""
+    }`;
     try {
       setProgress({ kind: "pending", stage: "Creating Story…" });
-      const creation = await storyRequests.createStory(title);
+      const creation = await storyRequests.createStory(title, purpose);
       if (creation.kind !== "completed") {
         setProgress({
           kind: "failure",
@@ -512,7 +564,11 @@ function TriageItem({
       const story = creation.value;
       onStoryKnown(story, 0);
       setProgress({ kind: "pending", stage: "Attaching Source…" });
-      const attachment = await storyRequests.attachSource(story.id, item.source.id, relevance);
+      const attachment = await storyRequests.attachSource(
+        story.id,
+        item.source.id,
+        sourceContribution,
+      );
       if (attachment.kind !== "completed") {
         setProgress({
           kind: "partial",
@@ -521,6 +577,7 @@ function TriageItem({
             attachment.kind === "application-failure"
               ? `Story exists; Source was not attached: ${attachment.error.message}`
               : "Story exists; Source attachment outcome is unavailable. No rollback or automatic replay was attempted.",
+          retryAttachment: { relevance: sourceContribution, reason: decisionReason },
         });
         return;
       }
@@ -530,13 +587,13 @@ function TriageItem({
         item.source.id,
         "new_story",
         story.id,
-        reason,
+        decisionReason,
       );
       if (triage.kind !== "completed") {
         setProgress({
           kind: "partial",
           story,
-          retryTriage: { decision: "new_story", sourceCount: 1 },
+          retryTriage: { decision: "new_story", sourceCount: 1, reason: decisionReason },
           message:
             triage.kind === "application-failure"
               ? `Story and attachment exist; final triage audit failed: ${triage.error.message}`
@@ -560,16 +617,18 @@ function TriageItem({
 
   async function attachExisting(event: FormEvent) {
     event.preventDefault();
-    if (pendingRef.current || !validate(["story", "relevance", "reason"])) return;
+    if (pendingRef.current || !validate(["story"])) return;
     const selected = stories.find(({ story }) => story.id === storyIdentity);
     if (!selected) return;
+    const finalContribution = contribution.trim() || DEFAULT_SOURCE_CONTRIBUTION;
+    const decisionReason = `Added this Source to “${selected.story.title}” because: ${finalContribution}`;
     pendingRef.current = true;
     try {
       setProgress({ kind: "pending", stage: "Attaching Source…" });
       const attachment = await storyRequests.attachSource(
         selected.story.id,
         item.source.id,
-        relevance,
+        finalContribution,
       );
       if (attachment.kind !== "completed") {
         setProgress({
@@ -588,13 +647,17 @@ function TriageItem({
         item.source.id,
         "existing_story",
         selected.story.id,
-        reason,
+        decisionReason,
       );
       if (triage.kind !== "completed") {
         setProgress({
           kind: "partial",
           story: selected.story,
-          retryTriage: { decision: "existing_story", sourceCount: knownSourceCount },
+          retryTriage: {
+            decision: "existing_story",
+            sourceCount: knownSourceCount,
+            reason: decisionReason,
+          },
           message:
             triage.kind === "application-failure"
               ? `Attachment exists; final triage audit failed: ${triage.error.message}`
@@ -616,12 +679,96 @@ function TriageItem({
     }
   }
 
+  async function recoverNewStoryAttachment() {
+    if (
+      pendingRef.current ||
+      progress.kind !== "partial" ||
+      !progress.story ||
+      !progress.retryAttachment
+    )
+      return;
+    pendingRef.current = true;
+    const story = progress.story;
+    const { relevance, reason } = progress.retryAttachment;
+    setProgress({ kind: "pending", stage: "Checking whether the Source was attached…" });
+    try {
+      const inspected = await storyRequests.inspectStory(story.id);
+      if (inspected.kind !== "completed") {
+        setProgress({
+          kind: "partial",
+          story,
+          retryAttachment: { relevance, reason },
+          message: "The attachment status could not be checked. Check again before retrying.",
+        });
+        return;
+      }
+      const existing = inspected.value.sources.find(
+        ({ source: attachedSource }) => attachedSource.id === item.source.id,
+      );
+      if (existing && existing.attachment.relevance !== relevance) {
+        setProgress({
+          kind: "partial",
+          story,
+          retryAttachment: { relevance, reason },
+          message:
+            "A different attachment for this Source is already recorded. Review the Story before continuing triage.",
+        });
+        return;
+      }
+      if (!existing) {
+        const attached = await storyRequests.attachSource(story.id, item.source.id, relevance);
+        if (attached.kind !== "completed") {
+          setProgress({
+            kind: "partial",
+            story,
+            retryAttachment: { relevance, reason },
+            message:
+              attached.kind === "application-failure"
+                ? `The Source is not confirmed attached: ${attached.error.message}`
+                : "The attachment outcome is still unavailable. Check its status before retrying.",
+          });
+          return;
+        }
+      }
+
+      const decision = await inboxRequests.recordTriageDecision(
+        item.source.id,
+        "new_story",
+        story.id,
+        reason,
+      );
+      if (decision.kind !== "completed") {
+        setProgress({
+          kind: "partial",
+          story,
+          retryTriage: { decision: "new_story", sourceCount: 1, reason },
+          message:
+            decision.kind === "application-failure"
+              ? `Story and attachment exist; final triage audit failed: ${decision.error.message}`
+              : "Story and attachment exist; final triage audit outcome is unavailable. No rollback was attempted.",
+        });
+        return;
+      }
+      onDecisionCompleted();
+      const finalInspection = await storyRequests.inspectStory(story.id);
+      setProgress({
+        kind: "completed",
+        decision: "new_story",
+        message: "Story created and Source attached.",
+        ...(finalInspection.kind === "completed" ? { inspection: finalInspection.value } : {}),
+      });
+    } finally {
+      pendingRef.current = false;
+    }
+  }
+
   async function skip(event: FormEvent) {
     event.preventDefault();
-    if (pendingRef.current || !validate(["reason"])) return;
+    if (pendingRef.current) return;
     pendingRef.current = true;
     setProgress({ kind: "pending", stage: "Recording skip decision…" });
     try {
+      const reason = skipReason.trim() || TRIAGE_REASON.skip;
       const result = await inboxRequests.recordTriageDecision(item.source.id, "skip", null, reason);
       if (result.kind === "completed") {
         onDecisionCompleted();
@@ -655,6 +802,7 @@ function TriageItem({
     pendingRef.current = true;
     const story = progress.story;
     const decision = progress.retryTriage.decision;
+    const reason = progress.retryTriage.reason;
     const knownSourceCount = progress.retryTriage.sourceCount;
     setProgress({ kind: "pending", stage: "Retrying final triage decision…" });
     try {
@@ -668,7 +816,7 @@ function TriageItem({
         setProgress({
           kind: "partial",
           story,
-          retryTriage: { decision, sourceCount: knownSourceCount },
+          retryTriage: { decision, sourceCount: knownSourceCount, reason },
           message:
             result.kind === "application-failure"
               ? `The attachment still exists; final triage audit failed: ${result.error.message}`
@@ -768,14 +916,14 @@ function TriageItem({
         onPrepare={(extractionId) => void prepare(extractionId)}
         onRetryExtraction={() => void retryExtraction()}
       />
-      <div className={styles.workspaceSwitch} role="group" aria-label="Triage action">
+      <div className={styles.workspaceSwitch} role="group" aria-label="What would you like to do?">
         <button
           type="button"
           aria-pressed={action === "new"}
           disabled={lockedByDurableStory}
           onClick={() => open("new")}
         >
-          Create new Story
+          Cover this
         </button>
         <button
           type="button"
@@ -783,7 +931,7 @@ function TriageItem({
           disabled={lockedByDurableStory}
           onClick={() => open("existing")}
         >
-          Attach to existing Story
+          Add to an existing Story
         </button>
         <button
           type="button"
@@ -801,35 +949,41 @@ function TriageItem({
             <input value={title} onChange={(event) => setTitle(event.currentTarget.value)} />
           </label>
           {field("title")}
-          <label htmlFor="triage-relevance">What this Source gives the Story</label>
-          <p id="triage-relevance-purpose" className={styles.fieldPurpose}>
-            Carried on the Story and read by the Assignment Editor and the Writer when they decide
-            what this Source can be used for.
+          <label htmlFor="story-reader-value">Why does this matter to your readers?</label>
+          <p className={styles.fieldPurpose}>
+            A short answer helps the newsroom choose a useful angle. You can keep the starting
+            suggestion and refine it later.
           </p>
+          <div className={styles.suggestionRow}>
+            <button
+              className={styles.secondaryAction}
+              type="button"
+              onClick={() => setReaderValue(readerValueSuggestion(item, publicationBrief))}
+            >
+              Use a suggested question
+            </button>
+            <span>Review and edit it before covering.</span>
+          </div>
           <textarea
-            id="triage-relevance"
-            aria-describedby="triage-relevance-purpose"
-            value={relevance}
-            onChange={(event) => setRelevance(event.currentTarget.value)}
+            id="story-reader-value"
+            value={readerValue}
+            maxLength={MAXIMUM_STORY_PURPOSE_FIELD_CHARACTERS}
+            onChange={(event) => setReaderValue(event.currentTarget.value)}
           />
-          {field("relevance")}
-          <label htmlFor="triage-reason">Why you are making this call</label>
-          <p id="triage-reason-purpose" className={styles.fieldPurpose}>
-            Kept for good under your name. It is the answer to anyone who later asks why this Source
-            was taken up or passed over.
-          </p>
+          <label htmlFor="story-focus">
+            Anything you want us to investigate or emphasize? <span>(optional)</span>
+          </label>
           <textarea
-            id="triage-reason"
-            aria-describedby="triage-reason-purpose"
-            value={reason}
-            onChange={(event) => setReason(event.currentTarget.value)}
+            id="story-focus"
+            value={focus}
+            maxLength={MAXIMUM_STORY_PURPOSE_FIELD_CHARACTERS}
+            onChange={(event) => setFocus(event.currentTarget.value)}
           />
-          {field("reason")}
           <button
             type="submit"
             disabled={pending || (progress.kind === "partial" && progress.story !== undefined)}
           >
-            Create, attach, and record decision
+            Cover this Source
           </button>
         </form>
       ) : null}
@@ -850,54 +1004,43 @@ function TriageItem({
             </select>
           </label>
           {field("story")}
-          <label htmlFor="triage-relevance">What this Source gives the Story</label>
-          <p id="triage-relevance-purpose" className={styles.fieldPurpose}>
-            Carried on the Story and read by the Assignment Editor and the Writer when they decide
-            what this Source can be used for.
+          <label htmlFor="triage-contribution">What does this Source add to the Story?</label>
+          <p className={styles.fieldPurpose}>
+            This note stays with this Source&apos;s attachment. The existing Story purpose will not
+            change.
           </p>
+          <button
+            className={styles.secondaryAction}
+            type="button"
+            onClick={() => setContribution(contributionSuggestion(item, publicationBrief))}
+          >
+            Suggest how this source could help
+          </button>
           <textarea
-            id="triage-relevance"
-            aria-describedby="triage-relevance-purpose"
-            value={relevance}
-            onChange={(event) => setRelevance(event.currentTarget.value)}
+            id="triage-contribution"
+            value={contribution}
+            onChange={(event) => setContribution(event.currentTarget.value)}
           />
-          {field("relevance")}
-          <label htmlFor="triage-reason">Why you are making this call</label>
-          <p id="triage-reason-purpose" className={styles.fieldPurpose}>
-            Kept for good under your name. It is the answer to anyone who later asks why this Source
-            was taken up or passed over.
-          </p>
-          <textarea
-            id="triage-reason"
-            aria-describedby="triage-reason-purpose"
-            value={reason}
-            onChange={(event) => setReason(event.currentTarget.value)}
-          />
-          {field("reason")}
           <button
             type="submit"
             disabled={pending || (progress.kind === "partial" && progress.story !== undefined)}
           >
-            Attach and record decision
+            Add this Source
           </button>
         </form>
       ) : null}
       {action === "skip" ? (
         <form className={styles.storyCreationForm} onSubmit={skip} aria-busy={pending}>
-          <label htmlFor="triage-reason">Why you are making this call</label>
-          <p id="triage-reason-purpose" className={styles.fieldPurpose}>
-            Kept for good under your name. It is the answer to anyone who later asks why this Source
-            was taken up or passed over.
-          </p>
+          <label htmlFor="triage-skip-reason">
+            Reason <span>(optional)</span>
+          </label>
           <textarea
-            id="triage-reason"
-            aria-describedby="triage-reason-purpose"
-            value={reason}
-            onChange={(event) => setReason(event.currentTarget.value)}
+            id="triage-skip-reason"
+            value={skipReason}
+            onChange={(event) => setSkipReason(event.currentTarget.value)}
           />
-          {field("reason")}
           <button type="submit" disabled={pending}>
-            Record skip decision
+            Skip this Source
           </button>
         </form>
       ) : null}
@@ -931,6 +1074,15 @@ function TriageItem({
               Retry final triage decision
             </button>
           ) : null}
+          {progress.retryAttachment ? (
+            <button
+              className={styles.storyCreationAction}
+              type="button"
+              onClick={() => void recoverNewStoryAttachment()}
+            >
+              Check and continue attachment
+            </button>
+          ) : null}
         </div>
       ) : null}
     </article>
@@ -951,6 +1103,7 @@ export function SourceInboxWorkspace({
   const inboxRequests = suppliedInboxRequests ?? clients.sourceInbox;
   const storyRequests = suppliedStoryRequests ?? clients.stories;
   const [state, setState] = useState<InboxState>({ kind: "loading" });
+  const [publicationBrief, setPublicationBrief] = useState<PublicationBrief | null>(null);
   const [locallyCompletedSourceIds, setLocallyCompletedSourceIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -982,6 +1135,22 @@ export function SourceInboxWorkspace({
       active = false;
     };
   }, [refreshVersion, inboxRequests]);
+
+  useEffect(() => {
+    let active = true;
+    void clients.newsroomStandards
+      .listRevisions()
+      .then((result) => {
+        if (!active || result.kind !== "loaded") return;
+        setPublicationBrief(result.revisions.at(-1)?.brief ?? null);
+      })
+      .catch(() => {
+        if (active) setPublicationBrief(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [clients.newsroomStandards]);
 
   const displayedState =
     state.kind !== "loading" && state.refreshVersion !== refreshVersion
@@ -1019,11 +1188,8 @@ export function SourceInboxWorkspace({
     <section className={styles.sourceWorkspace} aria-labelledby="source-inbox-title">
       <header className={styles.sourceWorkspaceHeader}>
         <p className={styles.sectionKicker}>Source Inbox</p>
-        <h1 id="source-inbox-title">Decide what preserved evidence means</h1>
-        <p>
-          Source intake preserves evidence. Source Inbox makes the durable editorial decision: new
-          Story, existing Story, or skip.
-        </p>
+        <h1 id="source-inbox-title">What would you like to cover?</h1>
+        <p>Cover a source, add it to a story, or skip it. Your evidence stays available.</p>
       </header>
       {displayedState.items.length === 0 ? (
         <div className={styles.emptyWorkspace} role="status">
@@ -1039,6 +1205,7 @@ export function SourceInboxWorkspace({
             <TriageItem
               key={`${displayedState.refreshVersion}:${item.source.id}`}
               item={item}
+              publicationBrief={publicationBrief}
               stories={stories}
               inboxRequests={inboxRequests}
               storyRequests={storyRequests}

@@ -65,6 +65,10 @@ function storyRequests(): StoryClient {
       kind: "completed",
       value: STORY,
     })),
+    updateStoryPurpose: vi.fn<StoryClient["updateStoryPurpose"]>(async () => ({
+      kind: "completed",
+      value: STORY,
+    })),
     attachSource: vi.fn<StoryClient["attachSource"]>(async (_storyId, identity) => ({
       kind: "completed",
       value: {

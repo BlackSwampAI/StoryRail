@@ -55,6 +55,17 @@ function modelOutput(input) {
       reason: "The attached notice is a single verified service update.",
     };
   }
+  // URL Autopilot's optional Researcher receives evidence documents rather than references.
+  // It can complete without tools when no further page is warranted.
+  if (
+    Array.isArray(input.evidence) &&
+    input.evidence.some((item) => typeof item.url === "string")
+  ) {
+    return {
+      attach: [],
+      reasoning: "No further retrieved evidence was needed for this acceptance run.",
+    };
+  }
   if (Array.isArray(input.claims) && input.grounding) {
     const quoted = input.revision.headline;
     const approve = input.revision.revisionNumber === 2;

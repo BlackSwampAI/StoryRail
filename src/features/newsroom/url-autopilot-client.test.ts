@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { policyRunId, siteId } from "@/domain/editorial";
+import { policyRunId, siteId, type StoryPurpose } from "@/domain/editorial";
 
 import {
   URL_AUTOPILOT_UNAVAILABLE_MESSAGE,
@@ -45,6 +45,25 @@ describe("starting an unattended run from the browser", () => {
       policyRunId: "policy-1",
       sourceId: "source-1",
     });
+  });
+
+  it("sends the optional reader purpose in the Site-scoped URL request", async () => {
+    const purpose: StoryPurpose = {
+      readerValue: "Residents should know what changed.",
+      focus: "Confirmed timing",
+    };
+    const fetchImplementation = vi.fn(async () =>
+      response(202, { ok: true, policyRunId: "policy-1", sourceId: "source-1" }),
+    );
+
+    await createUrlAutopilotClient({ siteId: SITE_ID, fetch: fetchImplementation }).start({
+      submittedUrl,
+      research: true,
+      purpose,
+    });
+
+    const [, init] = fetchImplementation.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({ submittedUrl, research: true, purpose });
   });
 
   it("reports a refusal in the words the newsroom used", async () => {
