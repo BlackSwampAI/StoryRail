@@ -21,7 +21,7 @@ Durable Agent Profiles configure the Assignment Editor, Researcher, Writer, and 
 9. Run an independent editor-in-chief review.
 10. Approve, reject, or request changes.
 11. Permit no more than two revision cycles.
-12. Publish an approved Story through a separate, explicit operator transition, then optionally deliver its Article to the Site's configured destination (WordPress or StudioCMS) as a separate, recorded delivery.
+12. Publish an approved Story through a separate, explicit operator transition, then optionally deliver its Article to the Site's configured destination (WordPress or EmDash) as a separate, recorded delivery.
 
 ## In scope
 
@@ -78,7 +78,7 @@ These criteria describe the complete target slice and are only partially impleme
 
 - resumption of interrupted policy runs and automatic scheduling of reconciliation
 - a knowledge corpus separating house style from citable reference knowledge
-- publishing destinations beyond WordPress and StudioCMS, and delivery to more than one destination per Site
+- publishing destinations beyond WordPress and EmDash, and delivery to more than one destination per Site
 - RSS automation
 - automatic clustering
 - semantic duplicate detection across Sources or Stories

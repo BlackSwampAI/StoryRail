@@ -19,7 +19,10 @@ function trimmedString(value: unknown): value is string {
 export function siteDestinationInstanceId(
   destination: SiteDestinationSettings,
 ): DestinationInstanceId {
-  return destinationInstanceId(`${destination.kind}:${destination.baseUrl.replace(/\/+$/, "")}`);
+  const identity = `${destination.kind}:${destination.baseUrl.replace(/\/+$/, "")}`;
+  return destination.kind === "emdash"
+    ? destinationInstanceId(`${identity}:${destination.collection}`)
+    : destinationInstanceId(identity);
 }
 
 /**
@@ -30,8 +33,8 @@ export function siteDestinationInstanceId(
  * absolute for the same reason: a relative address would be resolved against whatever process
  * happened to send the request.
  *
- * The kind is read first and everything else is checked against it, so a StudioCMS renderer
- * package cannot be stored on a WordPress destination that would silently ignore it.
+ * The kind is read first and everything else is checked against it, so an EmDash collection
+ * cannot be stored on a WordPress destination that would silently ignore it.
  */
 function readDestination(
   value: unknown,
@@ -39,11 +42,11 @@ function readDestination(
   if (typeof value !== "object" || value === null || Array.isArray(value)) return { ok: false };
   const candidate = value as Record<string, unknown>;
   const kind = candidate.kind;
-  if (kind !== "studiocms" && kind !== "wordpress") return { ok: false };
+  if (kind !== "emdash" && kind !== "wordpress") return { ok: false };
 
   const allowed =
-    kind === "studiocms"
-      ? ["kind", "baseUrl", "package", "draft"]
+    kind === "emdash"
+      ? ["kind", "baseUrl", "collection", "draft"]
       : ["kind", "baseUrl", "username", "draft"];
   if (Object.keys(candidate).length !== allowed.length) return { ok: false };
   if (!trimmedString(candidate.baseUrl) || typeof candidate.draft !== "boolean")
@@ -52,11 +55,21 @@ function readDestination(
   const baseUrl = candidate.baseUrl.trim().replace(/\/+$/, "");
   if (!/^https?:\/\/[^\s]+$/.test(baseUrl)) return { ok: false };
 
-  if (kind === "studiocms") {
-    if (!trimmedString(candidate.package)) return { ok: false };
+  if (kind === "emdash") {
+    if (
+      !trimmedString(candidate.collection) ||
+      candidate.collection.trim().length > 63 ||
+      !/^[a-z][a-z0-9_]*$/.test(candidate.collection.trim())
+    )
+      return { ok: false };
     return {
       ok: true,
-      destination: { kind, baseUrl, package: candidate.package.trim(), draft: candidate.draft },
+      destination: {
+        kind,
+        baseUrl,
+        collection: candidate.collection.trim(),
+        draft: candidate.draft,
+      },
     };
   }
 

@@ -90,6 +90,14 @@ Open [http://localhost:3133](http://localhost:3133). The `pnpm migrate` shortcut
 
 Provider credentials and model choices are configured per Site in the newsroom settings. Do not commit `.env` or real credentials. Because the app has no authentication, keep the development server private to your machine or a trusted network.
 
+### EmDash destination setup
+
+Run the normal migrations, including `0083-emdash-destination.sql`, then choose **EmDash** under Publishing destinations. Enter the full API base URL (normally `https://your-site.example/_emdash/api`) and the collection slug, which defaults to `posts`. Collection names must be 1–63 characters, start with a lowercase letter, and contain only lowercase letters, numbers, or underscores. Changing the collection sends future deliveries to a separate destination history. See EmDash's [REST API](https://docs.emdashcms.com/reference/rest-api/) and [blog setup guide](https://docs.emdashcms.com/guides/create-a-blog) for instance setup.
+
+Create an EmDash personal access token for a user allowed to create content, with `content:write`; grant `content:publish` too when delivering live pages. Save it as the EmDash credential in Settings. The selected collection must accept `title` as a string, `excerpt` as text, and `content` as Portable Text, with no additional required fields. When **Deliver as a draft** is enabled, choose a collection that keeps revisions so updates can be staged while its published version remains live; the standard blog collection supports this. StoryRail maps Article title and excerpt directly and maps heading and prose blocks to Portable Text; inline Markdown remains literal text. **Deliver as a draft** is enabled by default. Later revisions update the page StoryRail created in the same collection. Live publishing requires the publish scope; a draft can be reviewed and published in EmDash.
+
+Migration 0083 removes an existing StudioCMS destination setting because its endpoint and renderer cannot be safely converted. It retains old delivery records and all encrypted credentials, including any old StudioCMS token, but does not use or convert that token. Configure EmDash and enter a new EmDash token. No remote content is migrated. If an EmDash request has an ambiguous outcome, StoryRail blocks another delivery until the operator reconciles that attempt in the delivery workspace.
+
 ## Development
 
 Useful commands from `package.json`:

@@ -25,11 +25,30 @@ describe("identifying a configured destination installation", () => {
     );
     expect(
       siteDestinationInstanceId({
-        kind: "studiocms",
+        kind: "emdash",
         baseUrl: wordpress.baseUrl,
-        package: "studiocms/markdown",
+        collection: "posts",
         draft: wordpress.draft,
       }),
     ).not.toBe(siteDestinationInstanceId(wordpress));
+  });
+
+  it("treats separate EmDash collections as separate destinations", () => {
+    const emdash = {
+      kind: "emdash" as const,
+      baseUrl: "https://newsroom.test/api",
+      collection: "posts",
+      draft: true,
+    };
+
+    expect(siteDestinationInstanceId({ ...emdash, collection: "pages" })).not.toBe(
+      siteDestinationInstanceId(emdash),
+    );
+    expect(siteDestinationInstanceId({ ...emdash, draft: false })).toBe(
+      siteDestinationInstanceId(emdash),
+    );
+    expect(siteDestinationInstanceId({ ...emdash, baseUrl: "https://newsroom.test/api/" })).toBe(
+      siteDestinationInstanceId(emdash),
+    );
   });
 });

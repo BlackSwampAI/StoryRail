@@ -184,7 +184,7 @@ describe("site-settings-client", () => {
           destination: {
             kind: "wordpress",
             baseUrl: "https://blog.example.com",
-            package: "@studiocms/markdown-remark",
+            collection: "posts",
             draft: true,
           },
         },

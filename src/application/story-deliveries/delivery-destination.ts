@@ -19,10 +19,9 @@ interface DeliveryRequestCommon {
   /** Derived from the Revision's blocks at the moment of delivery, never stored a second time. */
   readonly bodyMarkdown: string;
   /**
-   * The Revision's blocks as they were written. A destination whose body format keeps structure
-   * — WordPress stores separate editor blocks — serialises from these rather than parsing the
-   * markdown back apart, because re-deriving a structure that was never lost is how the two
-   * copies come to disagree.
+   * The Revision's blocks as they were written. WordPress and EmDash keep structured body
+   * content, so their adapters serialise from these rather than parsing the markdown back apart.
+   * Re-deriving a structure that was never lost is how the two copies come to disagree.
    */
   readonly blocks: readonly ArticleBlock[];
   readonly draft: boolean;
@@ -69,7 +68,7 @@ export type DeliveryAttemptResult =
  * remembering to write it.
  */
 export interface DeliveryDestination {
-  /** The name recorded against every delivery made through it, such as `studiocms`. */
+  /** The name recorded against every delivery made through it, such as `emdash`. */
   readonly name: string;
   readonly instanceId: DestinationInstanceId;
   /**

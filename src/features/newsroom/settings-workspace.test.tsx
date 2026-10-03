@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   OPENROUTER_API_KEY_SLOT,
-  STUDIOCMS_API_TOKEN_SLOT,
+  EMDASH_API_TOKEN_SLOT,
   WORDPRESS_APPLICATION_PASSWORD_SLOT,
   type SiteDestinationSettings,
   type SiteModelIds,
@@ -398,10 +398,10 @@ const WORDPRESS_DESTINATION: SiteDestinationSettings = {
   draft: true,
 };
 
-const STUDIOCMS_DESTINATION: SiteDestinationSettings = {
-  kind: "studiocms",
-  baseUrl: "https://blog.example.com/studiocms_api/rest/v1",
-  package: "@studiocms/markdown-remark",
+const EMDASH_DESTINATION: SiteDestinationSettings = {
+  kind: "emdash",
+  baseUrl: "https://blog.example.com/api",
+  collection: "posts",
   draft: true,
 };
 
@@ -416,7 +416,7 @@ function withDestination(
           settings: { models: MODELS, destination, search: null, research: null },
           credentials: [
             {
-              slot: STUDIOCMS_API_TOKEN_SLOT,
+              slot: EMDASH_API_TOKEN_SLOT,
               hint: "9f21",
               updatedAt: "2026-08-24T10:00:00.000Z",
             },
@@ -443,29 +443,27 @@ describe("publishing destination settings", () => {
 
     const section = destinationsSection();
     expect(section).not.toHaveTextContent(/it does not deliver/);
-    expect(section).not.toHaveTextContent(/Publish through the StudioCMS API/);
+    expect(section).not.toHaveTextContent(/Publish through the EmDash API/);
     expect(section).not.toHaveTextContent(/Publish through the WordPress REST API/);
     // Ghost and Webhook really are unbuilt, so they are the only rows still marked planned.
     expect(within(section).getAllByText("Planned")).toHaveLength(2);
   });
 
-  it("shows the WordPress fields and none of the StudioCMS ones", async () => {
+  it("shows the WordPress fields and none of the EmDash ones", async () => {
     renderSettings(withDestination(WORDPRESS_DESTINATION));
 
     expect(await screen.findByLabelText("Base URL")).toHaveValue("https://blog.example.com");
     expect(screen.getByLabelText("WordPress user")).toHaveValue("editor");
-    expect(screen.queryByLabelText("Renderer package")).toBeNull();
+    expect(screen.queryByLabelText("Collection")).toBeNull();
     expect(destinationsSection()).toHaveTextContent(/StoryRail appends \/wp-json\/wp\/v2\/posts/);
   });
 
-  it("shows the StudioCMS fields and asks for the API path in the base URL", async () => {
-    renderSettings(withDestination(STUDIOCMS_DESTINATION));
+  it("shows the EmDash collection and asks for the API base URL", async () => {
+    renderSettings(withDestination(EMDASH_DESTINATION));
 
-    expect(await screen.findByLabelText("Renderer package")).toHaveValue(
-      "@studiocms/markdown-remark",
-    );
+    expect(await screen.findByLabelText("Collection")).toHaveValue("posts");
     expect(screen.queryByLabelText("WordPress user")).toBeNull();
-    expect(destinationsSection()).toHaveTextContent(/Include the API path/);
+    expect(destinationsSection()).toHaveTextContent(/Include the full API base/);
   });
 
   it("stores a WordPress destination with a username and no renderer package", async () => {
@@ -489,26 +487,24 @@ describe("publishing destination settings", () => {
     renderSettings(withDestination(WORDPRESS_DESTINATION, { saveDestination }));
 
     fireEvent.change(await screen.findByLabelText("Destination"), {
-      target: { value: "studiocms" },
+      target: { value: "emdash" },
     });
     fireEvent.change(screen.getByLabelText("Base URL"), {
-      target: { value: STUDIOCMS_DESTINATION.baseUrl },
+      target: { value: EMDASH_DESTINATION.baseUrl },
     });
-    fireEvent.change(screen.getByLabelText("Renderer package"), {
-      target: { value: "@studiocms/markdown-remark" },
+    fireEvent.change(screen.getByLabelText("Collection"), {
+      target: { value: "posts" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save destination" }));
 
-    await waitFor(() =>
-      expect(saveDestination).toHaveBeenCalledWith(MODELS, STUDIOCMS_DESTINATION),
-    );
+    await waitFor(() => expect(saveDestination).toHaveBeenCalledWith(MODELS, EMDASH_DESTINATION));
   });
 
-  it("keeps a WordPress base URL out of a StudioCMS submission while a kind is being tried", async () => {
+  it("keeps a WordPress base URL out of an EmDash submission while a kind is being tried", async () => {
     renderSettings(withDestination(WORDPRESS_DESTINATION));
 
     fireEvent.change(await screen.findByLabelText("Destination"), {
-      target: { value: "studiocms" },
+      target: { value: "emdash" },
     });
     expect(screen.getByLabelText("Base URL")).toHaveValue("");
 
@@ -522,7 +518,7 @@ describe("publishing destination settings", () => {
     renderSettings(withDestination(WORDPRESS_DESTINATION, { setCredential, removeCredential }));
 
     fireEvent.change(await screen.findByLabelText("Destination"), {
-      target: { value: "studiocms" },
+      target: { value: "emdash" },
     });
 
     const section = within(destinationsSection());

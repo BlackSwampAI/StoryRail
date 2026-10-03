@@ -4,13 +4,13 @@ import type {
 } from "@/application/story-deliveries";
 import type { SiteSettingsRepository } from "@/application/site-settings";
 import {
-  STUDIOCMS_API_TOKEN_SLOT,
+  EMDASH_API_TOKEN_SLOT,
   WORDPRESS_APPLICATION_PASSWORD_SLOT,
   type ApiKeyResolution,
   type CredentialSlot,
 } from "@/domain/editorial";
 
-import { createStudioCmsDestination } from "./studiocms-destination";
+import { createEmDashDestination } from "./emdash-destination";
 import { createWordPressDestination } from "./wordpress-destination";
 
 /**
@@ -45,17 +45,15 @@ export function createSiteDeliveryDestinationDirectory(dependencies: {
       // The kind decides which slot is read, so a newsroom that switched destinations cannot be
       // handed the other kind's secret and be told by the far end that its credential is wrong.
       const secret = await dependencies.resolveApiKey(
-        destination.kind === "studiocms"
-          ? STUDIOCMS_API_TOKEN_SLOT
-          : WORDPRESS_APPLICATION_PASSWORD_SLOT,
+        destination.kind === "emdash" ? EMDASH_API_TOKEN_SLOT : WORDPRESS_APPLICATION_PASSWORD_SLOT,
       );
       if (!secret.ok) return { ok: false, error: secret.error };
 
       return {
         ok: true,
         destination:
-          destination.kind === "studiocms"
-            ? createStudioCmsDestination({
+          destination.kind === "emdash"
+            ? createEmDashDestination({
                 settings: destination,
                 apiToken: secret.apiKey,
                 fetch: dependencies.fetch,
