@@ -9,6 +9,8 @@ import {
   articleRevisionId,
   assignmentId,
   operatorId,
+  policyRunId,
+  siteId,
   sourceEvidencePreparationId,
   sourceExtractionId,
   sourceId,
@@ -17,6 +19,7 @@ import {
   type Story,
 } from "@/domain/editorial";
 
+import { createNewsroomClients, NewsroomSiteProvider } from "./newsroom-clients";
 import { NewsroomShell } from "./newsroom-shell";
 import type { SourceInboxClient } from "./source-inbox-client";
 import type { StoryClient } from "./story-client";
@@ -30,6 +33,13 @@ const STORY = {
   createdAt: "created",
   updatedAt: "updated",
 } satisfies Story;
+
+const TEST_SITE = {
+  id: siteId("site-autopilot-shell"),
+  name: "Autopilot newsroom",
+  domain: "autopilot.example",
+  description: "Autopilot newsroom test site.",
+};
 
 function inspection(story: Story): StoryInspection {
   return {
@@ -250,6 +260,153 @@ function agentRequests(): AgentProfileClient {
 }
 
 describe("NewsroomShell", () => {
+  it("follows a URL policy through an idle gap and opens the updated Story queue", async () => {
+    const automatedStory = {
+      ...STORY,
+      id: storyId("story-from-url-autopilot"),
+      title: "Story created by Autopilot",
+      state: "intake" as const,
+    };
+    const initialInspection = inspection(automatedStory);
+    const researchRun = {
+      id: agentRunId("run-url-research"),
+      storyId: automatedStory.id,
+      profileId: agentProfileId("profile-researcher"),
+      role: "researcher",
+      operation: "source_research",
+      model: { provider: "openrouter", model: "research-model" },
+      prompt: { key: "storyrail_source_research", version: "1" },
+      requestedBy: { type: "operator", operatorId: operatorId("operator-24") },
+      startedAt: "started",
+      completedAt: null,
+      outcome: "running",
+    } as const;
+    const earlierStory = { ...STORY, state: "published" as const };
+    const toolCall = {
+      id: "call-url-research",
+      runId: researchRun.id,
+      storyId: automatedStory.id,
+      sequence: 1,
+      tool: "search_web",
+      request: { query: "corroborating report" },
+      requestedAt: "requested",
+      outcome: "running",
+      completedAt: null,
+    } as const;
+    const activeInspection = {
+      ...initialInspection,
+      agentRuns: [researchRun],
+      toolCalls: [toolCall],
+    } as unknown as StoryInspection;
+    const deliveredInspection = {
+      ...activeInspection,
+      story: { ...automatedStory, state: "published" },
+      agentRuns: [{ ...researchRun, outcome: "succeeded", completedAt: "completed", attached: [] }],
+      toolCalls: [
+        { ...toolCall, outcome: "succeeded", completedAt: "completed", result: { count: 1 } },
+      ],
+      deliveries: [{ outcome: "succeeded" }],
+    } as unknown as StoryInspection;
+    let inspectionCount = 0;
+    const stories: StoryClient = {
+      ...storyRequests(),
+      listStories: vi.fn(async () => ({
+        kind: "completed" as const,
+        value: [{ story: earlierStory, sourceCount: 1 }],
+      })),
+      inspectStory: vi.fn(async () => {
+        inspectionCount += 1;
+        return {
+          kind: "completed" as const,
+          value:
+            inspectionCount === 1
+              ? initialInspection
+              : inspectionCount >= 3
+                ? deliveredInspection
+                : activeInspection,
+        };
+      }),
+    };
+    let followCount = 0;
+    const urlAutopilot = {
+      start: vi.fn(async () => ({
+        kind: "started" as const,
+        policyRunId: policyRunId("policy-url-autopilot"),
+        sourceId: sourceId("source-url-autopilot"),
+      })),
+      follow: vi.fn(async () => {
+        followCount += 1;
+        return {
+          kind: "observed" as const,
+          run: {
+            id: policyRunId("policy-url-autopilot"),
+            storyId: automatedStory.id,
+            sourceId: null,
+            policy: "autopilot",
+            requestedBy: { type: "operator", operatorId: operatorId("operator-24") },
+            research: true,
+            startedAt: "started",
+            step: followCount > 2 ? "delivery" : "source_research",
+            attempt: 1,
+            observedAt: "observed",
+            status: followCount > 2 ? "settled" : "running",
+            ...(followCount > 2 ? { conclusion: "completed", reason: "Delivered" } : {}),
+          } as never,
+        };
+      }),
+    };
+    const baseClients = createNewsroomClients(TEST_SITE.id, async () => {
+      throw new Error("Unexpected test network request");
+    });
+
+    render(
+      <NewsroomSiteProvider
+        site={TEST_SITE}
+        sites={[TEST_SITE]}
+        clients={{
+          ...baseClients,
+          stories,
+          sourceInbox: inboxRequests(),
+          agentProfiles: agentRequests(),
+          urlAutopilot,
+        }}
+      >
+        <NewsroomShell />
+      </NewsroomSiteProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Source" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Source URL" }), {
+      target: { value: "https://autopilot.example/source" },
+    });
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: /Run this all the way to a published post/ }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Start Autopilot" }));
+
+    expect(await screen.findByRole("heading", { name: "Story rail" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: /Story created by Autopilot/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Intake, 1 story" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(
+      await screen.findByText("The Researcher is looking for Sources to corroborate this Story."),
+    ).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { name: "What the newsroom reached for" }),
+    ).toBeVisible();
+    expect(await screen.findByText("1 of 12 research calls used.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Autopilot is running…" })).toBeDisabled();
+    expect(urlAutopilot.follow).toHaveBeenCalledWith(policyRunId("policy-url-autopilot"));
+    await waitFor(
+      () =>
+        expect(screen.getByRole("listitem", { current: "step" })).toHaveTextContent("Delivered"),
+      { timeout: 5_000 },
+    );
+    expect(urlAutopilot.follow).toHaveBeenCalledTimes(3);
+  }, 10_000);
+
   it("reviews a supervised suggestion before revealing the editable Assignment form", async () => {
     const writer = {
       id: agentProfileId("writer-0030"),

@@ -9,6 +9,7 @@ import type { StoryListItem } from "@/application/story-listing";
 import {
   STORY_STATES,
   type AgentProfile,
+  type PolicyRunId,
   type Site,
   type StoryId,
   type StoryState,
@@ -24,12 +25,12 @@ import { STORY_STATE_LABELS } from "./newsroom-state";
 import { NewsroomStaff, WRITER_DRAG_TYPE, type StaffState } from "./newsroom-staff";
 import styles from "./newsroom-shell.module.css";
 import { ResizableNewsroomLayout } from "./resizable-newsroom-layout";
-import { SourceEvidenceWorkspace } from "./source-evidence-workspace";
+import { AUTOPILOT_FOLLOW_INTERVAL_MS, SourceEvidenceWorkspace } from "./source-evidence-workspace";
 import type { RequestSourceEvidenceUrl } from "./source-evidence-url-client";
 import { SitesWorkspace } from "./sites-workspace";
 import { SiteSwitcher } from "./site-switcher";
 import { CompactStoryRail } from "./story-rail";
-import { useFullRailOutOfView } from "./story-rail-visibility";
+import { FULL_RAIL_ELEMENT_ID, useFullRailOutOfView } from "./story-rail-visibility";
 import { SourceInboxWorkspace } from "./source-inbox-workspace";
 import type { SourceInboxClient } from "./source-inbox-client";
 import { StoryWorkspace } from "./story-workspace";
@@ -56,6 +57,11 @@ type StorySelection =
   | { readonly kind: "loaded"; readonly inspection: StoryInspection; readonly notice?: string }
   | { readonly kind: "unavailable"; readonly storyId: StoryId };
 
+interface FollowedUrlAutopilot {
+  readonly storyId: StoryId;
+  readonly policyRunId: PolicyRunId;
+}
+
 function pluralizeStories(count: number): string {
   return `${count} ${count === 1 ? "story" : "stories"}`;
 }
@@ -81,12 +87,30 @@ export function NewsroomShell({
   const [listing, setListing] = useState<StoryListingState>({ kind: "loading" });
   const [storySelection, setStorySelection] = useState<StorySelection>({ kind: "none" });
   const storySelectionGeneration = useRef(0);
+  const pendingAutopilotRailFocus = useRef<StoryId | null>(null);
+  const followedUrlAutopilotRef = useRef<FollowedUrlAutopilot | null>(null);
+  const [followedUrlAutopilot, setFollowedUrlAutopilot] = useState<FollowedUrlAutopilot | null>(
+    null,
+  );
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("story");
   // Observed against the open Story, so opening another one starts watching that Story's rail
   // rather than an element that has since been replaced.
   const railOutOfView = useFullRailOutOfView(
     storySelection.kind === "loaded" ? storySelection.inspection.story.id : null,
   );
+  useEffect(() => {
+    if (
+      workspaceMode !== "story" ||
+      storySelection.kind !== "loaded" ||
+      pendingAutopilotRailFocus.current !== storySelection.inspection.story.id
+    ) {
+      return;
+    }
+    const rail = document.getElementById(FULL_RAIL_ELEMENT_ID);
+    if (!rail) return;
+    pendingAutopilotRailFocus.current = null;
+    rail.scrollIntoView?.({ block: "start" });
+  }, [storySelection, workspaceMode]);
   const [sourceInboxRefreshVersion, setSourceInboxRefreshVersion] = useState(0);
   const [sourceInboxCount, setSourceInboxCount] = useState<number | null>(null);
   const [focusedSourceId, setFocusedSourceId] = useState<string | null>(null);
@@ -184,41 +208,7 @@ export function NewsroomShell({
   }, [items]);
   const expandedQueue = chosenQueue === undefined ? suggestedQueue : chosenQueue;
 
-  function openWorkspace(mode: WorkspaceMode) {
-    setWorkspaceMode(mode);
-    if (mode !== "story") setChosenQueue(null);
-    if (mode !== "source-inbox") setFocusedSourceId(null);
-  }
-
-  function toggleQueue(state: StoryState) {
-    setChosenQueue(expandedQueue === state ? null : state);
-    setWorkspaceMode("story");
-  }
-
-  async function selectStory(identity: StoryId) {
-    const generation = ++storySelectionGeneration.current;
-    setStorySelection({ kind: "loading", storyId: identity });
-    setWorkspaceMode("story");
-    try {
-      const result = await requests.inspectStory(identity);
-      if (generation !== storySelectionGeneration.current) return;
-      setStorySelection(
-        result.kind === "completed"
-          ? { kind: "loaded", inspection: result.value }
-          : { kind: "unavailable", storyId: identity },
-      );
-    } catch {
-      if (generation !== storySelectionGeneration.current) return;
-      setStorySelection({ kind: "unavailable", storyId: identity });
-    }
-  }
-
-  function installStoryInspection(inspection: StoryInspection, notice?: string) {
-    storySelectionGeneration.current += 1;
-    setStorySelection({ kind: "loaded", inspection, ...(notice === undefined ? {} : { notice }) });
-  }
-
-  function upsertStoryListItem(item: StoryListItem) {
+  const upsertStoryListItem = useCallback((item: StoryListItem) => {
     setListing((current) => {
       if (current.kind !== "loaded") return current;
       const existingIndex = current.items.findIndex(({ story }) => story.id === item.story.id);
@@ -230,6 +220,144 @@ export function NewsroomShell({
       );
       return { kind: "loaded", items: nextItems };
     });
+  }, []);
+
+  function openWorkspace(mode: WorkspaceMode) {
+    followedUrlAutopilotRef.current = null;
+    setFollowedUrlAutopilot(null);
+    pendingAutopilotRailFocus.current = null;
+    storySelectionGeneration.current += 1;
+    setWorkspaceMode(mode);
+    if (mode !== "story") setChosenQueue(null);
+    if (mode !== "source-inbox") setFocusedSourceId(null);
+  }
+
+  function toggleQueue(state: StoryState) {
+    followedUrlAutopilotRef.current = null;
+    setFollowedUrlAutopilot(null);
+    pendingAutopilotRailFocus.current = null;
+    storySelectionGeneration.current += 1;
+    setChosenQueue(expandedQueue === state ? null : state);
+    setWorkspaceMode("story");
+  }
+
+  const selectStory = useCallback(
+    async (identity: StoryId, openStoryQueue = false) => {
+      if (!openStoryQueue && pendingAutopilotRailFocus.current !== identity) {
+        followedUrlAutopilotRef.current = null;
+        setFollowedUrlAutopilot(null);
+        pendingAutopilotRailFocus.current = null;
+      }
+      const generation = ++storySelectionGeneration.current;
+      const shouldOpenStoryQueue = openStoryQueue || pendingAutopilotRailFocus.current === identity;
+      setStorySelection({ kind: "loading", storyId: identity });
+      setWorkspaceMode("story");
+      try {
+        const result = await requests.inspectStory(identity);
+        if (generation !== storySelectionGeneration.current) return;
+        if (result.kind === "completed") {
+          if (shouldOpenStoryQueue) {
+            upsertStoryListItem({
+              story: result.value.story,
+              sourceCount: result.value.sources.length,
+            });
+            setChosenQueue(result.value.story.state);
+          }
+          setStorySelection({ kind: "loaded", inspection: result.value });
+        } else {
+          setStorySelection({ kind: "unavailable", storyId: identity });
+        }
+      } catch {
+        if (generation !== storySelectionGeneration.current) return;
+        setStorySelection({ kind: "unavailable", storyId: identity });
+      }
+    },
+    [requests, upsertStoryListItem],
+  );
+
+  const handoffAutopilotStory = useCallback(
+    (identity: StoryId, policyRunIdentity: PolicyRunId | null) => {
+      pendingAutopilotRailFocus.current = identity;
+      const follow =
+        policyRunIdentity === null ? null : { storyId: identity, policyRunId: policyRunIdentity };
+      followedUrlAutopilotRef.current = follow;
+      setFollowedUrlAutopilot(follow);
+      void selectStory(identity, true);
+    },
+    [selectStory],
+  );
+
+  const followedStoryReady =
+    followedUrlAutopilot !== null &&
+    storySelection.kind === "loaded" &&
+    storySelection.inspection.story.id === followedUrlAutopilot.storyId;
+  useEffect(() => {
+    if (followedUrlAutopilot === null || !followedStoryReady) return;
+    let active = true;
+    let checking = false;
+
+    const observe = async () => {
+      if (checking || followedUrlAutopilotRef.current !== followedUrlAutopilot) {
+        return;
+      }
+      checking = true;
+      const selectionGeneration = storySelectionGeneration.current;
+      try {
+        const followed = await clients.urlAutopilot.follow(followedUrlAutopilot.policyRunId);
+        if (
+          !active ||
+          followedUrlAutopilotRef.current !== followedUrlAutopilot ||
+          storySelectionGeneration.current !== selectionGeneration ||
+          followed.kind !== "observed" ||
+          followed.run.storyId !== followedUrlAutopilot.storyId
+        ) {
+          return;
+        }
+        const inspected = await requests.inspectStory(followedUrlAutopilot.storyId);
+        if (
+          !active ||
+          followedUrlAutopilotRef.current !== followedUrlAutopilot ||
+          storySelectionGeneration.current !== selectionGeneration ||
+          inspected.kind !== "completed"
+        ) {
+          return;
+        }
+
+        upsertStoryListItem({
+          story: inspected.value.story,
+          sourceCount: inspected.value.sources.length,
+        });
+        setChosenQueue(inspected.value.story.state);
+        storySelectionGeneration.current += 1;
+        setStorySelection({ kind: "loaded", inspection: inspected.value });
+        if (followed.run.status === "settled") {
+          followedUrlAutopilotRef.current = null;
+          setFollowedUrlAutopilot(null);
+        }
+      } catch {
+        // Keep following. A transient read failure does not mean the durable run has stopped.
+      } finally {
+        checking = false;
+      }
+    };
+
+    void observe();
+    const timer = setInterval(() => void observe(), AUTOPILOT_FOLLOW_INTERVAL_MS);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [
+    clients.urlAutopilot,
+    followedStoryReady,
+    followedUrlAutopilot,
+    requests,
+    upsertStoryListItem,
+  ]);
+
+  function installStoryInspection(inspection: StoryInspection, notice?: string) {
+    storySelectionGeneration.current += 1;
+    setStorySelection({ kind: "loaded", inspection, ...(notice === undefined ? {} : { notice }) });
   }
 
   function upsertStaffProfile(profile: AgentProfile) {
@@ -465,6 +593,9 @@ export function NewsroomShell({
                 <StoryWorkspace
                   key={storySelection.inspection.story.id}
                   inspection={storySelection.inspection}
+                  followingUrlAutopilot={
+                    followedUrlAutopilot?.storyId === storySelection.inspection.story.id
+                  }
                   notice={storySelection.notice}
                   requests={requests}
                   staff={staff}
@@ -588,7 +719,7 @@ export function NewsroomShell({
                     setFocusedSourceId(sourceId);
                     setWorkspaceMode("source-inbox");
                   }}
-                  onAutopilotStory={(identity) => void selectStory(identity)}
+                  onAutopilotStory={handoffAutopilotStory}
                 />
               ) : null}
             </div>

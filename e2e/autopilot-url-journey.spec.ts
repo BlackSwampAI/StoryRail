@@ -45,7 +45,7 @@ test("runs a URL to a delivered WordPress post through the newsroom UI under aut
     (response) =>
       response.request().method() === "POST" && response.url().endsWith(`${site.api}/autopilot`),
   );
-  await page.getByRole("button", { name: "Run this to a published post" }).click();
+  await page.getByRole("button", { name: "Start Autopilot" }).click();
 
   // Intake is durable before the response, and everything after it is followed as progress.
   const started = await autopilotResponse;

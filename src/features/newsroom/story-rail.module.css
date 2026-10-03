@@ -7,10 +7,15 @@
  */
 
 .rail {
+  position: sticky;
+  z-index: 1;
+  top: 3.5rem;
+  align-self: start;
+  scroll-margin-top: 3.5rem;
   border: 1px solid var(--tone-45);
   border-radius: 1.1rem;
   background: var(--tone-14);
-  padding: clamp(1rem, 2.5vw, 1.5rem);
+  padding: 0.7rem clamp(0.8rem, 2vw, 1.25rem);
 }
 
 /*
@@ -18,7 +23,7 @@
  * first time; the rail itself is legible without it, so it is not shouted.
  */
 .railHeading {
-  margin: 0 0 0.9rem;
+  margin: 0 0 0.5rem;
   color: var(--tone-89);
   font-size: 0.72rem;
   font-weight: 600;
@@ -34,18 +39,6 @@
   margin: 0;
   padding: 0;
   list-style: none;
-}
-
-/*
- * Every stop is on screen at once, which is the point: the shape of the whole journey is what
- * teaches a first-time operator what StoryRail does. Below the width where seven columns stay
- * readable the rail turns vertical rather than dropping stops.
- */
-@container (width < 46rem) {
-  .railStops {
-    grid-auto-flow: row;
-    grid-auto-columns: auto;
-  }
 }
 
 .railStop {
@@ -121,6 +114,52 @@
   color: var(--tone-79);
 }
 
+/*
+ * Every stop is on screen at once, which is the point: the shape of the whole journey is what
+ * teaches a first-time operator what StoryRail does. Below the width where seven columns stay
+ * readable, the rail uses two compact rows and keeps every stop visible.
+ */
+@container (width < 46rem) {
+  .railStops {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-auto-flow: row;
+    grid-auto-columns: unset;
+    row-gap: 0.65rem;
+  }
+
+  .railStop {
+    min-width: 0;
+    padding-right: 0.2rem;
+  }
+
+  .railStop:nth-child(4)::before,
+  .railStop:last-child::before {
+    content: none;
+  }
+
+  .railLabel {
+    margin-top: 0.25rem;
+    font-size: clamp(0.72rem, 2.5cqi, 0.78rem);
+    line-height: 1.15;
+    overflow-wrap: anywhere;
+  }
+
+  .railStop[data-position="current"] .railLabel {
+    font-size: clamp(0.75rem, 2.7cqi, 0.82rem);
+  }
+
+  .railSummary {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    overflow: hidden;
+    padding: 0;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
 .railVisuallyHidden {
   position: absolute;
   width: 1px;
@@ -149,9 +188,9 @@
  * the watcher cannot go looking: this is a thing people leave running and glance at.
  */
 .railActivity {
-  margin: 1rem 0 0;
+  margin: 0.55rem 0 0;
   border-top: 1px solid var(--tone-45);
-  padding-top: 0.8rem;
+  padding-top: 0.5rem;
   color: var(--tone-149);
   font-size: 0.85rem;
   line-height: 1.55;

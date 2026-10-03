@@ -120,6 +120,26 @@ function renderWorkspace(state: StoryInspection["story"]["state"]) {
 }
 
 describe("what the Story workspace tells someone who is only watching", () => {
+  it("keeps the complete rail ahead of the variable-height Story header", () => {
+    renderWorkspace("intake");
+
+    const rail = screen.getByRole("region", { name: "Story rail" });
+    const title = screen.getByRole("heading", { level: 1, name: "A Story on the rail" });
+    expect(rail.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    for (const stop of [
+      "Intake",
+      "Assigned",
+      "Drafting",
+      "Review",
+      "Approved",
+      "Published",
+      "Delivered",
+    ]) {
+      expect(within(rail).getByText(stop)).toBeVisible();
+    }
+    expect(screen.queryByText("Active work")).toBeNull();
+  });
+
   it("shows the whole journey, including delivery, before the Story has travelled any of it", () => {
     renderWorkspace("intake");
 
