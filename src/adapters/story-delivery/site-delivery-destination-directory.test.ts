@@ -3,10 +3,11 @@ import { describe, expect, it } from "vitest";
 import type { SiteSettingsRepository } from "@/application/site-settings";
 import {
   credentialUnavailable,
-  STUDIOCMS_API_TOKEN_SLOT,
+  EMDASH_API_TOKEN_SLOT,
   WORDPRESS_APPLICATION_PASSWORD_SLOT,
   type ApiKeyResolution,
   type SiteSettings,
+  type SiteDestinationSettings,
 } from "@/domain/editorial";
 
 import { createSiteDeliveryDestinationDirectory } from "./site-delivery-destination-directory";
@@ -23,14 +24,16 @@ function settings(value: SiteSettings | null): SiteSettingsRepository {
   return { find: async () => value, update: async () => undefined };
 }
 
-const CONFIGURED: SiteSettings = {
+const EMDASH_DESTINATION: Extract<SiteDestinationSettings, { kind: "emdash" }> = {
+  kind: "emdash",
+  baseUrl: "https://newsroom.test/api",
+  collection: "posts",
+  draft: true,
+};
+
+const EMDASH: SiteSettings = {
   models: MODELS,
-  destination: {
-    kind: "studiocms",
-    baseUrl: "https://newsroom.test/studiocms_api/rest/v1",
-    package: "studiocms/markdown",
-    draft: true,
-  },
+  destination: EMDASH_DESTINATION,
   search: null,
   research: null,
 };
@@ -87,10 +90,10 @@ describe("resolving the destination a newsroom delivers to", () => {
     });
   });
 
-  it("reads the token when a delivery is asked for, not when the runtime is built", async () => {
+  it("reads the EmDash token when a delivery is asked for, not when the runtime is built", async () => {
     const reads: string[] = [];
     const directory = createSiteDeliveryDestinationDirectory({
-      settings: settings(CONFIGURED),
+      settings: settings(EMDASH),
       resolveApiKey: async (slot): Promise<ApiKeyResolution> => {
         reads.push(slot);
         return { ok: true, apiKey: "token-1" };
@@ -101,17 +104,31 @@ describe("resolving the destination a newsroom delivers to", () => {
     await expect(directory.resolve()).resolves.toMatchObject({
       ok: true,
       destination: {
-        name: "studiocms",
-        instanceId: "studiocms:https://newsroom.test/studiocms_api/rest/v1",
+        name: "emdash",
+        instanceId: "emdash:https://newsroom.test/api:posts",
         draft: true,
       },
     });
-    expect(reads).toEqual([STUDIOCMS_API_TOKEN_SLOT]);
+    expect(reads).toEqual([EMDASH_API_TOKEN_SLOT]);
   });
 
-  it("names the missing token rather than offering a destination that cannot deliver", async () => {
+  it("includes the collection in EmDash installation identity", async () => {
+    const forCollection = async (collection: string) => {
+      const directory = createSiteDeliveryDestinationDirectory({
+        settings: settings({ ...EMDASH, destination: { ...EMDASH_DESTINATION, collection } }),
+        resolveApiKey: async () => ({ ok: true, apiKey: "token-1" }),
+      });
+      const result = await directory.resolve();
+      if (!result.ok) throw new Error("EmDash destination should resolve.");
+      return result.destination.instanceId;
+    };
+
+    await expect(forCollection("pages")).resolves.not.toBe(await forCollection("posts"));
+  });
+
+  it("names the missing EmDash token rather than offering a destination that cannot deliver", async () => {
     const directory = createSiteDeliveryDestinationDirectory({
-      settings: settings(CONFIGURED),
+      settings: settings(EMDASH),
       resolveApiKey: async (slot) => ({
         ok: false,
         error: credentialUnavailable(slot, "CREDENTIAL_NOT_CONFIGURED", "Nothing is stored."),
@@ -120,7 +137,7 @@ describe("resolving the destination a newsroom delivers to", () => {
 
     await expect(directory.resolve()).resolves.toMatchObject({
       ok: false,
-      error: { reason: "CREDENTIAL_NOT_CONFIGURED", slot: STUDIOCMS_API_TOKEN_SLOT },
+      error: { reason: "CREDENTIAL_NOT_CONFIGURED", slot: EMDASH_API_TOKEN_SLOT },
     });
   });
 

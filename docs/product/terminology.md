@@ -33,7 +33,7 @@ These terms form StoryRail's shared editorial language.
 - **Editor-in-chief:** The independent review role responsible for an overall editorial decision.
 - **SEO packaging:** Preparation of accurate discovery metadata and presentation options without making rankings the sole editorial purpose.
 - **Source extractor:** A replaceable adapter that retrieves and normalizes source material while retaining provenance.
-- **Delivery destination:** A replaceable adapter, currently WordPress or StudioCMS, that delivers a published Article to a Site's website.
+- **Delivery destination:** A replaceable adapter, currently WordPress or EmDash, that delivers a published Article to a Site's website.
 
 ## Invariants
 

@@ -4,12 +4,15 @@ import { credentialHint, parseCredentialSlot } from "./site-credential";
 import { recordSiteSettings } from "./site-settings";
 
 describe("credential slots", () => {
-  it.each(["openrouter_api_key", "firecrawl_api_key", "wordpress_application_password", "a1_b2"])(
-    "accepts %s, so a new connector needs no change here",
-    (candidate) => {
-      expect(parseCredentialSlot(candidate)).toEqual({ ok: true, slot: candidate });
-    },
-  );
+  it.each([
+    "openrouter_api_key",
+    "firecrawl_api_key",
+    "wordpress_application_password",
+    "emdash_api_token",
+    "a1_b2",
+  ])("accepts %s, so a new connector needs no change here", (candidate) => {
+    expect(parseCredentialSlot(candidate)).toEqual({ ok: true, slot: candidate });
+  });
 
   it.each(["", "   ", "OpenRouter", "open router", "open-router", "_leading", "trailing_", "9key"])(
     "refuses %j as a slot name",
@@ -84,9 +87,9 @@ describe("per-Site settings", () => {
       recordSiteSettings({
         models,
         destination: {
-          kind: "studiocms",
-          baseUrl: "  https://newsroom.test/studiocms_api/rest/v1/  ",
-          package: "studiocms/markdown",
+          kind: "emdash",
+          baseUrl: "  https://newsroom.test/api/  ",
+          collection: "  posts  ",
           draft: true,
         },
       }),
@@ -95,15 +98,51 @@ describe("per-Site settings", () => {
       settings: {
         models,
         destination: {
-          kind: "studiocms",
-          baseUrl: "https://newsroom.test/studiocms_api/rest/v1",
-          package: "studiocms/markdown",
+          kind: "emdash",
+          baseUrl: "https://newsroom.test/api",
+          collection: "posts",
           draft: true,
         },
         search: null,
         research: null,
       },
     });
+  });
+
+  it("refuses EmDash collection names that are not collection slugs", () => {
+    for (const collection of [
+      "",
+      " Posts",
+      "Posts",
+      "posts/items",
+      "9posts",
+      "posts.items",
+      "news-posts",
+      "a".repeat(64),
+    ]) {
+      expect(
+        recordSiteSettings({
+          models,
+          destination: {
+            kind: "emdash",
+            baseUrl: "https://newsroom.test/api",
+            collection,
+            draft: true,
+          },
+        }),
+      ).toMatchObject({ ok: false, error: { code: "SITE_SETTINGS_DESTINATION_INVALID" } });
+    }
+    expect(
+      recordSiteSettings({
+        models,
+        destination: {
+          kind: "emdash",
+          baseUrl: "https://newsroom.test/api",
+          collection: "news_posts",
+          draft: true,
+        },
+      }),
+    ).toMatchObject({ ok: true, settings: { destination: { collection: "news_posts" } } });
   });
 
   it("accepts a WordPress destination and keeps its user out of the credential store", () => {
@@ -142,7 +181,7 @@ describe("per-Site settings", () => {
         destination: {
           kind: "wordpress",
           baseUrl: "https://newsroom.test",
-          package: "studiocms/markdown",
+          collection: "posts",
           draft: true,
         },
       }),
@@ -155,7 +194,7 @@ describe("per-Site settings", () => {
         models,
         destination: {
           baseUrl: "https://newsroom.test",
-          package: "studiocms/markdown",
+          collection: "posts",
           draft: true,
         },
       }),
@@ -166,7 +205,7 @@ describe("per-Site settings", () => {
     expect(
       recordSiteSettings({
         models,
-        destination: { kind: "studiocms", baseUrl: "https://newsroom.test", draft: true },
+        destination: { kind: "emdash", baseUrl: "https://newsroom.test", draft: true },
       }),
     ).toMatchObject({ ok: false, error: { code: "SITE_SETTINGS_DESTINATION_INVALID" } });
   });
@@ -178,10 +217,10 @@ describe("per-Site settings", () => {
       recordSiteSettings({
         models,
         destination: {
-          kind: "studiocms",
+          kind: "emdash",
           baseUrl: "https://newsroom.test",
           authorId: "author-1",
-          package: "studiocms/markdown",
+          collection: "posts",
           draft: true,
         },
       }),
@@ -193,9 +232,9 @@ describe("per-Site settings", () => {
       recordSiteSettings({
         models,
         destination: {
-          kind: "studiocms",
-          baseUrl: "/studiocms_api/rest/v1",
-          package: "studiocms/markdown",
+          kind: "emdash",
+          baseUrl: "/api",
+          collection: "posts",
           draft: true,
         },
       }),

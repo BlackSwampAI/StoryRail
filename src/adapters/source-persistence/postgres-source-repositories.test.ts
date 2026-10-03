@@ -261,6 +261,10 @@ const storyPurposeAndContextMigrationPath = resolve(
   process.cwd(),
   "database/migrations/0082-story-purpose-and-run-context.sql",
 );
+const emdashDestinationMigrationPath = resolve(
+  process.cwd(),
+  "database/migrations/0083-emdash-destination.sql",
+);
 
 const DEFAULT_SITE = siteId("site-default");
 const OTHER_SITE = siteId("site-other");
@@ -506,6 +510,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
   let storyDeliveryRecoveryMigrationSql: string;
   let publicationBriefMigrationSql: string;
   let storyPurposeAndContextMigrationSql: string;
+  let emdashDestinationMigrationSql: string;
 
   /** Every migration, in order. One list so a rebuild can never drift from the first build. */
   const orderedMigrations = (): readonly string[] => [
@@ -551,6 +556,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
     storyDeliveryRecoveryMigrationSql,
     publicationBriefMigrationSql,
     storyPurposeAndContextMigrationSql,
+    emdashDestinationMigrationSql,
   ];
   let destructiveSetupAllowed = false;
 
@@ -649,6 +655,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
       storyPurposeAndContextMigrationPath,
       "utf8",
     );
+    emdashDestinationMigrationSql = await readFile(emdashDestinationMigrationPath, "utf8");
     pool = new Pool({ connectionString: databaseUrl, max: 20 });
     const client = await pool.connect();
 
@@ -2884,6 +2891,139 @@ describePostgres("PostgreSQL persistence repositories", () => {
         outcome: "running",
       };
     }
+
+    it("removes only the StudioCMS destination setting while retaining credentials and delivery history", async () => {
+      const published = await publishReport("emdash-destination-migration", {
+        headline: "A delivered headline",
+        body: "The body of a delivered report.",
+        publishedAt: "2026-08-24T09:00:00.000Z",
+      });
+      const deliveries = createPostgresStoryDeliveryRepository({ pool });
+      const prior = intent({
+        id: "delivery-before-emdash-migration",
+        storyId: published.storyId,
+        revisionId: published.revisionId,
+        remoteId: null,
+      });
+      await expect(deliveries.append(prior)).resolves.toMatchObject({ ok: true });
+      const completed: StoryDelivery = {
+        ...prior,
+        remoteId: "remote-before-migration",
+        outcome: "succeeded",
+        completedAt: "2026-08-24T10:00:01.000Z",
+        result: { status: 201, message: "Saved." },
+      };
+      await expect(deliveries.complete(completed)).resolves.toMatchObject({ ok: true });
+      const beforeDelivery = await pool.query(
+        "SELECT * FROM storyrail.story_deliveries WHERE delivery_id = $1",
+        [prior.id],
+      );
+      const client = await pool.connect();
+      const withoutTransaction = (sql: string) =>
+        sql.replace(/^BEGIN;/m, "").replace(/^COMMIT;/m, "");
+      try {
+        await client.query("BEGIN");
+        await client.query(
+          "ALTER TABLE storyrail.site_settings DROP CONSTRAINT site_settings_destination_shape_check",
+        );
+        await client.query(
+          `UPDATE storyrail.site_settings SET payload = jsonb_set(payload, '{destination}', $2::jsonb) WHERE site_id = $1`,
+          [
+            DEFAULT_SITE,
+            JSON.stringify({
+              kind: "studiocms",
+              baseUrl: "https://newsroom.test/studiocms_api/rest/v1",
+              package: "studiocms/markdown",
+              draft: true,
+            }),
+          ],
+        );
+        await client.query(
+          `INSERT INTO storyrail.site_credentials (site_id, slot, ciphertext, nonce, auth_tag, key_version, hint)
+           VALUES ($1, 'studiocms_api_token', decode('aabb', 'hex'), decode('000000000000000000000000', 'hex'), decode('00000000000000000000000000000000', 'hex'), 1, 'oken')`,
+          [DEFAULT_SITE],
+        );
+
+        await client.query(withoutTransaction(emdashDestinationMigrationSql));
+
+        const { rows: settingsRows } = await client.query<{ destination: unknown }>(
+          "SELECT payload -> 'destination' AS destination FROM storyrail.site_settings WHERE site_id = $1",
+          [DEFAULT_SITE],
+        );
+        expect(settingsRows[0]?.destination).toBeNull();
+        await expect(
+          client.query(
+            "SELECT ciphertext, hint FROM storyrail.site_credentials WHERE site_id = $1 AND slot = 'studiocms_api_token'",
+            [DEFAULT_SITE],
+          ),
+        ).resolves.toMatchObject({
+          rows: [{ ciphertext: Buffer.from([0xaa, 0xbb]), hint: "oken" }],
+        });
+        await expect(
+          client.query("SELECT * FROM storyrail.story_deliveries WHERE delivery_id = $1", [
+            prior.id,
+          ]),
+        ).resolves.toMatchObject({ rows: beforeDelivery.rows });
+
+        for (const [index, invalidDestination] of [
+          {
+            kind: "emdash",
+            baseUrl: "https://newsroom.test/_emdash/api",
+            collection: null,
+            draft: true,
+          },
+          {
+            kind: null,
+            baseUrl: "https://newsroom.test/wp-json/wp/v2",
+            username: "editor",
+            draft: true,
+          },
+          {
+            kind: "emdash",
+            baseUrl: "https://newsroom.test/_emdash/api",
+            collection: "posts",
+            draft: true,
+            package: "unused",
+          },
+          {
+            kind: "emdash",
+            baseUrl: "https://newsroom.test/_emdash/api",
+            collection: "a".repeat(64),
+            draft: true,
+          },
+          {
+            kind: "emdash",
+            baseUrl: "https://newsroom.test/_emdash/api",
+            collection: "news-posts",
+            draft: true,
+          },
+          {
+            kind: "wordpress",
+            baseUrl: "https://newsroom.test/wp-json/wp/v2",
+            username: null,
+            draft: true,
+          },
+          {
+            kind: "studiocms",
+            baseUrl: "https://newsroom.test/studiocms_api/rest/v1",
+            package: "studiocms/markdown",
+            draft: true,
+          },
+        ].entries()) {
+          await client.query(`SAVEPOINT invalid_destination_${index}`);
+          await expect(
+            client.query(
+              `UPDATE storyrail.site_settings SET payload = jsonb_set(payload, '{destination}', $2::jsonb) WHERE site_id = $1`,
+              [DEFAULT_SITE, JSON.stringify(invalidDestination)],
+            ),
+          ).rejects.toMatchObject({ constraint: "site_settings_destination_shape_check" });
+          await client.query(`ROLLBACK TO SAVEPOINT invalid_destination_${index}`);
+        }
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    });
 
     it("migrates legacy mappings fail closed while allowing an in-flight legacy row to finish", async () => {
       const before = orderedMigrations().slice(
@@ -8166,9 +8306,9 @@ describePostgres("PostgreSQL persistence repositories", () => {
       const configured = {
         ...before,
         destination: {
-          kind: "studiocms" as const,
-          baseUrl: "https://newsroom.test/studiocms_api/rest/v1",
-          package: "studiocms/markdown",
+          kind: "emdash" as const,
+          baseUrl: "https://newsroom.test/_emdash/api",
+          collection: "posts",
           draft: true,
         },
       };
@@ -8190,9 +8330,8 @@ describePostgres("PostgreSQL persistence repositories", () => {
             [
               DEFAULT_SITE,
               JSON.stringify({
-                kind: "studiocms",
+                kind: "emdash",
                 baseUrl: "https://newsroom.test",
-                package: "studiocms/markdown",
               }),
             ],
           ),
@@ -8225,7 +8364,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
         });
         await expect(settings(DEFAULT_SITE).find()).resolves.toEqual(configured);
 
-        // A renderer package means nothing to WordPress, so a destination carrying one is a
+        // An EmDash collection means nothing to WordPress, so a destination carrying one is a
         // setting an operator could fill in and watch do nothing. The database refuses it here.
         await expect(
           pool.query(
@@ -8238,7 +8377,7 @@ describePostgres("PostgreSQL persistence repositories", () => {
                 kind: "wordpress",
                 baseUrl: "https://newsroom.test",
                 username: "storyrail",
-                package: "studiocms/markdown",
+                collection: "posts",
                 draft: true,
               }),
             ],

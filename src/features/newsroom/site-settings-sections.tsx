@@ -417,42 +417,42 @@ export function AgentModelsForm({
 }
 
 const DESTINATION_KIND_LABELS: Readonly<Record<SiteDestinationKind, string>> = {
-  studiocms: "StudioCMS",
+  emdash: "EmDash",
   wordpress: "WordPress",
 };
 
 /**
  * The base URL means a different thing to each destination, and getting it wrong fails at the far
- * end as a bare 404 that names nothing. StudioCMS is addressed at its REST base, while the
+ * end as a bare 404 that names nothing. EmDash is addressed at its API base, while the
  * WordPress adapter appends `/wp-json/wp/v2/posts` itself and so wants the site root alone.
  */
 const DESTINATION_BASE_URL_GUIDANCE: Readonly<Record<SiteDestinationKind, string>> = {
-  studiocms: "Include the API path, as in https://example.com/studiocms_api/rest/v1",
+  emdash: "Include the full API base, as in https://example.com/_emdash/api",
   wordpress:
     "The site root only, as in https://example.com — StoryRail appends /wp-json/wp/v2/posts itself.",
 };
 
 interface DestinationDraft {
   readonly kind: SiteDestinationKind;
-  readonly studiocms: { readonly baseUrl: string; readonly package: string };
+  readonly emdash: { readonly baseUrl: string; readonly collection: string };
   readonly wordpress: { readonly baseUrl: string; readonly username: string };
   readonly draft: boolean;
 }
 
 const EMPTY_DRAFT: DestinationDraft = {
   kind: "wordpress",
-  studiocms: { baseUrl: "", package: "" },
+  emdash: { baseUrl: "", collection: "posts" },
   wordpress: { baseUrl: "", username: "" },
   draft: DEFAULT_DESTINATION_DRAFT,
 };
 
 function draftFrom(destination: SiteDestinationSettings | null): DestinationDraft {
   if (destination === null) return EMPTY_DRAFT;
-  return destination.kind === "studiocms"
+  return destination.kind === "emdash"
     ? {
         ...EMPTY_DRAFT,
-        kind: "studiocms",
-        studiocms: { baseUrl: destination.baseUrl, package: destination.package },
+        kind: "emdash",
+        emdash: { baseUrl: destination.baseUrl, collection: destination.collection },
         draft: destination.draft,
       }
     : {
@@ -501,15 +501,15 @@ export function DestinationForm({
   const edit = (change: Partial<DestinationDraft>) => setEdits({ ...current, ...change });
 
   function candidate(): SiteDestinationSettings | { readonly problem: string } {
-    if (kind === "studiocms") {
-      const { baseUrl, package: renderer } = current.studiocms;
-      if (baseUrl.trim().length === 0) return { problem: "Enter the StudioCMS REST base URL." };
-      if (renderer.trim().length === 0)
-        return { problem: "Name the StudioCMS renderer package to store content under." };
+    if (kind === "emdash") {
+      const { baseUrl, collection } = current.emdash;
+      if (baseUrl.trim().length === 0) return { problem: "Enter the EmDash API base URL." };
+      if (collection.trim().length === 0)
+        return { problem: "Enter an EmDash collection identifier." };
       return {
         kind,
         baseUrl: baseUrl.trim(),
-        package: renderer.trim(),
+        collection: collection.trim(),
         draft: current.draft,
       };
     }
@@ -582,11 +582,11 @@ export function DestinationForm({
           id="destination-base-url"
           name="baseUrl"
           inputMode="url"
-          value={kind === "studiocms" ? current.studiocms.baseUrl : current.wordpress.baseUrl}
+          value={kind === "emdash" ? current.emdash.baseUrl : current.wordpress.baseUrl}
           onChange={(event) =>
             edit(
-              kind === "studiocms"
-                ? { studiocms: { ...current.studiocms, baseUrl: event.target.value } }
+              kind === "emdash"
+                ? { emdash: { ...current.emdash, baseUrl: event.target.value } }
                 : { wordpress: { ...current.wordpress, baseUrl: event.target.value } },
             )
           }
@@ -595,20 +595,23 @@ export function DestinationForm({
         <small className={styles.destinationHint}>{DESTINATION_BASE_URL_GUIDANCE[kind]}</small>
       </div>
 
-      {kind === "studiocms" ? (
+      {kind === "emdash" ? (
         <div>
-          <label htmlFor="destination-package">Renderer package</label>
+          <label htmlFor="destination-collection">Collection</label>
           <input
-            id="destination-package"
-            name="package"
-            value={current.studiocms.package}
+            id="destination-collection"
+            name="collection"
+            value={current.emdash.collection}
             onChange={(event) =>
-              edit({ studiocms: { ...current.studiocms, package: event.target.value } })
+              edit({ emdash: { ...current.emdash, collection: event.target.value } })
             }
             disabled={pending}
           />
           <small className={styles.destinationHint}>
-            Which renderer StudioCMS stores the body under, such as @studiocms/markdown-remark.
+            EmDash collection receiving title, excerpt, and Portable Text content. Use a lowercase
+            identifier beginning with a letter and containing only lowercase letters, numbers, or
+            underscores (up to 63 characters). Changing the collection delivers to a separate
+            destination.
           </small>
         </div>
       ) : (

@@ -1,7 +1,7 @@
 import {
   FIRECRAWL_API_KEY_SLOT,
   OPENROUTER_API_KEY_SLOT,
-  STUDIOCMS_API_TOKEN_SLOT,
+  EMDASH_API_TOKEN_SLOT,
   WORDPRESS_APPLICATION_PASSWORD_SLOT,
   type CredentialSlot,
 } from "@/domain/editorial";
@@ -168,10 +168,11 @@ export const SCAFFOLD_SETTINGS: readonly ScaffoldSection[] = [
     // find it again, and an operator can see at a glance which of the two is ready.
     storedConnectors: [
       {
-        name: "StudioCMS",
-        detail: "Bearer token from the StudioCMS dashboard.",
-        slot: STUDIOCMS_API_TOKEN_SLOT,
-        label: "StudioCMS API token",
+        name: "EmDash",
+        detail:
+          "Personal access token with content:write; content:publish is also needed for live publishing.",
+        slot: EMDASH_API_TOKEN_SLOT,
+        label: "EmDash personal access token",
       },
       {
         name: "WordPress",

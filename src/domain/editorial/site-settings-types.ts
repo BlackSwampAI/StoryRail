@@ -23,7 +23,7 @@ export const SITE_MODEL_ROLES = [
 
 export type SiteModelRole = (typeof SITE_MODEL_ROLES)[number];
 
-export const SITE_DESTINATION_KINDS = ["studiocms", "wordpress"] as const;
+export const SITE_DESTINATION_KINDS = ["emdash", "wordpress"] as const;
 
 /**
  * Which kind of website a newsroom delivers to. It is stored rather than inferred from the shape
@@ -48,16 +48,15 @@ interface SiteDestinationCommon {
  * The secret is deliberately absent from every member: it lives in the encrypted credential
  * store, so nothing that reads settings can serialise it by accident.
  *
- * `package` and `username` stay on the member that needs them rather than being hoisted into
- * the common half for symmetry. A renderer package means nothing to WordPress and a WordPress
- * user means nothing to StudioCMS, so a shared field would be one an operator could fill in for
- * a destination that ignores it.
+ * Collection and username stay on the member that needs them. A collection means nothing to
+ * WordPress and a WordPress user means nothing to EmDash, so a shared field would be one an
+ * operator could fill in for a destination that ignores it.
  */
 export type SiteDestinationSettings =
   | (SiteDestinationCommon & {
-      readonly kind: "studiocms";
-      /** The renderer the destination stores content under, such as `studiocms/markdown`. */
-      readonly package: string;
+      readonly kind: "emdash";
+      /** EmDash content collection receiving the article, usually `posts`. */
+      readonly collection: string;
     })
   | (SiteDestinationCommon & {
       readonly kind: "wordpress";

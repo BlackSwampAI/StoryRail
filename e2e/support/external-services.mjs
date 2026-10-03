@@ -9,6 +9,8 @@ const PREPARATION_DELAY_MILLISECONDS = 1_500;
 const WORDPRESS_AUTHORIZATION = `Basic ${Buffer.from(
   "acceptance:acceptance-wordpress-password",
 ).toString("base64")}`;
+const EMDASH_AUTHORIZATION = "Bearer acceptance-emdash-token";
+let emdashItem = null;
 
 function json(response, status, body) {
   response.writeHead(status, { "Content-Type": "application/json" });
@@ -155,6 +157,57 @@ createServer(async (request, response) => {
       }
       const body = await readJson(request);
       return json(response, 201, { id: 412, slug: body.slug });
+    }
+    if (request.url === "/_emdash/api/content/posts" && request.method === "POST") {
+      if (request.headers.authorization !== EMDASH_AUTHORIZATION) {
+        return json(response, 401, { success: false, error: { message: "Unauthorized." } });
+      }
+      const body = await readJson(request);
+      if (
+        body.status !== "draft" ||
+        typeof body.data?.title !== "string" ||
+        typeof body.data?.excerpt !== "string" ||
+        !Array.isArray(body.data?.content) ||
+        body.data.content.some(
+          (block) =>
+            block._type !== "block" ||
+            typeof block._key !== "string" ||
+            !Array.isArray(block.children) ||
+            block.children.some((span) => span._type !== "span" || typeof span._key !== "string"),
+        )
+      ) {
+        return json(response, 400, {
+          success: false,
+          error: { message: "Invalid Portable Text." },
+        });
+      }
+      emdashItem = {
+        id: "emdash-item-1",
+        type: "posts",
+        slug: body.slug,
+        status: "draft",
+      };
+      return json(response, 201, {
+        success: true,
+        data: { item: emdashItem, _rev: "emdash-rev-1" },
+      });
+    }
+    if (
+      request.url === "/_emdash/api/content/posts/emdash-item-1/publish" &&
+      request.method === "POST"
+    ) {
+      if (request.headers.authorization !== EMDASH_AUTHORIZATION) {
+        return json(response, 401, { success: false, error: { message: "Unauthorized." } });
+      }
+      const body = await readJson(request);
+      if (!emdashItem || body._rev !== "emdash-rev-1") {
+        return json(response, 409, { success: false, error: { message: "Revision conflict." } });
+      }
+      emdashItem = { ...emdashItem, status: "published" };
+      return json(response, 200, {
+        success: true,
+        data: { item: emdashItem, _rev: "emdash-rev-2" },
+      });
     }
     return json(response, 404, { ok: false });
   } catch {

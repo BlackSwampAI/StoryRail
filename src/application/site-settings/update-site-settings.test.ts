@@ -14,9 +14,9 @@ const MODELS = {
 };
 
 const DESTINATION = {
-  kind: "studiocms",
-  baseUrl: "https://newsroom.test/studiocms_api/rest/v1",
-  package: "studiocms/markdown",
+  kind: "emdash",
+  baseUrl: "https://newsroom.test/_emdash/api",
+  collection: "posts",
   draft: true,
 } as const;
 
